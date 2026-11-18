@@ -75,6 +75,29 @@
   }
   mem(); setInterval(mem, 3000);
 
+  // Sites that are never put to sleep
+  const keepCard = el('div', { class: 'card' }, el('h2', { text: 'Always keep these sites active' }));
+  const keepList = el('div');
+  const keepInput = el('input', { class: 'field grow', placeholder: 'Site, e.g. web.whatsapp.com', spellcheck: 'false', 'aria-label': 'Site' });
+  async function addKeep() {
+    if (!keepInput.value.trim()) return;
+    try { await gb.send('keep.add', { site: keepInput.value }); keepInput.value = ''; drawKeep(); }
+    catch (e) { snack(e.message); }
+  }
+  keepInput.addEventListener('keydown', e => { if (e.key === 'Enter') addKeep(); });
+  keepCard.append(el('div', { class: 'row' }, keepInput, el('button', { class: 'btn tonal', onclick: addKeep }, icon('Add'), 'Add')), keepList);
+  async function drawKeep() {
+    const cur = (await gb.send('settings.get')).settings.KeepActiveSites || [];
+    keepList.textContent = '';
+    for (const site of cur) {
+      const r = el('div', { class: 'row' }, letter('https://' + site), el('div', { class: 'text' }, el('div', { class: 'title', text: site })),
+        iconButton('Delete', 'Remove', async () => { await gb.send('keep.remove', { site }); r.remove(); }));
+      keepList.append(r);
+    }
+  }
+  drawKeep();
+  main.append(keepCard);
+
   // Privacy
   const kinds = [['cookies', 'Cookies and site data'], ['cache', 'Cached files'], ['history', 'Browsing and download history'], ['passwords', 'Saved passwords'], ['autofill', 'Autofill data']];
   const checks = kinds.map(([k, t]) => { const c = el('input', { type: 'checkbox', value: k }); if (k === 'cache') c.checked = true; return el('label', { class: 'row' }, c, el('span', { text: t })); });

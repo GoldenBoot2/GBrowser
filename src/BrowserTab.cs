@@ -120,6 +120,8 @@ namespace GBrowser
         {
             if (!Created || View.Visible || PlayingAudio) return;
             try { Url = View.CoreWebView2.Source; } catch { }
+            string site = Blocking.SiteOf(Url);
+            if (site != null && Store.Settings.KeepActiveSites.Contains(site)) return;   // user: always keep active
             try { View.Parent?.Controls.Remove(View); View.Dispose(); } catch { }
             View = null;
             creating = null;

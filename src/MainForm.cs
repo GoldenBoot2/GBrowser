@@ -382,6 +382,19 @@ namespace GBrowser
             m.Items.Add(Item("History", IconData.History, "Ctrl+H", () => OpenPage("history")));
             m.Items.Add(Item("Downloads", IconData.Download, "Ctrl+J", OpenDownloads));
             m.Items.Add(Item("Extensions", IconData.Extension, null, () => OpenPage("extensions")));
+            string keepSite = Blocking.SiteOf(Current?.Created == true ? Current.View.CoreWebView2.Source : Current?.Url);
+            if (keepSite != null)
+            {
+                bool kept = Store.Settings.KeepActiveSites.Contains(keepSite);
+                var keep = new ToolStripMenuItem("Keep " + keepSite + " active") { Checked = kept, Padding = new Padding(0, 3, 0, 3) };
+                keep.Click += (s, e) =>
+                {
+                    Store.Settings.KeepActiveSites.Remove(keepSite);
+                    if (!kept) Store.Settings.KeepActiveSites.Add(keepSite);
+                    Store.SaveSettings();
+                };
+                m.Items.Add(keep);
+            }
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(Item("Zoom in", IconData.ZoomIn, "Ctrl++", () => Zoom(1.1)));
             m.Items.Add(Item("Zoom out", IconData.ZoomOut, "Ctrl+-", () => Zoom(1 / 1.1)));
@@ -769,6 +782,18 @@ namespace GBrowser
                     };
                 }
                 case "allow.remove": st.AllowedSites.Remove(Str(m, "site")); Store.SaveSettings(); return null;
+                case "keep.add":
+                {
+                    // accepts a site, an address or a full URL; stores the registrable domain (www.bbc.co.uk -> bbc.co.uk)
+                    string text = (Str(m, "site") ?? "").Trim();
+                    string url = text.Contains("://") ? text : "https://" + text;
+                    string site = Blocking.SiteOf(url);
+                    if (site == null || !site.Contains(".")) throw new Exception("Not a site");
+                    if (!st.KeepActiveSites.Contains(site)) st.KeepActiveSites.Add(site);
+                    Store.SaveSettings();
+                    return site;
+                }
+                case "keep.remove": st.KeepActiveSites.Remove(Str(m, "site")); Store.SaveSettings(); return null;
                 case "ext.list": return Profile == null ? new List<Dictionary<string, object>>() : await Extensions.List(Profile);
                 case "ext.install":
                 {

@@ -107,6 +107,7 @@ namespace GBrowser
         public bool RestoreTabs { get; set; } = true;
         public int SleepMinutes { get; set; } = 5;          // 0 = never put hidden tabs to sleep
         public bool LowMemoryHiddenTabs { get; set; } = true;
+        public List<string> KeepActiveSites { get; set; } = new List<string>();   // never unloaded (site = registrable domain)
         public bool ShowBookmarksBar { get; set; } = false;
         // ad blocking (same switches as the WebView Adblocker Android app)
         public bool AdblockEnabled { get; set; } = true;
