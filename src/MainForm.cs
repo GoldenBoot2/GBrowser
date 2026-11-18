@@ -237,6 +237,8 @@ namespace GBrowser
                 Security.ApplySecureDnsPref(Path.Combine(Store.WebDataDir, "EBWebView", "Local State"), Security.ActiveSecureDns);
                 var opts = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
                 env = await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
+                Updater.Changed += OnUpdateChanged;
+                Updater.Start();
             }
             catch (WebView2RuntimeNotFoundException)
             {
@@ -595,6 +597,16 @@ namespace GBrowser
         void ShowMenu()
         {
             var m = NewMenu();
+            if (Updater.UpdateReady)
+            {
+                m.Add("Relaunch to update", IconData.Restore, "Version " + Updater.Latest, RelaunchToUpdate);
+                m.AddSeparator();
+            }
+            else if (Updater.State == "downloading")
+            {
+                m.Add("Downloading update " + Updater.Percent + "%", IconData.Download, null, null).Enabled = false;
+                m.AddSeparator();
+            }
             m.Add("New tab", IconData.Tab, "Ctrl+T", () => NewTab(null));
             m.Add("New private tab", IconData.Private, "Ctrl+Shift+N", () => NewPrivateTab(null));
             m.Add("Reopen closed tab", IconData.Restore, "Ctrl+Shift+T", ReopenClosed).Enabled = closedTabs.Count > 0;
@@ -630,6 +642,31 @@ namespace GBrowser
             m.Add("Exit", IconData.Close, null, Close);
             m.ShowAt(toolbar, toolbar.ButtonRect("menu"), true, "menu");
         }
+
+        /// <summary>Runs the verified new setup in update mode and closes (the setup starts GBrowser again; tabs come back).</summary>
+        void RelaunchToUpdate()
+        {
+            if (Updater.RunSetup()) Close();
+        }
+
+        void OnUpdateChanged()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke((Action)OnUpdateChanged); return; }
+            toolbar.UpdateDot = Updater.UpdateReady;
+            toolbar.Invalidate();
+            // GBrowser's About page shows the state live
+            foreach (var t in Tabs)
+                if (t.Created && Pages.PageName(t.View.CoreWebView2.Source) == "about")
+                    try { t.View.CoreWebView2.PostWebMessageAsJson(Store.ToJson(new Dictionary<string, object> { { "type", "update" }, { "state", UpdateInfo() } })); } catch { }
+        }
+
+        static Dictionary<string, object> UpdateInfo() => new Dictionary<string, object>
+        {
+            { "state", Updater.State }, { "current", Updater.Current }, { "latest", Updater.Latest ?? "" },
+            { "percent", Updater.Percent }, { "error", Updater.Error ?? "" },
+            { "checked", Updater.LastCheck == DateTime.MinValue ? "" : Updater.LastCheck.ToString("dd MMM yyyy, HH:mm") },
+        };
 
         void SendKeysToPage(string keys)
         {
@@ -1059,6 +1096,9 @@ namespace GBrowser
                         { "version", AppVersion }, { "engine", env?.BrowserVersionString ?? "" },
                         { "dataDir", Store.DataDir }, { "userAgent", tab.View?.CoreWebView2?.Settings.UserAgent ?? "" },
                     };
+                case "update.status": return UpdateInfo();
+                case "update.check": await Updater.Check(); return UpdateInfo();
+                case "update.install": RelaunchToUpdate(); return null;
                 case "openDataDir":
                     Process.Start("explorer.exe", "\"" + Store.DataDir + "\""); return null;
                 case "memory": return MemoryReport();

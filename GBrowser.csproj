@@ -33,6 +33,9 @@
   <ItemGroup>
     <!-- helper programs under tools/ have their own projects -->
     <Compile Remove="tools/**" />
+    <Compile Remove="installer/**" />
+    <EmbeddedResource Remove="installer/**" />
+    <None Remove="installer/**" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>

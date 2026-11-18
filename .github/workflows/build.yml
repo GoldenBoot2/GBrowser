@@ -6,35 +6,56 @@ on:
     paths-ignore: ['**.md']
   workflow_dispatch:
 
+permissions:
+  contents: write   # publish releases (GBrowser's updater reads them)
+
 jobs:
   build:
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # tags + history for the release notes
 
       - name: Compile filter lists
         shell: pwsh
         run: python -I tools/build_filters.py
 
-      - name: Build
-        shell: pwsh
-        run: dotnet build -c Release -nodeReuse:false -o out/GBrowser
-
-      - name: Package
-        id: pkg
+      - name: Build GBrowser and the installer
+        id: build
         shell: pwsh
         run: |
-          $ver = ([xml](Get-Content GBrowser.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
-          Remove-Item out/GBrowser/Microsoft.Web.WebView2.Wpf.dll -ErrorAction SilentlyContinue
-          foreach ($f in 'GBrowser.exe', 'pages/newtab.html', 'assets/gbab.js', 'filters/hosts.bin', 'filters/net.txt', 'filters/cosm.txt') {
-            if (-not (Test-Path "out/GBrowser/$f")) { throw "missing $f" }
-          }
-          "version=$ver" >> $env:GITHUB_OUTPUT
-          Get-ChildItem out/GBrowser -Recurse -File | Measure-Object Length -Sum | ForEach-Object { "files $($_.Count), $([math]::Round($_.Sum / 1MB, 1)) MB" }
+          $out = & ./tools/build_installer.ps1
+          $out | ForEach-Object { $_ }
+          foreach ($l in $out) { if ($l -match '^(version|installer|sha256)=') { "$l" >> $env:GITHUB_OUTPUT } }
 
       - uses: actions/upload-artifact@v7
         with:
-          name: GBrowser-${{ steps.pkg.outputs.version }}
+          name: GBrowserSetup-${{ steps.build.outputs.version }}
+          path: ${{ steps.build.outputs.installer }}
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GBrowser-${{ steps.build.outputs.version }}-portable
           path: out/GBrowser
           retention-days: 30
+
+      # A new version number in GBrowser.csproj = a new release (an existing tag is never replaced).
+      - name: Publish release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = '${{ steps.build.outputs.version }}'
+          $tag = "v$ver"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { "Release $tag exists: nothing to publish"; exit 0 }
+          $prev = git describe --tags --abbrev=0 2>$null
+          $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
+          $log = git log $range --pretty=format:'- %s' --no-merges | Select-Object -First 40
+          $notes = "GBrowser $ver`n`nDownload **GBrowserSetup-$ver.exe** and run it (no admin needed). Installed copies update themselves.`n`nSHA-256: ``${{ steps.build.outputs.sha256 }}```n`n## Changes`n" + ($log -join "`n")
+          $notes | Set-Content -Encoding utf8 notes.md
+          gh release create $tag '${{ steps.build.outputs.installer }}' --title "GBrowser $ver" --notes-file notes.md --latest

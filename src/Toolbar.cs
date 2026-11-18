@@ -18,6 +18,7 @@ namespace GBrowser
         /// <summary>Full address (shown while editing) and the Chrome-style short form (shown otherwise).</summary>
         public string FullUrl = "";
         public int BlockedCount;
+        public bool UpdateDot;   // an update is downloaded: a dot on the menu button (like Chrome's update badge)
         public string StoreChipText = "Add to GBrowser";
 
         public event Action Back, Forward, Reload, Stop, Home, Star, ExtensionsClicked, MenuClicked, StoreChipClicked, ShieldClicked;
@@ -181,6 +182,9 @@ namespace GBrowser
                 int isz = S(20);
                 var col = !en ? Theme.Disabled : b.Color != null ? b.Color() : Theme.OnSurfaceVariant;
                 Icons.Draw(g, b.Icon(), b.Rect.X + (b.Rect.Width - isz) / 2f, b.Rect.Y + (b.Rect.Height - isz) / 2f, isz, col);
+                if (b.Name == "menu" && UpdateDot)
+                    using (var bb = new SolidBrush(Theme.Primary))
+                        g.FillEllipse(bb, b.Rect.Right - S(13), b.Rect.Y + S(6), S(8), S(8));
                 if (b.Name == "shield" && ShieldOn && BlockedCount > 0)
                 {
                     string n = BlockedCount > 99 ? "99+" : BlockedCount.ToString();
@@ -210,6 +214,7 @@ namespace GBrowser
                     : h.Name == "reload" ? (Loading ? "Stop (Esc)" : "Reload (F5)")
                     : h.Name == "star" ? (Bookmarked ? "Remove bookmark (Ctrl+D)" : "Bookmark this page (Ctrl+D)")
                     : h.Name == "shield" ? (ShieldOn ? BlockedCount + " blocked" : "Blocking off")
+                    : h.Name == "menu" && UpdateDot ? "Update available"
                     : h.Tip;
                 if (t != tipText) { tipText = t; tip.SetToolTip(this, t); }
             }

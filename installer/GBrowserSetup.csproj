@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- GBrowserSetup.exe: one file with the whole browser inside (payload.zip, made by tools/build_installer.ps1). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Nullable>disable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>GBrowserSetup</AssemblyName>
+    <RootNamespace>GBrowserSetup</RootNamespace>
+    <ApplicationIcon>..\assets\gbrowser.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- one version for the browser and its setup: read from GBrowser.csproj -->
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\GBrowser.csproj')), '&lt;Version&gt;(.*?)&lt;/Version&gt;').Groups[1].Value)</Version>
+    <Company>GoldenBoot</Company>
+    <Product>GBrowser</Product>
+    <AssemblyTitle>GBrowser Setup</AssemblyTitle>
+    <Description>GBrowser Setup</Description>
+    <Copyright>GoldenBoot</Copyright>
+    <PayloadZip Condition="'$(PayloadZip)' == ''">$(MSBuildThisFileDirectory)..\out\payload.zip</PayloadZip>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\src\Icons.cs" Link="Shared\Icons.cs" />
+    <Compile Include="..\src\IconData.cs" Link="Shared\IconData.cs" />
+    <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" />
+    <EmbeddedResource Include="..\assets\gbrowser-256.png" LogicalName="logo.png" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="Microsoft.CSharp" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <Target Name="CheckPayload" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(PayloadZip)')" Text="Missing $(PayloadZip): run tools/build_installer.ps1" />
+  </Target>
+</Project>
