@@ -72,6 +72,7 @@ namespace GBrowser
             core.NavigationStarting += OnNavigationStarting;
             core.ContentLoading += OnContentLoading;
             core.NavigationCompleted += OnNavigationCompleted;
+            core.FrameNavigationStarting += OnFrameNavigationStarting;
             var bridge = new PageBridge(this);
             core.AddHostObjectToScript("gb", bridge);
             core.FrameCreated += (s, e) =>
@@ -79,6 +80,27 @@ namespace GBrowser
                 try { e.Frame.AddHostObjectToScript("gb", bridge, new[] { "*" }); } catch { }
             };
             _ = core.AddScriptToExecuteOnDocumentCreatedAsync(PageScript());
+        }
+
+        /// <summary>Blocked frames (any depth) are cancelled before their request. Measured 18-11-2026 (WebView2 157):
+        /// answering a blocked frame with an empty page (or 204) commits a document at the ad's address, and site
+        /// isolation then keeps a renderer process (~6.6 MB) per ad site; a cancelled frame stays an empty frame in
+        /// its parent's process. Frames whose rule names a $redirect stub still load it through OnRequest.</summary>
+        void OnFrameNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            string url = e.Uri ?? "";
+#if AUTOMATION
+            if (url.Contains(".invalid/cancel/")) { e.Cancel = true; TestLog.Add("frame cancelled: " + url); return; }
+#endif
+            string host = HostOf(url);
+            if (host == null || !S.AdblockEnabled) return;
+            if (PageHost != null && !OnFor(PageHost)) return;
+            var eng = FilterEngine.Instance;
+            if (eng == null) return;
+            string decision = eng.Match(url, host, PageHost, FilterEngine.T_SUBDOC, Groups());
+            if (decision == null || (decision.Length > 0 && eng.Redirect(decision) != null)) return;
+            e.Cancel = true;
+            Count();
         }
 
         void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
@@ -220,7 +242,7 @@ namespace GBrowser
             string host = HostOf(url);
 #if AUTOMATION
             // test builds: https://gb-block-test.invalid/<variant>/... answers with one kind of "blocked" response
-            if (host == "gb-block-test.invalid")
+            if (host == "gb-block-test.invalid" || host == "gb-block-test2.invalid")
             {
                 string v = new Uri(url).AbsolutePath.Split('/')[1];
                 try
@@ -236,6 +258,17 @@ namespace GBrowser
                         case "rscheme": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: gbblocked:x"); break;
                         case "rabout": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: about:blank"); break;
                         case "rinvalid": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: https://blocked.invalid/"); break;
+                        case "e200": e.Response = EmptyFrame(); break;
+                        case "s204": e.Response = env.CreateWebResourceResponse(null, 204, "No Content", ""); break;
+                        case "page":
+                        {
+                            // a cross-site page that itself holds a frame of variant ?f= on another test site (nested frames)
+                            string f = url.Contains("?f=") ? url.Substring(url.IndexOf("?f=") + 3) : "";
+                            string html = "<!doctype html><title>t</title><p>frame</p>" +
+                                (f.Length > 0 ? "<iframe src=\"https://gb-block-test2.invalid/" + f + "/nested\"></iframe>" : "");
+                            e.Response = env.CreateWebResourceResponse(new MemoryStream(Encoding.UTF8.GetBytes(html)), 200, "OK", "Content-Type: text/html; charset=utf-8");
+                            break;
+                        }
                     }
                 }
                 catch (Exception ex) { TestLog.Add(v + ": " + ex.GetType().Name + " " + ex.Message); }

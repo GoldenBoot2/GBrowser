@@ -1245,6 +1245,14 @@ namespace GBrowser
                 case "back": toolbar_Back(); return "ok";
                 case "star": ToggleBookmark(); return "ok";
                 case "sleepnow": foreach (var t in Tabs) if (t != Current) { t.HiddenSince = DateTime.MinValue; } await SleepHiddenTabs(); return "ok";
+                case "procs":
+                {
+                    // which frames each engine process holds (for memory analysis)
+                    var infos = await env.GetProcessExtendedInfosAsync();
+                    return Store.ToJson(infos.Select(pi => new Dictionary<string, object> {
+                        { "pid", pi.ProcessInfo.ProcessId }, { "kind", pi.ProcessInfo.Kind.ToString() },
+                        { "frames", pi.AssociatedFrameInfos.Select(f => (f.Name ?? "") + " " + f.Source).ToList() } }).ToList());
+                }
                 case "state":
                     return Store.ToJson(new Dictionary<string, object>
                     {
