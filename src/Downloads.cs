@@ -29,6 +29,9 @@ namespace GBrowser
             public string Parts { get; set; }         // "start,end,pos;..."
             public long ActiveMs { get; set; }        // time spent downloading (pauses not counted)
             public bool OpenWhenDone { get; set; }    // open the file as soon as it has finished
+            public string ReplaceTarget { get; set; } // "Replace": downloaded beside it, then moved over this file when done
+            [System.Web.Script.Serialization.ScriptIgnore] public DateTime FullAt;   // all bytes in, engine still not done
+            [System.Web.Script.Serialization.ScriptIgnore] public CoreWebView2 Core; // the tab that started it
             [System.Web.Script.Serialization.ScriptIgnore] public DateTime? RunningSince;
             // speed of the engine's own downloads (multi-part ones report theirs): bytes per second, smoothed
             [System.Web.Script.Serialization.ScriptIgnore] public double EngineSpeed;
@@ -86,6 +89,22 @@ namespace GBrowser
 
         public static void Notify(Item it) { try { Changed?.Invoke(); } catch { } }
 
+        /// <summary>"Replace": the finished file takes the place of the existing one (only after it downloaded fully,
+        /// so a failed download never costs the old file).</summary>
+        public static void CompleteReplace(Item it)
+        {
+            string target = it.ReplaceTarget;
+            if (string.IsNullOrEmpty(target) || string.IsNullOrEmpty(it.Path) || !File.Exists(it.Path)) return;
+            try
+            {
+                if (File.Exists(target)) File.Delete(target);
+                File.Move(it.Path, target);   // same folder: the internet mark (an NTFS stream) moves with it
+                it.Path = target;
+                it.ReplaceTarget = null;
+            }
+            catch { }
+        }
+
         /// <summary>A download finished: "Open when done" opens it (through the shell, so SmartScreen checks it).</summary>
         public static void Finished(Item it)
         {
@@ -102,7 +121,7 @@ namespace GBrowser
             it.RunningSince = null;
         }
 
-        public static void Track(CoreWebView2DownloadOperation op, string path = null)
+        public static Item Track(CoreWebView2DownloadOperation op, string path = null)
         {
             var it = new Item
             {
@@ -115,6 +134,7 @@ namespace GBrowser
             {
                 it.Received = op.BytesReceived; it.Total = (long)(op.TotalBytesToReceive ?? (ulong)it.Total);
                 var now = DateTime.UtcNow;
+                if (it.Total > 0 && it.Received >= it.Total && it.FullAt == default(DateTime)) it.FullAt = now;
                 double sec = (now - it.SpeedAt).TotalSeconds;
                 if (it.SpeedAt == default(DateTime)) { it.SpeedAt = now; it.SpeedBytes = it.Received; }
                 else if (sec >= 0.5)
@@ -131,19 +151,22 @@ namespace GBrowser
                 if (op.State == CoreWebView2DownloadState.InProgress) MarkRunning(it); else MarkStopped(it);
                 switch (op.State)
                 {
-                    case CoreWebView2DownloadState.Completed: it.State = "completed"; it.Received = op.BytesReceived; it.Op = null; Finished(it); break;
+                    case CoreWebView2DownloadState.Completed:
+                        it.State = "completed"; it.Received = op.BytesReceived; it.Op = null; it.Path = op.ResultFilePath;
+                        CompleteReplace(it); Finished(it); break;
                     case CoreWebView2DownloadState.Interrupted:
                         it.State = op.CanResume ? "paused" : "interrupted";
                         it.Reason = op.InterruptReason.ToString();
                         if (!op.CanResume) it.Op = null;
                         break;
-                    default: it.State = "in_progress"; break;
+                    default: if (it.State != "review") it.State = "in_progress"; break;
                 }
                 Save();
                 Changed?.Invoke();
             };
             Save();
             Changed?.Invoke();
+            return it;
         }
 
         public static Item Find(int id) => All.FirstOrDefault(i => i.Id == id);

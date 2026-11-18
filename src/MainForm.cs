@@ -250,6 +250,8 @@ namespace GBrowser
                 env = await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
                 Updater.Changed += OnUpdateChanged;
                 Downloads.Changed += OnDownloadsChanged;
+                reviewWatch.Tick += (s, e) => CheckReviews();
+                reviewWatch.Start();
                 downloadsSeen = Downloads.All.Any(d => d.State == "in_progress" || d.State == "paused");
                 OnDownloadsChanged();
                 Updater.Start();
@@ -388,10 +390,13 @@ namespace GBrowser
             t.Blocking = new Blocking(t, env);
             t.Blocking.Changed += () => uiDirty = true;
             t.Blocking.Attach(core);
-#if AUTOMATION
-            // test builds save downloads inside the test data folder, never in the user's Downloads
-            core.Profile.DefaultDownloadFolderPath = Path.Combine(Store.DataDir, "Downloads");
-#endif
+            // The engine proposes download names already made unique against its default folder ("x (1).exe"),
+            // which hid existing files from GBrowser's "If the file already exists" choice. Its default folder is an
+            // always-empty folder, so it proposes the plain name; GBrowser picks the real folder for every download
+            // (OnDownloadStarting sets ResultFilePath), so nothing is ever saved there.
+            string names = Path.Combine(Store.DataDir, "DownloadNames");
+            Directory.CreateDirectory(names);
+            core.Profile.DefaultDownloadFolderPath = names;
 
             core.SourceChanged += (o, e) => { t.Url = core.Source; if (t == Current) UpdateUi(); };
             core.DocumentTitleChanged += (o, e) =>
@@ -708,7 +713,22 @@ namespace GBrowser
                 if (string.IsNullOrEmpty(name)) name = "download";
                 string folder = DownloadFolder();
                 Directory.CreateDirectory(folder);
-                string path = UniquePath(Path.Combine(folder, name));
+                string path = Path.Combine(folder, name), replace = null;
+                if (File.Exists(path) || File.Exists(path + ".gbdownload"))
+                {
+                    // a file with this name is already there: Settings > Downloads > "If the file exists"
+                    string mode = Store.Settings.DownloadConflict ?? "ask";
+                    if (mode == "ask" && !Store.Settings.AskWhereToSave)
+                    {
+                        int c = MaterialDialog.Choose(this, "File already exists", null, new[] {
+                            Tuple.Create(IconData.File, name + " is already in " + Path.GetFileName(folder.TrimEnd('\\')) + ".") },
+                            "Keep both", "Replace");
+                        if (c == 0) { e.Cancel = true; return; }
+                        mode = c == 2 ? "replace" : "keep";
+                    }
+                    if (mode == "replace" && File.Exists(path)) replace = path;
+                    path = UniquePath(path);   // "Replace" also downloads beside it first; the old file goes only when the new one is complete
+                }
                 if (Store.Settings.AskWhereToSave)
                 {
                     using (var dlg = new SaveFileDialog { FileName = name, InitialDirectory = folder, OverwritePrompt = true, AutoUpgradeEnabled = true, Title = "Save as" })
@@ -717,15 +737,27 @@ namespace GBrowser
                         dlg.Filter = (string.IsNullOrEmpty(ext) ? "File" : ext.TrimStart('.').ToUpperInvariant() + " file") + "|*" + ext + "|All files|*.*";
                         if (dlg.ShowDialog(this) != DialogResult.OK) { e.Cancel = true; return; }
                         path = dlg.FileName;
+                        replace = null;
+                        if (File.Exists(path)) { replace = path; path = UniquePath(path); }   // Windows already asked "replace it?"
                     }
                 }
                 e.ResultFilePath = path;
-                e.Handled = true;   // GBrowser's download button replaces the engine's download bubble
+                // GBrowser's download button replaces the engine's download bubble, except for programs and scripts:
+                // Microsoft Defender SmartScreen shows its warnings (and Keep / Delete) only in that bubble, and WebView2
+                // has no API to show or answer them elsewhere (measured: a flagged file waits forever when it is hidden)
+                e.Handled = !FastDownload.Risky(path);
                 // the page as referrer, only a real web address (not about:blank / GBrowser pages) and never from private tabs
                 string referer = t.Private || core.Source == null || !(core.Source.StartsWith("https://") || core.Source.StartsWith("http://")) || Pages.IsInternal(core.Source) ? null : core.Source;
-                var fast = await FastDownload.TryTakeOver(e.DownloadOperation, path, referer, core.CookieManager);
-                if (fast != null) e.Cancel = true;   // GBrowser downloads it in parts
-                else Downloads.Track(e.DownloadOperation, path);
+                // read once: every read of e.DownloadOperation returns a new wrapper object
+                var op = e.DownloadOperation;
+                var fast = await FastDownload.TryTakeOver(op, path, referer, core.CookieManager);
+                if (fast != null) { e.Cancel = true; fast.Item.ReplaceTarget = replace; }   // GBrowser downloads it in parts
+                else
+                {
+                    var it = Downloads.Track(op, path);
+                    it.ReplaceTarget = replace;
+                    it.Core = core;
+                }
                 downloadsSeen = true;
                 OnDownloadsChanged();
             }
@@ -734,6 +766,44 @@ namespace GBrowser
         }
 
         bool downloadsSeen;
+        readonly Timer reviewWatch = new Timer { Interval = 1000 };
+
+        /// <summary>Microsoft Defender SmartScreen holds a flagged download (all bytes in, never completes) until someone
+        /// decides in the engine's download panel; WebView2 offers no API to read or answer that warning. GBrowser hides
+        /// that panel for normal downloads, so for such a download it shows the row as "Needs your review" and opens
+        /// the panel, where SmartScreen's own Keep / Delete choices are.</summary>
+        void CheckReviews()
+        {
+            foreach (var d in Downloads.All.Where(x => x.Op != null && (x.State == "in_progress" || x.State == "review")).ToList())
+            {
+                // read from the engine itself: a small file can be complete before any progress event reaches GBrowser
+                long got = d.Op.BytesReceived, total = (long)(d.Op.TotalBytesToReceive ?? 0);
+                bool full = d.Op.State == CoreWebView2DownloadState.InProgress && total > 0 && got >= total;
+                if (!full) { d.FullAt = default(DateTime); continue; }
+                if (d.FullAt == default(DateTime)) { d.FullAt = DateTime.UtcNow; d.Received = got; d.Total = total; continue; }
+                bool held = (DateTime.UtcNow - d.FullAt).TotalSeconds > 4;   // beyond a normal antivirus scan of a finished file
+                if (held && d.State != "review")
+                {
+                    d.State = "review";
+                    Downloads.MarkStopped(d);
+                    OnDownloadsChanged();
+                    OpenReview(d);
+                }
+            }
+        }
+
+        void OpenReview(Downloads.Item d)
+        {
+            var core = d.Core != null && Tabs.Any(t => t.Created && t.View.CoreWebView2 == d.Core) ? d.Core : Current?.View?.CoreWebView2;
+            if (core == null) return;
+            if (Current?.View?.CoreWebView2 != core) { int i = Tabs.FindIndex(t => t.Created && t.View.CoreWebView2 == core); if (i >= 0) Select(i); }
+            try
+            {
+                core.DefaultDownloadDialogCornerAlignment = CoreWebView2DefaultDownloadDialogCornerAlignment.TopRight;
+                core.OpenDefaultDownloadDialog();
+            }
+            catch { }
+        }
         string lastDownloadStates;
 
         void OnDownloadsChanged()
@@ -777,6 +847,7 @@ namespace GBrowser
             switch (action)
             {
                 case "cancel": d.Op?.Cancel(); break;
+                case "review": OpenReview(d); break;
                 case "pause": d.Op?.Pause(); d.State = "paused"; Downloads.MarkStopped(d); break;
                 case "resume": if (d.Op != null && d.Op.CanResume) { d.Op.Resume(); d.State = "in_progress"; Downloads.MarkRunning(d); } break;
                 case "retry": NewTab(d.Url, false); break;
@@ -1197,6 +1268,7 @@ namespace GBrowser
                         case "AskWhereToSave": st.AskWhereToSave = v is bool aw && aw; break;
                         case "DownloadConnections": st.DownloadConnections = Math.Max(1, Math.Min(16, Convert.ToInt32(v))); break;
                         case "DownloadSpeedLimit": st.DownloadSpeedLimit = Math.Max(0, Math.Min(1024 * 1024, Convert.ToInt32(v))); break;
+                        case "DownloadConflict": if (v is string dc && (dc == "ask" || dc == "keep" || dc == "replace")) st.DownloadConflict = dc; break;
                         case "SecureDns":
                         {
                             string d = (v as string ?? "").Trim();
@@ -1271,6 +1343,7 @@ namespace GBrowser
                         { "total", d.Total }, { "received", d.Received }, { "state", d.State }, { "reason", d.Reason ?? "" },
                         { "time", d.Time }, { "exists", !string.IsNullOrEmpty(d.Path) && File.Exists(d.Path) },
                         { "live", d.Op != null || (d.Engine == "multi" && (d.State == "in_progress" || d.State == "paused")) }, { "multi", d.Engine == "multi" },
+                        { "replaces", d.ReplaceTarget != null ? Path.GetFileName(d.ReplaceTarget) : "" },
                         { "speed", d.Fast != null ? d.Fast.Speed : d.State == "in_progress" ? d.EngineSpeed : 0 }, { "connections", d.Fast != null ? d.Fast.Connections : 0 },
                         { "segments", d.Fast != null ? d.Fast.Segments() : null }, { "durationMs", d.DurationMs }, { "openWhenDone", d.OpenWhenDone },
                         { "limited", d.Engine == "multi" && st.DownloadSpeedLimit > 0 } }).ToList();
@@ -1295,7 +1368,7 @@ namespace GBrowser
                     {
                         case "open": if (File.Exists(d.Path)) Process.Start(new ProcessStartInfo(d.Path) { UseShellExecute = true }); break;
                         case "folder": if (File.Exists(d.Path)) Process.Start("explorer.exe", "/select,\"" + d.Path + "\""); break;
-                        case "cancel": case "pause": case "resume": case "retry": DownloadAction(d, Str(m, "action")); break;
+                        case "cancel": case "pause": case "resume": case "retry": case "review": DownloadAction(d, Str(m, "action")); break;
                         case "openwhendone": d.OpenWhenDone = !d.OpenWhenDone; Downloads.Save(); break;
                         case "remove": Downloads.All.Remove(d); Downloads.Save(); break;
                     }
@@ -1476,6 +1549,14 @@ namespace GBrowser
                     else if (arg == "undock") devDock.Undock();
                     return "docked=" + devDock.Docked(Current) + " count=" + devDock.DockedCount + " frame=" + devDock.FrameInfo() + " page=" + content.Bounds + " splitter=" + devDock.SplitterOnScreen;
                 case "bubble": bubble.SetText(arg); return bubble.Visible ? bubble.Bounds.ToString() : "hidden";
+                case "dlinfo":
+                {
+                    var d = Downloads.All.FirstOrDefault();
+                    if (d == null) return "none";
+                    string opState = "-";
+                    try { if (d.Op != null) opState = d.Op.State + " recv=" + d.Op.BytesReceived + " total=" + d.Op.TotalBytesToReceive + " reason=" + d.Op.InterruptReason; } catch (Exception ex) { opState = "error " + ex.Message; }
+                    return Path.GetFileName(d.Path ?? "") + " state=" + d.State + " op=" + opState + " fullAt=" + (d.FullAt == default(DateTime) ? "none" : (DateTime.UtcNow - d.FullAt).TotalSeconds.ToString("F1") + "s ago") + " timer=" + reviewWatch.Enabled + " panelOpen=" + (Current?.View?.CoreWebView2?.IsDefaultDownloadDialogOpen.ToString() ?? "-") + " sameCore=" + (d.Core == Current?.View?.CoreWebView2);
+                }
                 case "extinstall":
                 {
                     var core = Current.View.CoreWebView2;

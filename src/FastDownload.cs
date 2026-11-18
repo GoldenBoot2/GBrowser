@@ -132,6 +132,19 @@ namespace GBrowser
             return null;
         }
 
+        /// <summary>Programs, installers and scripts: Microsoft Defender SmartScreen checks them (download reputation)
+        /// in the engine before they are saved, and warns, like Chrome. GBrowser's multi-part engine has no such
+        /// check (its files are marked and scanned only after saving), so these always go to the engine.</summary>
+        static readonly string[] RiskyTypes =
+        {
+            ".exe", ".msi", ".msix", ".msixbundle", ".appx", ".appxbundle", ".appinstaller", ".msp", ".msu",
+            ".bat", ".cmd", ".com", ".scr", ".pif", ".cpl", ".dll", ".sys", ".ocx", ".lnk", ".url", ".reg", ".inf",
+            ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".jar", ".application",
+            ".gadget", ".msc", ".scf", ".iso", ".img", ".vhd", ".vhdx", ".docm", ".xlsm", ".pptm",
+        };
+
+        public static bool Risky(string path) => RiskyTypes.Contains(Path.GetExtension(path ?? "").ToLowerInvariant());
+
         static async Task<HttpRequestMessage> Request(string url, string referer, CoreWebView2CookieManager cm, long from, long to)
         {
             var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -161,6 +174,7 @@ namespace GBrowser
             if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) return null;
             long expected = (long)(op.TotalBytesToReceive ?? 0);
             if (expected > 0 && expected < 2 * MinSplit) return null;   // small files: nothing to gain
+            if (Risky(path)) return null;   // programs and scripts: the engine's SmartScreen check before the download
             Probe p;
             using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
                 try { p = await Check(url, referer, cm, expected, cts.Token); } catch { return null; }
@@ -297,6 +311,7 @@ namespace GBrowser
                 Attachment.Mark(dest, Item.Url, Item.Referer);   // "downloaded from the internet" + antivirus scan
                 Item.State = "completed";
                 Item.Parts = null;
+                Downloads.CompleteReplace(Item);
                 Downloads.Finished(Item);
             }
             catch (OperationCanceledException) { if (Item.State != "cancelled") Item.State = "paused"; }

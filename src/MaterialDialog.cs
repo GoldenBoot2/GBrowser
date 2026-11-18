@@ -12,9 +12,10 @@ namespace GBrowser
     internal sealed class MaterialDialog : Form
     {
         readonly string title, okText, cancelText;
+        string extraText;   // optional third choice, between Cancel and OK (DialogResult.Retry)
         readonly Image icon;
         readonly List<Tuple<string, string>> lines;   // (icon path data or null, text)
-        Rectangle okRect, cancelRect;
+        Rectangle okRect, cancelRect, extraRect;
         int hover = -1;
 
         MaterialDialog(string title, Image icon, List<Tuple<string, string>> lines, string ok, string cancel)
@@ -95,10 +96,19 @@ namespace GBrowser
                 okRect = new Rectangle(right - okW, by, okW, bh);
                 using (var p = Theme.Round(okRect, bh / 2f)) using (var b = new SolidBrush(hover == 1 ? ControlPaint.Dark(Theme.Primary, 0.05f) : Theme.Primary)) g.FillPath(b, p);
                 TextRenderer.DrawText(g, okText, bf, okRect, Theme.OnPrimary, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                int left = okRect.X;
+                if (extraText != null)
+                {
+                    int ew = TextRenderer.MeasureText(extraText, bf).Width + S(40);
+                    extraRect = new Rectangle(okRect.X - S(8) - ew, by, ew, bh);
+                    using (var p = Theme.Round(extraRect, bh / 2f)) using (var b = new SolidBrush(hover == 2 ? ControlPaint.Dark(Theme.PrimaryContainer, 0.05f) : Theme.PrimaryContainer)) g.FillPath(b, p);
+                    TextRenderer.DrawText(g, extraText, bf, extraRect, Theme.OnPrimaryContainer, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    left = extraRect.X;
+                }
                 if (cancelText != null)
                 {
                     int cw = TextRenderer.MeasureText(cancelText, bf).Width + S(32);
-                    cancelRect = new Rectangle(okRect.X - S(8) - cw, by, cw, bh);
+                    cancelRect = new Rectangle(left - S(8) - cw, by, cw, bh);
                     if (hover == 0) using (var p = Theme.Round(cancelRect, bh / 2f)) using (var b = new SolidBrush(Theme.Hover)) g.FillPath(b, p);
                     TextRenderer.DrawText(g, cancelText, bf, cancelRect, Theme.Primary, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 }
@@ -107,7 +117,7 @@ namespace GBrowser
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            int h = okRect.Contains(e.Location) ? 1 : cancelRect.Contains(e.Location) ? 0 : -1;
+            int h = okRect.Contains(e.Location) ? 1 : extraText != null && extraRect.Contains(e.Location) ? 2 : cancelRect.Contains(e.Location) ? 0 : -1;
             if (h != hover) { hover = h; Cursor = h >= 0 ? Cursors.Hand : Cursors.Default; Invalidate(); }
         }
 
@@ -115,6 +125,7 @@ namespace GBrowser
         {
             if (e.Button != MouseButtons.Left) return;
             if (okRect.Contains(e.Location)) { DialogResult = DialogResult.OK; Close(); }
+            else if (extraText != null && extraRect.Contains(e.Location)) { DialogResult = DialogResult.Retry; Close(); }
             else if (cancelText != null && cancelRect.Contains(e.Location)) { DialogResult = DialogResult.Cancel; Close(); }
         }
 
@@ -130,6 +141,16 @@ namespace GBrowser
         {
             using (var d = new MaterialDialog(title, icon, new List<Tuple<string, string>>(lines), ok, cancel))
                 return d.ShowDialog(owner) == DialogResult.OK;
+        }
+
+        /// <summary>Three choices: returns 1 for ok (filled button), 2 for extra (tonal), 0 for cancel / Esc.</summary>
+        public static int Choose(IWin32Window owner, string title, Image icon, IEnumerable<Tuple<string, string>> lines, string ok, string extra, string cancel = "Cancel")
+        {
+            using (var d = new MaterialDialog(title, icon, new List<Tuple<string, string>>(lines), ok, cancel) { extraText = extra })
+            {
+                var r = d.ShowDialog(owner);
+                return r == DialogResult.OK ? 1 : r == DialogResult.Retry ? 2 : 0;
+            }
         }
 
         public static void Info(IWin32Window owner, string title, string text) =>
