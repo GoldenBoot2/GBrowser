@@ -1,0 +1,132 @@
+using System;
+using System.Drawing;
+using System.IO;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
+
+namespace GBrowser
+{
+    /// <summary>One tab. Its WebView2 is created only when the tab is first shown (restored tabs cost no memory
+    /// until opened) and is suspended after a while in the background (sleeping tabs).</summary>
+    internal sealed class BrowserTab
+    {
+        public WebView2 View;
+        public string Url;            // real URL (internal pages: https://gbrowser.local/...)
+        public string Title = "New tab";
+        public Image Favicon;
+        public bool Loading, Sleeping, PlayingAudio;
+        public bool OpenedByPage;     // created for NewWindowRequested: the page fills it, don't navigate
+        public int Blocked;           // ads / trackers blocked on the current page
+        public Blocking Blocking;
+        public DateTime HiddenSince = DateTime.UtcNow;
+        public bool Created => View?.CoreWebView2 != null;
+        Task creating;
+
+        public BrowserTab(string url, string title = null)
+        {
+            Url = url;
+            if (!string.IsNullOrEmpty(title)) Title = title;
+            else if (Pages.IsInternal(url)) Title = PageTitle(url);
+            else if (!string.IsNullOrEmpty(url)) Title = url;
+        }
+
+        public string TooltipText => Title + (Blocked > 0 ? "\n" + Blocked + " blocked" : "") + (Sleeping ? "\nSleeping" : "");
+
+        public static string PageTitle(string url)
+        {
+            switch (Pages.PageName(url))
+            {
+                case "bookmarks": return "Bookmarks";
+                case "history": return "History";
+                case "extensions": return "Extensions";
+                case "settings": return "Settings";
+                case "about": return "About GBrowser";
+                default: return "New tab";
+            }
+        }
+
+        /// <summary>Creates the WebView2 inside host (once). The returned task completes when CoreWebView2 is ready.</summary>
+        public Task EnsureCreated(CoreWebView2Environment env, Control host, Action<BrowserTab> setup)
+        {
+            if (creating != null) return creating;
+            View = new WebView2 { Dock = DockStyle.Fill, Visible = false, DefaultBackgroundColor = Theme.Surface };
+            host.Controls.Add(View);
+            creating = Create(env, setup);
+            return creating;
+        }
+
+        async Task Create(CoreWebView2Environment env, Action<BrowserTab> setup)
+        {
+            await View.EnsureCoreWebView2Async(env);
+            setup(this);
+        }
+
+        public void Navigate(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return;
+            Url = url;
+            if (Created)
+            {
+                try { View.CoreWebView2.Navigate(url); }
+                catch (ArgumentException) { View.CoreWebView2.Navigate(Search.ToUrl(url) ?? Pages.Url("newtab")); }
+            }
+        }
+
+        public async void UpdateFavicon(Action done)
+        {
+            try
+            {
+                if (!Created || string.IsNullOrEmpty(View.CoreWebView2.FaviconUri)) { Favicon = null; done(); return; }
+                using (var s = await View.CoreWebView2.GetFaviconAsync(CoreWebView2FaviconImageFormat.Png))
+                {
+                    if (s == null || s.Length == 0) { Favicon = null; done(); return; }
+                    var ms = new MemoryStream();
+                    await s.CopyToAsync(ms);
+                    ms.Position = 0;
+                    var old = Favicon;
+                    Favicon = new Bitmap(Image.FromStream(ms));
+                    old?.Dispose();
+                }
+            }
+            catch { Favicon = null; }
+            done();
+        }
+
+        /// <summary>Hidden tab: ask the engine to use less memory; after SleepMinutes it is suspended.</summary>
+        public void OnHidden()
+        {
+            HiddenSince = DateTime.UtcNow;
+            if (!Created) return;
+            View.Visible = false;
+            if (Store.Settings.LowMemoryHiddenTabs)
+                try { View.CoreWebView2.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Low; } catch { }
+        }
+
+        public void OnShown()
+        {
+            if (!Created) return;
+            try { View.CoreWebView2.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Normal; } catch { }
+            View.Visible = true;
+            if (Sleeping)
+            {
+                try { View.CoreWebView2.Resume(); } catch { }
+                Sleeping = false;
+            }
+        }
+
+        public async Task TrySleep()
+        {
+            if (!Created || Sleeping || View.Visible || PlayingAudio) return;
+            try { Sleeping = await View.CoreWebView2.TrySuspendAsync(); } catch { }
+        }
+
+        public void Dispose()
+        {
+            try { View?.Parent?.Controls.Remove(View); View?.Dispose(); } catch { }
+            Favicon?.Dispose();
+            View = null;
+        }
+    }
+}

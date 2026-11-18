@@ -1,0 +1,63 @@
+! GoldenBoot extra rules (group 0), compiled by tools/build_filters.py.
+! Ad, tracker and telemetry endpoints that none of the public lists in the build block for every
+! site. Rules that could break the vendor's own site are limited to third-party use.
+!
+! Telemetry (TVs / devices)
+||amoeba.web.roku.com^
+||ngfts.lge.com^
+||us.ibs.lgappstv.com^
+! Analytics, experiments, session tracking
+||analytics.twitter.com^$third-party
+||cdn.dynamicyield.com^$third-party
+||clientstream.launchdarkly.com^$third-party
+||snap.licdn.com^$third-party
+||static.klaviyo.com^$third-party
+||s.youtube.com^$third-party,important
+||eu.posthog.com^$third-party
+||us.posthog.com^$third-party
+||xp.apple.com^
+||udc.yahoo.com^
+||settings-win.data.microsoft.com^
+||tvinteractive.tv^
+||graph.facebook.com^$third-party
+||connect.facebook.net^$third-party
+! Consent / ad-block recovery popups (Google Funding Choices)
+||fundingchoicesmessages.google.com^$third-party
+! Ad servers (FreeWheel video ads; AdGuard keeps v.fwmrm.net/? open for some players)
+||fwmrm.net^$third-party
+||v.fwmrm.net^$third-party,important
+! Email click tracking
+||click.mailchimp.com^
+||list-manage.com^$third-party
+! Social widgets and chat bubbles
+||widgets.pinterest.com^$third-party
+||widget.intercom.io^$third-party
+||i.instagram.com^$third-party
+! Video ads (Google DAI, JW Player ad plugins, ad redirects)
+||dai.google.com^$third-party
+||ssl.p.jwpcdn.com^$third-party
+||redirector.googlevideo.com^$third-party,domain=~youtube.com|~youtube-nocookie.com
+! Never break YouTube's own ad-blocker check (static.doubleclick.net is blocked by the lists)
+@@||static.doubleclick.net/instream/ad_status.js$domain=youtube.com|youtube-nocookie.com
+! Ad-bait files and elements (classic ad names; ad-block tests and anti-adblock scripts use them).
+! The lists' own "@@" exceptions for sites that need such files still win (rules here are not $important).
+/advertisement.js$script
+/ads/banner/*
+/ads/adframe.
+/adframe.html$subdocument
+##.adsbox
+##.ad-banner
+##.textads
+##.pub_300x250
+##.ad-placement
+###adblock-bait
+! Ad-block detector markers: harmless bait scripts that only add an empty element; blocking them
+! just tells the site an ad blocker is on (the lists already allow this vendor's ads.js / wp-banners.js)
+@@||adblockanalytics.com/google-adsense.js|$script
+! Generic ad file names (banner images / flash named "..._ads_banner.*")
+_ads_banner.$image,object,media
+! Real-site fixes
+! Times of India: empty ad boxes stay as blank gaps (list rule ".clsplaceholder" no longer matches the
+! site's "CLSPlaceholder"); hide the placeholder only when it holds an ad slot
+timesofindia.indiatimes.com##.CLSPlaceholder:has(> .adInv)
+timesofindia.indiatimes.com##.CLSPlaceholder:has(.colombia)

@@ -1,0 +1,23 @@
+# build output
+bin/
+obj/
+out/
+*.user
+.vs/
+
+# compiled filter lists (tools/build_filters.py writes them; CI builds them fresh) and downloaded inputs
+filters/
+tools/lists/
+tools/sl_pkg/
+__pycache__/
+
+# local-only helpers (test channel client, screenshots, edit scripts with personal paths)
+tools/local/
+
+# keys and secrets
+*.jks
+*.pfx
+*.snk
+*.pem
+*.key
+secrets/

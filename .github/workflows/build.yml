@@ -1,0 +1,40 @@
+name: Build GBrowser
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compile filter lists
+        shell: pwsh
+        run: python -I tools/build_filters.py
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build -c Release -nodeReuse:false -o out/GBrowser
+
+      - name: Package
+        id: pkg
+        shell: pwsh
+        run: |
+          $ver = ([xml](Get-Content GBrowser.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          Remove-Item out/GBrowser/Microsoft.Web.WebView2.Wpf.dll -ErrorAction SilentlyContinue
+          foreach ($f in 'GBrowser.exe', 'pages/newtab.html', 'assets/gbab.js', 'filters/hosts.bin', 'filters/net.txt', 'filters/cosm.txt') {
+            if (-not (Test-Path "out/GBrowser/$f")) { throw "missing $f" }
+          }
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          Get-ChildItem out/GBrowser -Recurse -File | Measure-Object Length -Sum | ForEach-Object { "files $($_.Count), $([math]::Round($_.Sum / 1MB, 1)) MB" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GBrowser-${{ steps.pkg.outputs.version }}
+          path: out/GBrowser
+          retention-days: 30

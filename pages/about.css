@@ -1,0 +1,6 @@
+.app-card { display: flex; align-items: center; gap: 20px; padding: 28px 24px; }
+.app-card .logo { width: 72px; height: 72px; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; flex: none; }
+.app-card .logo .icon { width: 44px; height: 44px; }
+.app-card .name { font-size: 26px; font-weight: 600; }
+.app-card .ver { color: var(--on-surface-variant); }
+.mono { font-family: Consolas, monospace; font-size: 12.5px; word-break: break-all; white-space: normal !important; }
