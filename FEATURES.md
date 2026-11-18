@@ -155,9 +155,9 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 ## From the Android app (WebView Adblocker 2.9.4; user 19-11-2026: "we added some stuffs in the android browser are missing in this pc browser")
 | Feature | Status |
 |---|---|
-| Hide my identity (device / fingerprint masking). GBrowser leaves masking off on purpose so far (Blocking.cs: the engine's Edge values are genuine); a Chrome identity would use values measured from the user's Chrome 157 on this PC | Missing (decide with the user first) |
-| New identity, "Also sign out of all sites", new identity each start | Missing |
-| Canvas noise | Missing |
+| Hide my identity (decided by the user 19-11-2026: stay a genuine Microsoft Edge, but change everything a site uses to recognise and block this browser, like the Android app's Hide my identity + Stealth). Each identity = a different but genuine-looking Edge on Windows: values measured from real Edge / Chrome on this PC, varied only within real ranges, consistent with each other (UA = client hints = platform version; GPU string matches the GPU vendor; cores / memory / screen plausible for a laptop). Covers: canvas, WebGL (vendor / renderer + noise), audio, fonts list, screen and window sizes, hardwareConcurrency, deviceMemory, media device IDs, client hints (model, platformVersion), plugins, battery, WebRTC local addresses, storage IDs. Not changeable without approval: the IP address (no VPN / proxy). | Missing (spec agreed) |
+| New identity: new fingerprint seed + clears what sites store to recognise the browser (cookies, local / session storage, IndexedDB, caches, service workers, HSTS / favicon / HTTP caches, ETags); "Also sign out of all sites"; new identity each start; shows the identity ID | Missing |
+| Canvas noise (per identity, invisible, passes canvas consistency checks) | Missing |
 | Masked cookie-consent records (OneTrust / Cookiebot) | Missing |
 | IP-lookup masking | Missing (no VPN / proxy without approval) |
 | Block tracker pages (strict) | Missing (compare with "Block pages of ad sites") |
