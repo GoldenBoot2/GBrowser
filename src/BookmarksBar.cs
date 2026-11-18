@@ -41,7 +41,14 @@ namespace GBrowser
                     var r = new Rectangle(x, S(3), w, Height - S(6));
                     if (items.Count == hover)
                         using (var p = Theme.Round(r, r.Height / 2f)) using (var br = new SolidBrush(Theme.Hover)) g.FillPath(br, p);
-                    Icons.Draw(g, IconData.Public, r.X + S(8), r.Y + (r.Height - S(16)) / 2, S(16), Theme.OnSurfaceVariant);
+                    // the site's own icon once a visit has shown it (Favicons), else Chrome's default globe
+                    var fav = Favicons.Image(b.Url);
+                    if (fav != null)
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(fav, r.X + S(8), r.Y + (r.Height - S(16)) / 2, S(16), S(16));
+                    }
+                    else Icons.Draw(g, IconData.Public, r.X + S(8), r.Y + (r.Height - S(16)) / 2, S(16), Theme.OnSurfaceVariant);
                     TextRenderer.DrawText(g, t, font, new Rectangle(r.X + S(28), r.Y, r.Width - S(30), r.Height), Theme.OnSurface,
                         TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
                     items.Add(new KeyValuePair<Rectangle, Bookmark>(r, b));

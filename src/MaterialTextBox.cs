@@ -341,33 +341,25 @@ namespace GBrowser
             else if (e.Button == MouseButtons.Right) ShowMenu(e.Location);
         }
 
-        internal ContextMenuStrip ShowMenu(Point p)
+        internal void ShowMenu(Point p)
         {
             if (!Focused) Focus();
-            var m = new ContextMenuStrip { Renderer = new MenuRenderer(), Font = new Font("Segoe UI", 9.5f), ShowImageMargin = false };
-#if AUTOMATION
-            m.AutoClose = false;   // test builds: stays open for the screenshot
-#endif
+            var m = new MaterialMenu();
             bool sel = SelectionLength > 0, clip = false;
             try { clip = Clipboard.ContainsText(); } catch { }
-            void Add(string t, string keys, bool en, Action a)
-            {
-                var it = new ToolStripMenuItem(t) { Enabled = en, ShortcutKeyDisplayString = keys, Padding = new Padding(0, 3, 0, 3) };
-                it.Click += (s, e) => a();
-                m.Items.Add(it);
-            }
+            void Add(string t, string keys, bool en, Action a) => m.Add(t, null, keys, a).Enabled = en;
             Add("Undo", "Ctrl+Z", undo.Count > 0, Undo);
-            m.Items.Add(new ToolStripSeparator());
+            m.AddSeparator();
             Add("Cut", "Ctrl+X", sel, Cut);
             Add("Copy", "Ctrl+C", sel, Copy);
             Add("Paste", "Ctrl+V", clip, Paste);
             if (PasteAndGo != null)
                 Add("Paste and go", null, clip, () => { try { PasteAndGo(Clipboard.GetText()); } catch { } });
             Add("Delete", null, sel, DeleteSelection);
-            m.Items.Add(new ToolStripSeparator());
+            m.AddSeparator();
             Add("Select all", "Ctrl+A", text.Length > 0 && SelectionLength < text.Length, SelectAll);
-            m.Show(this, p);
-            return m;
+            // opens at the mouse, like a context menu
+            m.ShowAt(this, new Rectangle(p.X, p.Y - 1, 1, 1), false, null);
         }
 
         // ------------------------------------------------------------ focus

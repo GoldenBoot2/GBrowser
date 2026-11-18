@@ -15,7 +15,8 @@
   input.placeholder = 'Search ' + data.engine + ' or type a URL';
   const tiles = document.getElementById('tiles');
   for (const t of data.tiles) {
-    const a = el('a', { class: 'tile', href: t.url, title: t.title + '\n' + t.url }, letter(t.url), el('span', { text: t.title }));
+    const a = el('a', { class: 'tile', href: t.url, title: t.title + '\n' + t.url }, siteIcon(t.url, true), el('span', { text: t.title }));
     tiles.append(a);
   }
+  loadSiteIcons(tiles);
 })();

@@ -14,12 +14,13 @@
     const card = el('div', { class: 'card' });
     for (const b of list) card.append(row(b));
     main.append(card);
+    loadSiteIcons(card);
   }
 
   function row(b) {
     const title = el('div', { class: 'title', text: b.Title || b.Url });
     const r = el('div', { class: 'row link', title: b.Url },
-      letter(b.Url),
+      siteIcon(b.Url),
       el('div', { class: 'text' }, title, el('div', { class: 'sub', text: b.Url })),
       el('div', { class: 'actions' },
         iconButton('OpenNew', 'Open in new tab', e => { e.stopPropagation(); openUrl(b.Url, { ctrlKey: true }); }),

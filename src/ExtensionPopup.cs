@@ -64,9 +64,9 @@ namespace GBrowser
             };
         }
 
-#if AUTOMATION
-        protected override bool ShowWithoutActivation => true;   // test builds never take the user's focus
-#endif
+        /// <summary>Only for popups opened by the test channel: they must not take the user's focus.</summary>
+        public bool NoActivate;
+        protected override bool ShowWithoutActivation => NoActivate;
 
         protected override void OnDeactivate(EventArgs e)
         {

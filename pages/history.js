@@ -19,7 +19,7 @@
       if (d !== day) { day = d; main.append(el('div', { class: 'day', text: d })); card = el('div', { class: 'card' }); main.append(card); }
       const r = el('div', { class: 'row link', title: h.Url },
         el('div', { class: 'time', text: fmtTime(h.Time) }),
-        letter(h.Url),
+        siteIcon(h.Url),
         el('div', { class: 'text' }, el('div', { class: 'title', text: h.Title || h.Url }), el('div', { class: 'sub', text: h.Url })),
         el('div', { class: 'actions' },
           iconButton('Delete', 'Remove', async e => { e.stopPropagation(); await gb.send('history.remove', { url: h.Url, time: h.Time }); r.remove(); })));
@@ -27,6 +27,7 @@
       r.addEventListener('auxclick', e => { if (e.button === 1) openUrl(h.Url, e); });
       card.append(r);
     }
+    loadSiteIcons(main);
   }
   load();
 })();

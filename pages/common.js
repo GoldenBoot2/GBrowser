@@ -74,6 +74,35 @@ function iconButton(name, title, onclick) {
   return el('button', { class: 'icon-btn', title, 'aria-label': title, onclick }, icon(name, 's20'));
 }
 
+// Site icon like Chrome's lists: the site's own icon (remembered from visits, src/Favicons.cs); until one is known,
+// Chrome's default globe in lists, or the first letter on a big new-tab tile. Fill with loadSiteIcons() after render.
+function siteKey(url) {
+  try { const h = new URL(url).hostname.toLowerCase(); return h.startsWith('www.') ? h.slice(4) : h; } catch (e) { return ''; }
+}
+
+function siteIcon(url, big) {
+  const box = el('div', { class: big ? 'site-icon big' : 'site-icon' }, big ? letter(url) : icon('Public', 's20'));
+  const k = siteKey(url);
+  if (k) box.dataset.site = k;
+  return box;
+}
+
+async function loadSiteIcons(root) {
+  const boxes = [...(root || document).querySelectorAll('.site-icon[data-site]:not([data-done])')];
+  if (!boxes.length) return;
+  for (const b of boxes) b.dataset.done = '1';
+  const urls = [...new Set(boxes.map(b => 'https://' + b.dataset.site + '/'))];
+  let map = {};
+  try { map = await gb.send('favicons', { urls }) || {}; } catch (e) { }
+  for (const b of boxes) {
+    const d = map[b.dataset.site];
+    if (!d) continue;
+    b.textContent = '';
+    b.classList.add('has');
+    b.append(el('img', { src: d, alt: '' }));
+  }
+}
+
 function letter(textOrUrl) {
   let s = textOrUrl || '?';
   try { s = new URL(textOrUrl).hostname.replace(/^www\./, ''); } catch (e) { }

@@ -97,6 +97,9 @@ namespace GBrowser
                     if (s == null || s.Length == 0) { Favicon = null; done(); return; }
                     var ms = new MemoryStream();
                     await s.CopyToAsync(ms);
+                    // remembered for bookmarks / history / new tab (never from private tabs or GBrowser's own pages)
+                    string src = View.CoreWebView2.Source;
+                    if (!Private && !Pages.IsInternal(src)) Favicons.Save(src, ms.ToArray());
                     ms.Position = 0;
                     var old = Favicon;
                     Favicon = new Bitmap(Image.FromStream(ms));

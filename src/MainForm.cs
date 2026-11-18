@@ -16,6 +16,7 @@ namespace GBrowser
         readonly Toolbar toolbar = new Toolbar { Dock = DockStyle.Top };
         readonly BookmarksBar bookmarksBar = new BookmarksBar { Dock = DockStyle.Top };
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
+        readonly StatusBubble bubble = new StatusBubble();
         readonly Timer sleepTimer = new Timer { Interval = 30000 };
         readonly Stack<string> closedTabs = new Stack<string>();
         CoreWebView2Environment env;
@@ -51,6 +52,8 @@ namespace GBrowser
             if (st.WindowMax) WindowState = FormWindowState.Maximized;
 
             Controls.Add(content);
+            content.Controls.Add(bubble);
+            content.Resize += (s, e) => bubble.Place();
             Controls.Add(bookmarksBar);
             Controls.Add(toolbar);
             Controls.Add(strip);
@@ -141,16 +144,13 @@ namespace GBrowser
             for (int i = 0; i < Tabs.Count; i++)
             {
                 var t = Tabs[i];
-                Image img = t.Private ? Icons.Bitmap(IconData.Private, 16, Theme.Primary) : t.Favicon != null ? new Bitmap(t.Favicon, 16, 16) : Icons.Bitmap(IconData.Public, 16, Theme.OnSurfaceVariant);
-                string title = t.Title ?? "New tab";
-                if (title.Length > 60) title = title.Substring(0, 59) + "...";
-                var it = new ToolStripMenuItem(title, img) { Checked = i == strip.Selected, Padding = new Padding(0, 3, 0, 3) };
                 int idx = i;
-                it.Click += (s, e) => Select(idx);
-                m.Items.Add(it);
+                var it = m.AddToggle(t.Title ?? "New tab", i == strip.Selected, true, () => Select(idx));
+                if (t.Private) it.Icon = IconData.Private;
+                else if (t.Favicon != null) it.Image = t.Favicon;
+                else it.Icon = IconData.Public;
             }
-            var r = strip.SearchRect;
-            m.Show(strip, new Point(r.X, r.Bottom + 2));
+            m.ShowAt(strip, strip.SearchRect, false, "tabsearch");
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -333,6 +333,7 @@ namespace GBrowser
                 if (fresh) task.ContinueWith(_ => BeginInvoke((Action)(() => { if (Current == t) t.OnShown(); })), TaskScheduler.FromCurrentSynchronizationContext());
             }
             else t.OnShown();
+            bubble.SetText(t.Created ? t.View.CoreWebView2.StatusBarText : "");
             UpdateUi();
             strip.RefreshTabs();
         }
@@ -355,7 +356,8 @@ namespace GBrowser
             var core = t.View.CoreWebView2;
             var s = core.Settings;
             s.AreDevToolsEnabled = true;
-            s.IsStatusBarEnabled = true;
+            s.IsStatusBarEnabled = false;   // GBrowser's own, smaller bubble (StatusBubble)
+            core.StatusBarTextChanged += (o, e) => { if (t == Current) bubble.SetText(core.StatusBarText); };
             s.AreDefaultContextMenusEnabled = true;
             s.IsZoomControlEnabled = true;
             s.IsPasswordAutosaveEnabled = true;
@@ -443,7 +445,7 @@ namespace GBrowser
                 if (t == Current) UpdateUi();
             };
             core.HistoryChanged += (o, e) => { if (t == Current) UpdateUi(); };
-            core.FaviconChanged += (o, e) => t.UpdateFavicon(() => strip.RefreshTabs());
+            core.FaviconChanged += (o, e) => t.UpdateFavicon(() => { strip.RefreshTabs(); bookmarksBar.Invalidate(); });
             core.IsDocumentPlayingAudioChanged += (o, e) => { t.PlayingAudio = core.IsDocumentPlayingAudio; strip.RefreshTabs(); };
             core.WindowCloseRequested += (o, e) => { int i = Tabs.IndexOf(t); if (i >= 0) CloseTab(i); };
             core.ContainsFullScreenElementChanged += (o, e) => SetFullscreen(core.ContainsFullScreenElement);
@@ -586,66 +588,47 @@ namespace GBrowser
 
         // ---------- menus ----------
 
-        ToolStripMenuItem Item(string text, string icon, string keys, Action click)
-        {
-            var it = new ToolStripMenuItem(text, icon == null ? null : Icons.Bitmap(icon, (int)(18 * DeviceDpi / 96f), Theme.OnSurfaceVariant));
-            if (keys != null) it.ShortcutKeyDisplayString = keys;
-            it.Click += (s, e) => click();
-            it.Padding = new Padding(0, 3, 0, 3);
-            return it;
-        }
-
-        ContextMenuStrip lastMenu;
         ExtensionPopup lastPopup;
 
-        ContextMenuStrip NewMenu()
-        {
-            var m = new ContextMenuStrip { Renderer = new MenuRenderer(), Font = new Font("Segoe UI", 9.5f), ShowImageMargin = true };
-#if AUTOMATION
-            m.AutoClose = false;   // test builds: menus stay open until the test closes them
-#endif
-            lastMenu = m;
-            return m;
-        }
+        MaterialMenu NewMenu() => new MaterialMenu();
 
         void ShowMenu()
         {
             var m = NewMenu();
-            m.Items.Add(Item("New tab", IconData.Tab, "Ctrl+T", () => NewTab(null)));
-            m.Items.Add(Item("New private tab", IconData.Private, "Ctrl+Shift+N", () => NewPrivateTab(null)));
-            m.Items.Add(Item("Reopen closed tab", IconData.Restore, "Ctrl+Shift+T", ReopenClosed));
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(Item("Bookmarks", IconData.Bookmarks, "Ctrl+Shift+O", () => OpenPage("bookmarks")));
-            m.Items.Add(Item(Store.Settings.ShowBookmarksBar ? "Hide bookmarks bar" : "Show bookmarks bar", IconData.Star, "Ctrl+Shift+B", ToggleBookmarksBar));
-            m.Items.Add(Item("History", IconData.History, "Ctrl+H", () => OpenPage("history")));
-            m.Items.Add(Item("Downloads", IconData.Download, "Ctrl+J", OpenDownloads));
-            m.Items.Add(Item("Extensions", IconData.Extension, null, () => OpenPage("extensions")));
-            string keepSite = Blocking.SiteOf(Current?.Created == true ? Current.View.CoreWebView2.Source : Current?.Url);
+            m.Add("New tab", IconData.Tab, "Ctrl+T", () => NewTab(null));
+            m.Add("New private tab", IconData.Private, "Ctrl+Shift+N", () => NewPrivateTab(null));
+            m.Add("Reopen closed tab", IconData.Restore, "Ctrl+Shift+T", ReopenClosed).Enabled = closedTabs.Count > 0;
+            m.AddSeparator();
+            m.Add("Bookmarks", IconData.Bookmarks, "Ctrl+Shift+O", () => OpenPage("bookmarks"));
+            m.Add(Store.Settings.ShowBookmarksBar ? "Hide bookmarks bar" : "Show bookmarks bar", IconData.Star, "Ctrl+Shift+B", ToggleBookmarksBar);
+            m.Add("History", IconData.History, "Ctrl+H", () => OpenPage("history"));
+            m.Add("Downloads", IconData.Download, "Ctrl+J", OpenDownloads);
+            m.Add("Extensions", IconData.Extension, null, () => OpenPage("extensions"));
+            string curUrl = Current?.Created == true ? Current.View.CoreWebView2.Source : Current?.Url;
+            string keepSite = Pages.IsInternal(curUrl) ? null : Blocking.SiteOf(curUrl);   // GBrowser's own pages never unload
             if (keepSite != null)
             {
                 bool kept = Store.Settings.KeepActiveSites.Contains(keepSite);
-                var keep = new ToolStripMenuItem("Keep " + keepSite + " active") { Checked = kept, Padding = new Padding(0, 3, 0, 3) };
-                keep.Click += (s, e) =>
+                var keep = m.AddToggle("Keep " + keepSite + " active", kept, true, () =>
                 {
                     Store.Settings.KeepActiveSites.Remove(keepSite);
                     if (!kept) Store.Settings.KeepActiveSites.Add(keepSite);
                     Store.SaveSettings();
-                };
-                m.Items.Add(keep);
+                });
+                keep.Icon = IconData.Memory;
             }
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(Item("Zoom in", IconData.ZoomIn, "Ctrl++", () => Zoom(1.1)));
-            m.Items.Add(Item("Zoom out", IconData.ZoomOut, "Ctrl+-", () => Zoom(1 / 1.1)));
-            m.Items.Add(Item("Find on page", IconData.Find, "Ctrl+F", () => SendKeysToPage("^f")));
-            m.Items.Add(Item("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); }));
-            m.Items.Add(Item("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen)));
-            m.Items.Add(Item("Developer tools", IconData.Code, "F12", () => { if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow(); }));
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(Item("Settings", IconData.Settings, null, () => OpenPage("settings")));
-            m.Items.Add(Item("About GBrowser", IconData.Info, null, () => OpenPage("about")));
-            m.Items.Add(Item("Exit", IconData.Close, null, Close));
-            var r = toolbar.ButtonRect("menu");
-            m.Show(toolbar, new Point(r.Right - m.PreferredSize.Width, r.Bottom + 2));
+            m.AddSeparator();
+            m.Add("Zoom in", IconData.ZoomIn, "Ctrl++", () => Zoom(1.1));
+            m.Add("Zoom out", IconData.ZoomOut, "Ctrl+-", () => Zoom(1 / 1.1));
+            m.Add("Find on page", IconData.Find, "Ctrl+F", () => SendKeysToPage("^f"));
+            m.Add("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); });
+            m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
+            m.Add("Developer tools", IconData.Code, "F12", () => { if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow(); });
+            m.AddSeparator();
+            m.Add("Settings", IconData.Settings, null, () => OpenPage("settings"));
+            m.Add("About GBrowser", IconData.Info, null, () => OpenPage("about"));
+            m.Add("Exit", IconData.Close, null, Close);
+            m.ShowAt(toolbar, toolbar.ButtonRect("menu"), true, "menu");
         }
 
         void SendKeysToPage(string keys)
@@ -703,26 +686,26 @@ namespace GBrowser
             {
                 IReadOnlyList<CoreWebView2BrowserExtension> list = null;
                 try { list = await profile.GetBrowserExtensionsAsync(); } catch { }
+                m.AddHeader("Extensions", IconData.Extension);
+                int before = m.Items.Count;
                 foreach (var ext in list ?? new List<CoreWebView2BrowserExtension>())
                 {
                     if (!ext.IsEnabled || !Extensions.Index.ContainsKey(ext.Id)) continue;
                     var man = Extensions.Manifest(ext.Id);
                     string popup = Extensions.PopupPage(man), options = Extensions.OptionsPage(man);
-                    var it = new ToolStripMenuItem(ext.Name, Extensions.Icon(ext.Id) ?? Icons.Bitmap(IconData.Extension, 16, Theme.OnSurfaceVariant));
-                    it.Padding = new Padding(0, 3, 0, 3);
                     string id = ext.Id;
-                    if (popup != null) it.Click += (s, e) => ShowExtensionPopup(id, popup);
-                    else if (options != null) it.Click += (s, e) => NewTab("chrome-extension://" + id + "/" + options);
-                    else it.Enabled = false;
-                    m.Items.Add(it);
+                    Action open = popup != null ? (Action)(() => ShowExtensionPopup(id, popup))
+                        : options != null ? () => NewTab("chrome-extension://" + id + "/" + options) : (Action)null;
+                    var it = m.Add(ext.Name, IconData.Extension, null, open);
+                    it.Image = Extensions.Icon(ext.Id);
+                    it.Enabled = open != null;
                 }
-                if (m.Items.Count == 0) m.Items.Add(new ToolStripMenuItem("No extensions") { Enabled = false });
+                if (m.Items.Count == before) m.AddNote("No extensions");
             }
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(Item("Chrome Web Store", IconData.OpenNew, null, () => NewTab("https://chromewebstore.google.com/category/extensions")));
-            m.Items.Add(Item("Manage extensions", IconData.Settings, null, () => OpenPage("extensions")));
-            var r = toolbar.ButtonRect("ext");
-            m.Show(toolbar, new Point(r.Right - m.PreferredSize.Width, r.Bottom + 2));
+            m.AddSeparator();
+            m.Add("Chrome Web Store", IconData.OpenNew, null, () => NewTab("https://chromewebstore.google.com/category/extensions"));
+            m.Add("Manage extensions", IconData.Settings, null, () => OpenPage("extensions"));
+            m.ShowAt(toolbar, toolbar.ButtonRect("ext"), true, "ext");
         }
 
         void ShowShieldMenu()
@@ -735,15 +718,10 @@ namespace GBrowser
             string head = !st.AdblockEnabled ? "Ad blocking off"
                 : site != null && !Blocking.OnFor(Blocking.HostOf(url)) ? "Off on this site"
                 : (t?.Blocked ?? 0) + " blocked on this page";
-            m.Items.Add(new ToolStripLabel(head, Icons.Bitmap(IconData.Shield, (int)(18 * DeviceDpi / 96f), Theme.Primary))
-                { Font = new Font(m.Font, FontStyle.Bold), ForeColor = Theme.OnSurface, Padding = new Padding(0, 4, 0, 4) });
-            m.Items.Add(new ToolStripSeparator());
-            void Toggle(string text, bool on, Action<bool> set, bool enabled = true)
-            {
-                var it = new ToolStripMenuItem(text) { Checked = on, Enabled = enabled, Padding = new Padding(0, 3, 0, 3) };
-                it.Click += (s, e) => { set(!on); Store.SaveSettings(); ReloadAfterSettingChange(); };
-                m.Items.Add(it);
-            }
+            m.AddHeader(head, IconData.Shield);
+            m.AddSeparator();
+            void Toggle(string text, bool on, Action<bool> set, bool enabled = true) =>
+                m.AddToggle(text, on, enabled, () => { set(!on); Store.SaveSettings(); ReloadAfterSettingChange(); });
             if (site != null)
                 Toggle("Block on " + site, !st.AllowedSites.Contains(site), on =>
                 {
@@ -756,11 +734,10 @@ namespace GBrowser
             Toggle("Hide ad leftovers", st.HideAdLeftovers, v => st.HideAdLeftovers = v, st.AdblockEnabled);
             Toggle("Stealth mode", st.Stealth, v => st.Stealth = v, st.AdblockEnabled);
             Toggle("Block pages of ad sites", st.BlockAdSitePages, v => st.BlockAdSitePages = v, st.AdblockEnabled);
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(new ToolStripLabel("Total blocked: " + st.TotalBlocked.ToString("N0")) { ForeColor = Theme.OnSurfaceVariant, Padding = new Padding(0, 3, 0, 3) });
-            m.Items.Add(Item("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings")));
-            var r = toolbar.ButtonRect("shield");
-            m.Show(toolbar, new Point(r.Right - m.PreferredSize.Width, r.Bottom + 2));
+            m.AddSeparator();
+            m.AddNote("Total blocked: " + st.TotalBlocked.ToString("N0"));
+            m.Add("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings"));
+            m.ShowAt(toolbar, toolbar.ButtonRect("shield"), true, "shield");
         }
 
         /// <summary>Blocking settings apply to new requests; reload the current page so it shows the change.</summary>
@@ -824,11 +801,11 @@ namespace GBrowser
             finally { img?.Dispose(); }
         }
 
-        void ShowExtensionPopup(string id, string page)
+        void ShowExtensionPopup(string id, string page, bool fromTest = false)
         {
             var r = toolbar.ButtonRect("ext");
             var p = toolbar.PointToScreen(new Point(r.Right, r.Bottom + 2));
-            lastPopup = new ExtensionPopup(env, "chrome-extension://" + id + "/" + page, p, url => NewTab(url));
+            lastPopup = new ExtensionPopup(env, "chrome-extension://" + id + "/" + page, p, url => NewTab(url)) { NoActivate = fromTest };
             lastPopup.Show(this);
         }
 
@@ -960,6 +937,20 @@ namespace GBrowser
                     return new Dictionary<string, object> { { "tiles", tiles }, { "engine", Search.Engines.TryGetValue(st.SearchEngine ?? "", out var en) ? en[0] : "Google" } };
                 }
                 case "bookmarks.list": return Store.Bookmarks;
+                case "favicons":
+                {
+                    // site icons for a page's list (one per site): { "<site key>": "data:image/png;base64,..." }
+                    var o = new Dictionary<string, object>();
+                    if (m.TryGetValue("urls", out var uv) && uv is System.Collections.IEnumerable arr && !(uv is string))
+                        foreach (var u in arr.Cast<object>().OfType<string>().Take(1000))
+                        {
+                            string k = Favicons.KeyOf(u);
+                            if (k == null || o.ContainsKey(k)) continue;
+                            var d = Favicons.DataUrl(u);
+                            if (d != null) o[k] = d;
+                        }
+                    return o;
+                }
                 case "bookmarks.remove":
                     Store.Bookmarks.RemoveAll(b => b.Url == Str(m, "url")); Store.SaveBookmarks(); bookmarksBar.Invalidate(); UpdateUi(); return null;
                 case "bookmarks.rename":
@@ -982,6 +973,7 @@ namespace GBrowser
                 }
                 case "history.clear":
                     Store.History.Clear(); Store.SaveHistory();
+                    Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url));
                     if (Profile != null) await Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.BrowsingHistory);
                     return null;
                 case "settings.get":
@@ -1054,7 +1046,7 @@ namespace GBrowser
                         {
                             case "cookies": flags |= CoreWebView2BrowsingDataKinds.AllSite; break;
                             case "cache": flags |= CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage; break;
-                            case "history": flags |= CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory; Store.History.Clear(); Store.SaveHistory(); break;
+                            case "history": flags |= CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory; Store.History.Clear(); Store.SaveHistory(); Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url)); break;
                             case "passwords": flags |= CoreWebView2BrowsingDataKinds.PasswordAutosave; break;
                             case "autofill": flags |= CoreWebView2BrowsingDataKinds.GeneralAutofill; break;
                         }
@@ -1264,19 +1256,22 @@ namespace GBrowser
                 case "menu":
                     if (arg == "shield") ShowShieldMenu(); else if (arg == "ext") ShowExtensionsMenu(); else ShowMenu();
                     await Task.Delay(400);
-                    return lastMenu == null ? "none" : lastMenu.Handle.ToString();
+                    return MaterialMenu.Current == null ? "none" : MaterialMenu.Current.Handle.ToString();
                 case "menuitems":
-                    return lastMenu == null ? "none" : string.Join(" | ", lastMenu.Items.Cast<ToolStripItem>().Select(i =>
-                        i is ToolStripSeparator ? "---" : i.Text + (i is ToolStripMenuItem mi && mi.Checked ? " [x]" : "") + (i.Enabled ? "" : " (off)")));
+                    return MaterialMenu.Current == null ? "none" : string.Join(" | ", MaterialMenu.Current.Items.Select(i =>
+                        i.Separator ? "---" : i.Text + (i.Checked ? " [x]" : "") + (i.Enabled ? "" : " (off)")));
                 case "menuclick":
                 {
-                    var it = lastMenu?.Items.Cast<ToolStripItem>().FirstOrDefault(i => i.Text == arg);
+                    var m = MaterialMenu.Current;
+                    var it = m?.Items.FirstOrDefault(i => i.Text == arg);
                     if (it == null) return "no item";
-                    lastMenu.Close();
-                    it.PerformClick();
+                    m.Close();
+                    it.Click?.Invoke();
                     return "ok";
                 }
-                case "menuclose": lastMenu?.Close(); return "ok";
+                case "menuclose": MaterialMenu.Current?.Close(); return "ok";
+                case "menuopen": return MaterialMenu.Current == null ? "closed" : "open";
+                case "bubble": bubble.SetText(arg); return bubble.Visible ? bubble.Bounds.ToString() : "hidden";
                 case "extinstall":
                 {
                     var core = Current.View.CoreWebView2;
@@ -1287,7 +1282,7 @@ namespace GBrowser
                 {
                     var pp = Extensions.PopupPage(Extensions.Manifest(arg));
                     if (pp == null) return "no popup";
-                    ShowExtensionPopup(arg, pp);
+                    ShowExtensionPopup(arg, pp, true);
                     await Task.Delay(2500);
                     return lastPopup.Handle.ToString() + " " + lastPopup.Width + "x" + lastPopup.Height;
                 }
@@ -1333,7 +1328,7 @@ namespace GBrowser
                     await Task.Delay(50);
                     return toolbar.Address.Text + " | sel " + toolbar.Address.SelectionStart + "+" + toolbar.Address.SelectionLength;
                 }
-                case "addrmenu": lastMenu = toolbar.Address.ShowMenu(new Point(40, toolbar.Address.Height)); await Task.Delay(300); return lastMenu.Handle.ToString();
+                case "addrmenu": toolbar.Address.ShowMenu(new Point(40, toolbar.Address.Height)); await Task.Delay(300); return MaterialMenu.Current?.Handle.ToString() ?? "none";
                 case "addrselect": { var p = arg.Split(' '); toolbar.Address.Focus(); toolbar.Address.Select(int.Parse(p[0]), int.Parse(p[1])); return "ok"; }
                 case "newprivate": NewPrivateTab(arg.Length == 0 ? null : Search.ToUrl(arg)); return "ok";
                 case "storeinstall":
@@ -1403,6 +1398,7 @@ namespace GBrowser
                 var p = Profile;
                 Store.History.Clear();
                 Store.SaveHistory();
+                Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url));
                 p.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.AllSite | CoreWebView2BrowsingDataKinds.DiskCache |
                     CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory)
                     .ContinueWith(_ => BeginInvoke((Action)Close));

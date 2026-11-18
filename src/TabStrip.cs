@@ -138,21 +138,7 @@ namespace GBrowser
                     else Icons.Draw(g, IconData.Public, ix, iy, S(16), Theme.OnSurfaceVariant);
                     int textLeft = ix + S(24);
                     int textRight = showClose ? CloseRect(r).X - S(4) : r.Right - S(10);
-                    if (t.Blocked > 0 && r.Width >= S(120))
-                    {
-                        // ads / trackers blocked on this tab's page
-                        string n = t.Blocked > 999 ? "999+" : t.Blocked.ToString();
-                        using (var bf = new Font("Segoe UI", 7.5f, FontStyle.Bold))
-                        {
-                            int bw = Math.Max(S(20), TextRenderer.MeasureText(n, bf, Size.Empty, TextFormatFlags.NoPadding).Width + S(10));
-                            var br = new Rectangle(textRight - bw, iy, bw, S(16));
-                            using (var p = Theme.Round(br, br.Height / 2f))
-                            using (var b = new SolidBrush(Theme.PrimaryContainer)) g.FillPath(b, p);
-                            TextRenderer.DrawText(g, n, bf, br, Theme.OnPrimaryContainer,
-                                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                            textRight -= bw + S(4);
-                        }
-                    }
+                    // (the blocked count is shown on the toolbar's shield, not on tabs)
                     if (t.PlayingAudio)
                     {
                         Icons.Draw(g, IconData.Volume, textRight - S(16), iy, S(16), Theme.Primary);

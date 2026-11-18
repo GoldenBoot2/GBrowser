@@ -68,6 +68,13 @@ main { max-width: 900px; margin: 0 auto; padding: 24px 32px 64px; }
 .row img.fav { width: 24px; height: 24px; border-radius: 6px; flex: none; }
 .letter { width: 32px; height: 32px; border-radius: 50%; background: var(--primary-container); color: var(--on-primary-container);
   display: grid; place-items: center; font-weight: 700; flex: none; text-transform: uppercase; }
+/* site icons (Chrome-style: the plain 16 px favicon in lists; the default globe until one is known) */
+.site-icon { width: 32px; height: 32px; flex: none; display: grid; place-items: center; color: var(--on-surface-variant); }
+.site-icon img { width: 16px; height: 16px; image-rendering: auto; }
+.site-icon .icon { width: 18px; height: 18px; }
+.site-icon.big { width: 48px; height: 48px; border-radius: 50%; background: var(--surface-container-high); }
+.site-icon.big img { width: 24px; height: 24px; }
+.site-icon.big .letter { width: 48px; height: 48px; font-size: 20px; }
 .day { font-size: 13px; font-weight: 600; color: var(--on-surface-variant); margin: 24px 4px 8px; }
 .empty { text-align: center; color: var(--outline); padding: 64px 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .empty .icon { width: 48px; height: 48px; color: var(--outline-variant); }
