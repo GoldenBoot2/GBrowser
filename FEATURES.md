@@ -38,7 +38,7 @@ Last full audit: 19-11-2026.
 | Zoom (Ctrl +/-/0, wheel), remembered per site | Done (19-11-2026) |
 | Default page zoom setting | Missing |
 | Find in page (Ctrl+F, F3) | Engine UI |
-| Page right-click menu | Engine UI (to replace with GBrowser menu) |
+| Page right-click menu (page, link, image, media, selection, text field) | Done (19-11-2026: GBrowser Material menu, engine commands behind it) |
 | Print (Ctrl+P) | Engine UI (print preview) |
 | Save page as (Ctrl+S), view source (Ctrl+U) | Missing / to verify |
 | PDF viewer | Engine UI (to verify branding) |
@@ -90,7 +90,7 @@ Last full audit: 19-11-2026.
 | Home button / home page | Done |
 | Appearance: theme, colours, light / dark | Done |
 | Fonts and font size settings | Missing |
-| Languages, spell check | Missing / to verify |
+| Languages, spell check | Missing (no spelling suggestions offered in text fields: to investigate) |
 | Default browser (register with Windows, open links from other apps) | Missing |
 | Profiles (separate people) | Missing |
 | Sync | Not planned (no account service) |

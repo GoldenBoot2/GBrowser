@@ -19,6 +19,8 @@ namespace GBrowser
         readonly StatusBubble bubble = new StatusBubble();
         readonly Panel outer = new Panel { Dock = DockStyle.Fill };   // page area + docked DevTools
         Omnibox omni;
+        PageMenu.Host pageMenuHost;
+        string lastContextInfo;   // test builds: what the last page right-click offered
         DevToolsDock devDock;
         readonly Timer sleepTimer = new Timer { Interval = 30000 };
         readonly Stack<string> closedTabs = new Stack<string>();
@@ -102,6 +104,13 @@ namespace GBrowser
             };
             omni.SwitchTab += tab => { int i = Tabs.IndexOf(tab); if (i >= 0) Select(i); };
             toolbar.Omni = omni;
+            pageMenuHost = new PageMenu.Host
+            {
+                // like Chrome: a link opens in a background tab right after the current one
+                NewTab = url => NewTab(url, false, Current == null ? -1 : Tabs.IndexOf(Current) + 1),
+                NewPrivateTab = url => NewPrivateTab(url),
+                SearchUrl = text => (Search.Engines.TryGetValue(Store.Settings.SearchEngine ?? "google", out var en) ? en[1] : Search.Engines["google"][1]) + Uri.EscapeDataString(text),
+            };
             toolbar.DownloadsClicked += OpenDownloads;
             toolbar.ExtensionsClicked += ShowExtensionsMenu;
             toolbar.StoreChipClicked += InstallFromStorePage;
@@ -396,6 +405,17 @@ namespace GBrowser
             core.SourceChanged += (o, e) => ApplySiteZoom(t);
             devDock.Attach((uint)core.BrowserProcessId);   // DevTools windows of the engine get docked
             core.StatusBarTextChanged += (o, e) => { if (t == Current) bubble.SetText(core.StatusBarText); };
+            // GBrowser's own right-click menu (Material, Chrome's layout) instead of the engine's Edge menu
+            core.ContextMenuRequested += (o, e) => PageMenu.Show(t, core, e, pageMenuHost);
+#if AUTOMATION
+            core.ContextMenuRequested += (o, e) =>
+            {
+                string D(IList<CoreWebView2ContextMenuItem> items) => string.Join(", ", items.Select(i =>
+                    i.Kind == CoreWebView2ContextMenuItemKind.Separator ? "|" : i.Name + "[" + i.Label + "]" + (i.Kind == CoreWebView2ContextMenuItemKind.Submenu ? "{" + D(i.Children) + "}" : "")));
+                var tg = e.ContextMenuTarget;
+                lastContextInfo = "target=" + tg.Kind + (tg.HasLinkUri ? " link" : "") + (tg.HasSourceUri ? " source" : "") + (tg.HasSelection ? " selection" : "") + (tg.IsEditable ? " editable" : "") + " :: " + D(e.MenuItems);
+            };
+#endif
             s.AreDefaultContextMenusEnabled = true;
             s.IsZoomControlEnabled = true;
             s.IsPasswordAutosaveEnabled = true;
@@ -1596,6 +1616,17 @@ namespace GBrowser
                     else if (arg == "undock") devDock.Undock();
                     return "docked=" + devDock.Docked(Current) + " count=" + devDock.DockedCount + " frame=" + devDock.FrameInfo() + " page=" + content.Bounds + " splitter=" + devDock.SplitterOnScreen;
                 case "bubble": bubble.SetText(arg); return bubble.Visible ? bubble.Bounds.ToString() : "hidden";
+                case "rclick":
+                {
+                    // a right-click inside the page through the engine's DevTools protocol (no desktop input)
+                    var xy = arg.Split(' ');
+                    var core = Current.View.CoreWebView2;
+                    string p = "{\"x\":" + xy[0] + ",\"y\":" + xy[1] + ",\"button\":\"right\",\"clickCount\":1";
+                    await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", p + ",\"type\":\"mousePressed\"}");
+                    await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", p + ",\"type\":\"mouseReleased\"}");
+                    await Task.Delay(600);
+                    return lastContextInfo ?? "no menu event";
+                }
                 case "omnitype":
                     toolbar.Address.Focus();
                     await Task.Delay(150);   // focusing selects the address (queued); real typing comes after that
