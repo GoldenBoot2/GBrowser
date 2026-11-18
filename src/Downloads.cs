@@ -28,6 +28,7 @@ namespace GBrowser
             public string LastModified { get; set; }
             public string Parts { get; set; }         // "start,end,pos;..."
             public long ActiveMs { get; set; }        // time spent downloading (pauses not counted)
+            public bool OpenWhenDone { get; set; }    // open the file as soon as it has finished
             [System.Web.Script.Serialization.ScriptIgnore] public DateTime? RunningSince;
             // speed of the engine's own downloads (multi-part ones report theirs): bytes per second, smoothed
             [System.Web.Script.Serialization.ScriptIgnore] public double EngineSpeed;
@@ -85,6 +86,13 @@ namespace GBrowser
 
         public static void Notify(Item it) { try { Changed?.Invoke(); } catch { } }
 
+        /// <summary>A download finished: "Open when done" opens it (through the shell, so SmartScreen checks it).</summary>
+        public static void Finished(Item it)
+        {
+            if (!it.OpenWhenDone || string.IsNullOrEmpty(it.Path) || !File.Exists(it.Path)) return;
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(it.Path) { UseShellExecute = true }); } catch { }
+        }
+
         /// <summary>Downloading time: counts while a download runs, stops while it is paused or done.</summary>
         public static void MarkRunning(Item it) { if (!it.RunningSince.HasValue) it.RunningSince = DateTime.UtcNow; }
         public static void MarkStopped(Item it)
@@ -123,7 +131,7 @@ namespace GBrowser
                 if (op.State == CoreWebView2DownloadState.InProgress) MarkRunning(it); else MarkStopped(it);
                 switch (op.State)
                 {
-                    case CoreWebView2DownloadState.Completed: it.State = "completed"; it.Received = op.BytesReceived; it.Op = null; break;
+                    case CoreWebView2DownloadState.Completed: it.State = "completed"; it.Received = op.BytesReceived; it.Op = null; Finished(it); break;
                     case CoreWebView2DownloadState.Interrupted:
                         it.State = op.CanResume ? "paused" : "interrupted";
                         it.Reason = op.InterruptReason.ToString();

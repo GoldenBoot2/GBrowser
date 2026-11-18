@@ -721,7 +721,9 @@ namespace GBrowser
                 }
                 e.ResultFilePath = path;
                 e.Handled = true;   // GBrowser's download button replaces the engine's download bubble
-                var fast = await FastDownload.TryTakeOver(e.DownloadOperation, path, t.Private ? null : core.Source, core.CookieManager);
+                // the page as referrer, only a real web address (not about:blank / GBrowser pages) and never from private tabs
+                string referer = t.Private || core.Source == null || !(core.Source.StartsWith("https://") || core.Source.StartsWith("http://")) || Pages.IsInternal(core.Source) ? null : core.Source;
+                var fast = await FastDownload.TryTakeOver(e.DownloadOperation, path, referer, core.CookieManager);
                 if (fast != null) e.Cancel = true;   // GBrowser downloads it in parts
                 else Downloads.Track(e.DownloadOperation, path);
                 downloadsSeen = true;
@@ -1194,6 +1196,7 @@ namespace GBrowser
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
                         case "AskWhereToSave": st.AskWhereToSave = v is bool aw && aw; break;
                         case "DownloadConnections": st.DownloadConnections = Math.Max(1, Math.Min(16, Convert.ToInt32(v))); break;
+                        case "DownloadSpeedLimit": st.DownloadSpeedLimit = Math.Max(0, Math.Min(1024 * 1024, Convert.ToInt32(v))); break;
                         case "SecureDns":
                         {
                             string d = (v as string ?? "").Trim();
@@ -1267,9 +1270,10 @@ namespace GBrowser
                         { "id", d.Id }, { "url", d.Url }, { "path", d.Path }, { "name", Path.GetFileName(d.Path ?? "") },
                         { "total", d.Total }, { "received", d.Received }, { "state", d.State }, { "reason", d.Reason ?? "" },
                         { "time", d.Time }, { "exists", !string.IsNullOrEmpty(d.Path) && File.Exists(d.Path) },
-                        { "live", d.Op != null || d.Engine == "multi" }, { "multi", d.Engine == "multi" },
+                        { "live", d.Op != null || (d.Engine == "multi" && (d.State == "in_progress" || d.State == "paused")) }, { "multi", d.Engine == "multi" },
                         { "speed", d.Fast != null ? d.Fast.Speed : d.State == "in_progress" ? d.EngineSpeed : 0 }, { "connections", d.Fast != null ? d.Fast.Connections : 0 },
-                        { "segments", d.Fast != null ? d.Fast.Segments() : null }, { "durationMs", d.DurationMs } }).ToList();
+                        { "segments", d.Fast != null ? d.Fast.Segments() : null }, { "durationMs", d.DurationMs }, { "openWhenDone", d.OpenWhenDone },
+                        { "limited", d.Engine == "multi" && st.DownloadSpeedLimit > 0 } }).ToList();
                 case "downloads.folder":
                     return new Dictionary<string, object> { { "path", DownloadFolder() }, { "custom", !string.IsNullOrEmpty(st.DownloadFolder) } };
                 case "downloads.pick":
@@ -1292,6 +1296,7 @@ namespace GBrowser
                         case "open": if (File.Exists(d.Path)) Process.Start(new ProcessStartInfo(d.Path) { UseShellExecute = true }); break;
                         case "folder": if (File.Exists(d.Path)) Process.Start("explorer.exe", "/select,\"" + d.Path + "\""); break;
                         case "cancel": case "pause": case "resume": case "retry": DownloadAction(d, Str(m, "action")); break;
+                        case "openwhendone": d.OpenWhenDone = !d.OpenWhenDone; Downloads.Save(); break;
                         case "remove": Downloads.All.Remove(d); Downloads.Save(); break;
                     }
                     return null;

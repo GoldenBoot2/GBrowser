@@ -13,3 +13,6 @@
   color: var(--on-surface); font: inherit; text-align: left; cursor: pointer; }
 .menu-item .icon { color: var(--on-surface-variant); }
 .menu-item:hover, .menu-item:focus-visible { background: var(--surface-container-highest); outline: none; }
+.menu-item .grow { flex: 1; }
+.menu-item .icon.on { color: var(--primary); }
+.menu-sep { height: 1px; margin: 8px 0; background: var(--outline-variant); }

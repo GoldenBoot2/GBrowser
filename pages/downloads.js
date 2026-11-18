@@ -38,11 +38,12 @@
     if (done) status = d.exists ? size(d.total || d.received) + (d.durationMs > 0 ? '  ·  Downloaded in ' + dur(d.durationMs) : '') : 'Deleted';
     else if (d.state === 'in_progress') status = size(d.received) + (d.total ? ' of ' + size(d.total) : '') +
       (d.speed > 0 ? '  ·  ' + size(d.speed) + '/s' + (d.total ? '  ·  ' + eta((d.total - d.received) / d.speed) : '') : '') +
-      (d.connections > 1 ? '  ·  ' + d.connections + ' connections' : '');
+      (d.connections > 1 ? '  ·  ' + d.connections + ' connections' : '') + (d.limited ? '  ·  limited' : '') +
+      (d.openWhenDone ? '  ·  opens when done' : '');
     else if (d.state === 'paused') status = 'Paused - ' + size(d.received) + (d.total ? ' of ' + size(d.total) : '');
     else status = /cancel/i.test(d.reason || '') ? 'Cancelled' : 'Failed';
     const actions = el('div', { class: 'actions' });
-    actions.append(iconButton('Link', 'Download link', e => { e.stopPropagation(); linkMenu(e.currentTarget, d.url); }));
+    actions.append(iconButton('Link', 'Download link', e => { e.stopPropagation(); linkMenu(e.currentTarget, d); }));
     if (done && d.exists) actions.append(iconButton('Folder', 'Show in folder', e => { e.stopPropagation(); act(d.id, 'folder'); }));
     if (d.state === 'in_progress' && d.live) actions.append(iconButton('Pause', 'Pause', e => { e.stopPropagation(); act(d.id, 'pause'); }));
     if (d.state === 'paused' && d.live) actions.append(iconButton('Play', 'Resume', e => { e.stopPropagation(); act(d.id, 'resume'); }));
@@ -79,12 +80,17 @@
   }
 
   // small Material menu under the link icon
-  function linkMenu(anchor, url) {
+  function linkMenu(anchor, d) {
+    const url = d.url;
     closeMenu();
-    const item = (iconName, text, fn) => el('button', { class: 'menu-item', role: 'menuitem',
-      onclick: e => { e.stopPropagation(); closeMenu(); fn(); } }, icon(iconName, 's20'), text);
+    const item = (iconName, text, fn, checked) => el('button', { class: 'menu-item', role: checked === undefined ? 'menuitem' : 'menuitemcheckbox',
+      'aria-checked': checked === undefined ? null : String(checked), onclick: e => { e.stopPropagation(); closeMenu(); fn(); } },
+      icon(iconName, 's20'), el('span', { class: 'grow', text }), checked ? icon('Check', 's20 on') : null);
+    const running = d.state === 'in_progress' || d.state === 'paused';
     const m = el('div', { class: 'menu', role: 'menu' },
-      item('OpenNew', 'Open in new tab', () => openUrl(url, { ctrlKey: true })),
+      running ? item('OpenNew', 'Open when done', () => act(d.id, 'openwhendone'), !!d.openWhenDone) : null,
+      running ? el('div', { class: 'menu-sep' }) : null,
+      item('Public', 'Open link in new tab', () => openUrl(url, { ctrlKey: true })),
       item('Copy', 'Copy link', async () => {
         try { await navigator.clipboard.writeText(url); snack('Link copied'); } catch (err) { snack('Copy failed'); }
       }));

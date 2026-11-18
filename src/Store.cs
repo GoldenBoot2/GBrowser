@@ -153,6 +153,7 @@ namespace GBrowser
         public string DownloadFolder { get; set; } = "";          // "" = the Windows Downloads folder
         public bool AskWhereToSave { get; set; } = false;         // Save As window for every download
         public int DownloadConnections { get; set; } = 8;         // multi-part downloads: most connections (1 = off)
+        public int DownloadSpeedLimit { get; set; } = 0;          // KB/s for GBrowser's own downloads, 0 = no limit
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }

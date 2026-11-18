@@ -30,6 +30,35 @@ namespace GBrowser
             public long Left => Math.Max(0, End - Pos + 1);
         }
 
+        /// <summary>Settings > Downloads > Speed limit: one budget shared by all of GBrowser's downloads (token bucket
+        /// holding at most one second of data), so browsing stays smooth during big downloads.</summary>
+        static class Throttle
+        {
+            static readonly object g = new object();
+            static double tokens;
+            static DateTime last = DateTime.UtcNow;
+
+            public static async Task Take(int n, CancellationToken ct)
+            {
+                while (true)
+                {
+                    int limit = Store.Settings.DownloadSpeedLimit;
+                    if (limit <= 0) return;
+                    double rate = limit * 1024.0;
+                    TimeSpan wait;
+                    lock (g)
+                    {
+                        var now = DateTime.UtcNow;
+                        tokens = Math.Min(rate, tokens + (now - last).TotalSeconds * rate);
+                        last = now;
+                        if (tokens >= n || tokens >= rate) { tokens -= n; return; }   // a full bucket lets a big chunk through
+                        wait = TimeSpan.FromSeconds((n - tokens) / rate);
+                    }
+                    await Task.Delay(wait < TimeSpan.FromMilliseconds(5) ? TimeSpan.FromMilliseconds(5) : wait, ct);
+                }
+            }
+        }
+
         public static string Agent => "GBrowser/" + Updater.Current + " (Windows NT 10.0; Win64; x64) downloader";
         const long MinSplit = 1 << 20;   // never split below 1 MB left
 
@@ -265,8 +294,10 @@ namespace GBrowser
                 File.Move(PartFile, dest);
                 Item.Path = dest;
                 Item.Received = Item.Total;
+                Attachment.Mark(dest, Item.Url, Item.Referer);   // "downloaded from the internet" + antivirus scan
                 Item.State = "completed";
                 Item.Parts = null;
+                Downloads.Finished(Item);
             }
             catch (OperationCanceledException) { if (Item.State != "cancelled") Item.State = "paused"; }
             catch (Exception ex) { Item.State = "interrupted"; Item.Reason = ex.Message; }
@@ -361,6 +392,7 @@ namespace GBrowser
                                 int n;
                                 while ((n = await s.ReadAsync(buf, 0, buf.Length, ct)) > 0)
                                 {
+                                    await Throttle.Take(n, ct);
                                     long at, end;
                                     lock (gate) { at = p.Pos; end = p.End; }
                                     int take = (int)Math.Min(n, end - at + 1);

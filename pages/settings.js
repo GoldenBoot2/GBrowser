@@ -174,12 +174,16 @@
   const conn = el('select', { 'aria-label': 'Parts per download' }, [[1, 'Off'], [2, '2'], [4, '4'], [8, '8'], [12, '12'], [16, '16']]
     .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.DownloadConnections || 8) })));
   conn.addEventListener('change', () => set('DownloadConnections', +conn.value));
+  const limit = el('select', { 'aria-label': 'Speed limit' }, [[0, 'No limit'], [256, '256 KB/s'], [512, '512 KB/s'], [1024, '1 MB/s'],
+    [2048, '2 MB/s'], [5120, '5 MB/s'], [10240, '10 MB/s']].map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.DownloadSpeedLimit || 0) })));
+  limit.addEventListener('change', () => set('DownloadSpeedLimit', +limit.value));
   main.append(el('div', { class: 'card', id: 'downloads' }, el('h2', { text: 'Downloads' }),
     el('div', { class: 'row' }, icon('Folder'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Location' }), dlPath),
       el('div', { class: 'actions' }, dlReset,
         el('button', { class: 'btn tonal', onclick: async () => showFolder(await gb.send('downloads.pick')) }, 'Change'))),
     row('Download', 'Ask where to save each file', null, sw('AskWhereToSave')),
-    row('Speed', 'Split downloads into parts', 'More connections where the server allows it', conn)));
+    row('Speed', 'Split downloads into parts', 'More connections where the server allows it', conn),
+    row('Speed', 'Speed limit', 'GBrowser\'s own downloads; files the engine downloads itself are not limited', limit)));
   gb.send('downloads.folder').then(showFolder);
 
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Privacy and security' }),
