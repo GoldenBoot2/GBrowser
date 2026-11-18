@@ -17,9 +17,17 @@ namespace GBrowser
             using (var p = Theme.Round(r, 6)) using (var b = new SolidBrush(Theme.SurfaceContainerHighest)) e.Graphics.FillPath(b, p);
         }
 
+        /// <summary>Checked items: the Material Symbols "check" icon in the primary colour (no Windows check box).</summary>
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            var r = e.ImageRectangle;
+            int size = System.Math.Min(r.Width, r.Height);
+            Icons.Draw(e.Graphics, IconData.Check, r.X + (r.Width - size) / 2f, r.Y + (r.Height - size) / 2f, size, Theme.Primary);
+        }
+
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? Theme.OnSurface : Theme.Outline;
+            if (!(e.Item is ToolStripLabel)) e.TextColor = e.Item.Enabled ? Theme.OnSurface : Theme.Outline;
             base.OnRenderItemText(e);
         }
 

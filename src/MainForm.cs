@@ -214,6 +214,10 @@ namespace GBrowser
             t.Blocking = new Blocking(t, env);
             t.Blocking.Changed += () => uiDirty = true;
             t.Blocking.Attach(core);
+#if AUTOMATION
+            // test builds save downloads inside the test data folder, never in the user's Downloads
+            core.Profile.DefaultDownloadFolderPath = Path.Combine(Store.DataDir, "Downloads");
+#endif
 
             core.SourceChanged += (o, e) => { t.Url = core.Source; if (t == Current) UpdateUi(); };
             core.DocumentTitleChanged += (o, e) =>
@@ -260,6 +264,7 @@ namespace GBrowser
                 finally { deferral.Complete(); }
             };
             core.WebMessageReceived += (o, e) => OnPageMessage(t, e);
+            core.DownloadStarting += (o, e) => Downloads.Track(e.DownloadOperation);   // the default download bubble stays
             if (!t.OpenedByPage && !string.IsNullOrEmpty(t.Url) && core.Source != t.Url && (core.Source == "about:blank" || string.IsNullOrEmpty(core.Source)))
                 t.Navigate(t.Url);
         }
@@ -269,8 +274,9 @@ namespace GBrowser
             int min = Store.Settings.SleepMinutes;
             if (min <= 0) return;
             foreach (var t in Tabs.ToList())
-                if (t != Current && t.Created && !t.Sleeping && (DateTime.UtcNow - t.HiddenSince).TotalMinutes >= min)
-                    await t.TrySleep();
+                if (t != Current && t.Created && (DateTime.UtcNow - t.HiddenSince).TotalMinutes >= min)
+                    t.Discard();
+            await Task.CompletedTask;
             strip.RefreshTabs();
         }
 
@@ -352,7 +358,18 @@ namespace GBrowser
             return it;
         }
 
-        ContextMenuStrip NewMenu() => new ContextMenuStrip { Renderer = new MenuRenderer(), Font = new Font("Segoe UI", 9.5f), ShowImageMargin = true };
+        ContextMenuStrip lastMenu;
+        ExtensionPopup lastPopup;
+
+        ContextMenuStrip NewMenu()
+        {
+            var m = new ContextMenuStrip { Renderer = new MenuRenderer(), Font = new Font("Segoe UI", 9.5f), ShowImageMargin = true };
+#if AUTOMATION
+            m.AutoClose = false;   // test builds: menus stay open until the test closes them
+#endif
+            lastMenu = m;
+            return m;
+        }
 
         void ShowMenu()
         {
@@ -393,11 +410,7 @@ namespace GBrowser
             Current.View.ZoomFactor = Math.Max(0.25, Math.Min(5, Current.View.ZoomFactor * f));
         }
 
-        void OpenDownloads()
-        {
-            if (Current?.Created != true) return;
-            try { Current.View.CoreWebView2.OpenDefaultDownloadDialog(); } catch { }
-        }
+        void OpenDownloads() => OpenPage("downloads");
 
         void ToggleBookmarksBar()
         {
@@ -471,8 +484,8 @@ namespace GBrowser
             string head = !st.AdblockEnabled ? "Ad blocking off"
                 : site != null && !Blocking.OnFor(Blocking.HostOf(url)) ? "Off on this site"
                 : (t?.Blocked ?? 0) + " blocked on this page";
-            m.Items.Add(new ToolStripMenuItem(head, Icons.Bitmap(IconData.Shield, (int)(18 * DeviceDpi / 96f), Theme.Primary))
-                { Enabled = false, Font = new Font(m.Font, FontStyle.Bold) });
+            m.Items.Add(new ToolStripLabel(head, Icons.Bitmap(IconData.Shield, (int)(18 * DeviceDpi / 96f), Theme.Primary))
+                { Font = new Font(m.Font, FontStyle.Bold), ForeColor = Theme.OnSurface, Padding = new Padding(0, 4, 0, 4) });
             m.Items.Add(new ToolStripSeparator());
             void Toggle(string text, bool on, Action<bool> set, bool enabled = true)
             {
@@ -493,7 +506,7 @@ namespace GBrowser
             Toggle("Stealth mode", st.Stealth, v => st.Stealth = v, st.AdblockEnabled);
             Toggle("Block pages of ad sites", st.BlockAdSitePages, v => st.BlockAdSitePages = v, st.AdblockEnabled);
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(new ToolStripMenuItem("Total blocked: " + st.TotalBlocked.ToString("N0")) { Enabled = false });
+            m.Items.Add(new ToolStripLabel("Total blocked: " + st.TotalBlocked.ToString("N0")) { ForeColor = Theme.OnSurfaceVariant, Padding = new Padding(0, 3, 0, 3) });
             m.Items.Add(Item("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings")));
             var r = toolbar.ButtonRect("shield");
             m.Show(toolbar, new Point(r.Right - m.PreferredSize.Width, r.Bottom + 2));
@@ -510,7 +523,8 @@ namespace GBrowser
         {
             var r = toolbar.ButtonRect("ext");
             var p = toolbar.PointToScreen(new Point(r.Right, r.Bottom + 2));
-            new ExtensionPopup(env, "chrome-extension://" + id + "/" + page, p, url => NewTab(url)).Show(this);
+            lastPopup = new ExtensionPopup(env, "chrome-extension://" + id + "/" + page, p, url => NewTab(url));
+            lastPopup.Show(this);
         }
 
         async void InstallFromStorePage()
@@ -717,6 +731,29 @@ namespace GBrowser
                 case "openDataDir":
                     Process.Start("explorer.exe", "\"" + Store.DataDir + "\""); return null;
                 case "memory": return MemoryReport();
+                case "downloads.list":
+                    return Downloads.All.Select(d => new Dictionary<string, object> {
+                        { "id", d.Id }, { "url", d.Url }, { "path", d.Path }, { "name", Path.GetFileName(d.Path ?? "") },
+                        { "total", d.Total }, { "received", d.Received }, { "state", d.State }, { "reason", d.Reason ?? "" },
+                        { "time", d.Time }, { "exists", !string.IsNullOrEmpty(d.Path) && File.Exists(d.Path) }, { "live", d.Op != null } }).ToList();
+                case "downloads.do":
+                {
+                    var d = Downloads.Find(Convert.ToInt32(m["id"]));
+                    if (d == null) return null;
+                    switch (Str(m, "action"))
+                    {
+                        case "open": if (File.Exists(d.Path)) Process.Start(new ProcessStartInfo(d.Path) { UseShellExecute = true }); break;
+                        case "folder": if (File.Exists(d.Path)) Process.Start("explorer.exe", "/select,\"" + d.Path + "\""); break;
+                        case "cancel": d.Op?.Cancel(); break;
+                        case "pause": d.Op?.Pause(); d.State = "paused"; break;
+                        case "resume": if (d.Op != null && d.Op.CanResume) { d.Op.Resume(); d.State = "in_progress"; } break;
+                        case "retry": NewTab(d.Url, false); break;
+                        case "remove": Downloads.All.Remove(d); Downloads.Save(); break;
+                    }
+                    return null;
+                }
+                case "downloads.clear":
+                    Downloads.All.RemoveAll(d => d.Op == null); Downloads.Save(); return null;
                 case "adblock.info":
                 {
                     var eng = FilterEngine.Instance;
@@ -796,7 +833,7 @@ namespace GBrowser
             Add("GBrowser window", Process.GetCurrentProcess().Id);
             if (env != null)
                 foreach (var pi in env.GetProcessInfos()) Add(pi.Kind.ToString(), pi.ProcessId);
-            int live = Tabs.Count(t => t.Created && !t.Sleeping), sleeping = Tabs.Count(t => t.Sleeping), unloaded = Tabs.Count(t => !t.Created);
+            int live = Tabs.Count(t => t.Created), sleeping = Tabs.Count(t => t.Sleeping), unloaded = Tabs.Count(t => !t.Created && !t.Sleeping);
             return new Dictionary<string, object>
             {
                 { "rows", rows }, { "totalMb", Math.Round(total / 1048576.0, 1) },
@@ -835,6 +872,52 @@ namespace GBrowser
                             { "title", t.Title }, { "url", t.Created ? t.View.CoreWebView2.Source : t.Url }, { "created", t.Created },
                             { "loading", t.Loading }, { "sleeping", t.Sleeping }, { "blocked", t.Blocked } }).ToList() },
                     });
+                case "menu":
+                    if (arg == "shield") ShowShieldMenu(); else if (arg == "ext") ShowExtensionsMenu(); else ShowMenu();
+                    await Task.Delay(400);
+                    return lastMenu == null ? "none" : lastMenu.Handle.ToString();
+                case "menuitems":
+                    return lastMenu == null ? "none" : string.Join(" | ", lastMenu.Items.Cast<ToolStripItem>().Select(i =>
+                        i is ToolStripSeparator ? "---" : i.Text + (i is ToolStripMenuItem mi && mi.Checked ? " [x]" : "") + (i.Enabled ? "" : " (off)")));
+                case "menuclick":
+                {
+                    var it = lastMenu?.Items.Cast<ToolStripItem>().FirstOrDefault(i => i.Text == arg);
+                    if (it == null) return "no item";
+                    lastMenu.Close();
+                    it.PerformClick();
+                    return "ok";
+                }
+                case "menuclose": lastMenu?.Close(); return "ok";
+                case "extinstall":
+                {
+                    var core = Current.View.CoreWebView2;
+                    var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString);
+                    return ext.Id + " " + ext.Name;
+                }
+                case "extpopup":
+                {
+                    var pp = Extensions.PopupPage(Extensions.Manifest(arg));
+                    if (pp == null) return "no popup";
+                    ShowExtensionPopup(arg, pp);
+                    await Task.Delay(2500);
+                    return lastPopup.Handle.ToString() + " " + lastPopup.Width + "x" + lastPopup.Height;
+                }
+                case "popupclose": lastPopup?.Close(); return "ok";
+                case "set":
+                {
+                    int sp2 = arg.IndexOf(' ');
+                    var v = Store.FromJson<object>(arg.Substring(sp2 + 1));
+                    await HandleCommand(Current, "settings.set", new Dictionary<string, object> { { "key", arg.Substring(0, sp2) }, { "value", v } });
+                    UpdateUi();
+                    return "ok";
+                }
+                case "cdp":
+                {
+                    int sp2 = arg.IndexOf(' ');
+                    return await Current.View.CoreWebView2.CallDevToolsProtocolMethodAsync(arg.Substring(0, sp2), arg.Substring(sp2 + 1));
+                }
+                case "testlog": return string.Join(" | ", Blocking.TestLog);
+                case "fullscreen": return fullscreen + " " + WindowState + " strip=" + strip.Visible;
                 case "eval":
                     if (Current?.Created != true) return "no tab";
                     return await Current.View.CoreWebView2.ExecuteScriptAsync(arg);

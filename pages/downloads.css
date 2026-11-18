@@ -1,0 +1,5 @@
+.progress { height: 4px; border-radius: 2px; background: var(--surface-container-highest); margin-top: 6px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--primary); border-radius: 2px; transition: width .3s; }
+.row .file-icon { width: 32px; height: 32px; color: var(--primary); }
+.row.gone .title { text-decoration: line-through; color: var(--outline); }
+.state-err { color: var(--error); }

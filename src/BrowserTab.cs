@@ -43,6 +43,7 @@ namespace GBrowser
                 case "extensions": return "Extensions";
                 case "settings": return "Settings";
                 case "about": return "About GBrowser";
+                case "downloads": return "Downloads";
                 default: return "New tab";
             }
         }
@@ -109,17 +110,24 @@ namespace GBrowser
             if (!Created) return;
             try { View.CoreWebView2.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Normal; } catch { }
             View.Visible = true;
-            if (Sleeping)
-            {
-                try { View.CoreWebView2.Resume(); } catch { }
-                Sleeping = false;
-            }
+            Sleeping = false;
         }
 
-        public async Task TrySleep()
+        /// <summary>Unloads a background tab (like Chrome's Memory Saver): its WebView2 and page processes are freed;
+        /// the tab keeps its address, title and icon and loads again when it is opened. Measured 2026-11-18:
+        /// WebView2's TrySuspendAsync only freezes a page (5 news tabs: 1,092 -> 1,076 MB), so it is not used.</summary>
+        public void Discard()
         {
-            if (!Created || Sleeping || View.Visible || PlayingAudio) return;
-            try { Sleeping = await View.CoreWebView2.TrySuspendAsync(); } catch { }
+            if (!Created || View.Visible || PlayingAudio) return;
+            try { Url = View.CoreWebView2.Source; } catch { }
+            try { View.Parent?.Controls.Remove(View); View.Dispose(); } catch { }
+            View = null;
+            creating = null;
+            Blocking = null;
+            Blocked = 0;
+            Loading = false;
+            OpenedByPage = false;
+            Sleeping = true;
         }
 
         public void Dispose()

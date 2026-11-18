@@ -22,6 +22,7 @@ ICONS = [
     ('ZoomOut', 'zoom_out', ''), ('Find', 'find_in_page', ''), ('Upload', 'upload_file', ''),
     ('Restore', 'restore_page', ''), ('Cookie', 'cookie', ''), ('Block', 'block', ''),
     ('Volume', 'volume_up', ''), ('Stop', 'close', ''),
+    ('Check', 'check', ''), ('Pause', 'pause', ''), ('Play', 'play_arrow', ''), ('File', 'draft', ''),
 ]
 
 def fetch(url):

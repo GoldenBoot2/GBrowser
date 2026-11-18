@@ -19,6 +19,9 @@ namespace GBrowser
         public event Action Changed;
 
         public Blocking(BrowserTab tab, CoreWebView2Environment env) { this.tab = tab; this.env = env; }
+#if AUTOMATION
+        public static readonly List<string> TestLog = new List<string>();
+#endif
 
         static Settings S => Store.Settings;
 
@@ -67,6 +70,7 @@ namespace GBrowser
             core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += OnRequest;
             core.NavigationStarting += OnNavigationStarting;
+            core.ContentLoading += OnContentLoading;
             var bridge = new PageBridge(this);
             core.AddHostObjectToScript("gb", bridge);
             core.FrameCreated += (s, e) =>
@@ -108,8 +112,16 @@ namespace GBrowser
                 }
             }
             pendingMainUrl = uri;
-            PageUrl = uri;
-            PageHost = host;
+            // the page (and its count) changes only when the new document starts loading (OnContentLoading):
+            // a navigation can also end as a download, which keeps the current page
+            if (PageHost == null) { PageUrl = uri; PageHost = host; }
+        }
+
+        void OnContentLoading(object sender, CoreWebView2ContentLoadingEventArgs e)
+        {
+            var core = (CoreWebView2)sender;
+            PageUrl = core.Source;
+            PageHost = HostOf(core.Source);
             tab.Blocked = 0;
             Changed?.Invoke();
         }
@@ -134,20 +146,76 @@ namespace GBrowser
             }
         }
 
+        /// <summary>fetch / XHR / "other" requests say little about what they load: like the Android app
+        /// (Blocker.requestType), look at the Accept header and the file extension; otherwise T_UNKNOWN
+        /// (script | xhr | other | ping), so rules for any of those kinds still apply.</summary>
+        static int GuessType(CoreWebView2WebResourceRequest r, int context)
+        {
+            string accept = null;
+            try { if (r.Headers.Contains("Accept")) accept = r.Headers.GetHeader("Accept"); } catch { }
+            if (accept != null)
+            {
+                if (accept.StartsWith("text/css")) return FilterEngine.T_CSS;
+                if (accept.StartsWith("image/")) return FilterEngine.T_IMAGE;
+                if (accept.Contains("video/") || accept.Contains("audio/")) return FilterEngine.T_MEDIA;
+            }
+            string path;
+            try { path = new Uri(r.Uri).AbsolutePath; } catch { path = ""; }
+            int dot = path.LastIndexOf('.');
+            if (dot > path.LastIndexOf('/'))
+                switch (path.Substring(dot + 1).ToLowerInvariant())
+                {
+                    case "js": case "mjs": return FilterEngine.T_SCRIPT;
+                    case "css": return FilterEngine.T_CSS;
+                    case "png": case "jpg": case "jpeg": case "gif": case "webp": case "svg": case "ico": case "avif": case "bmp": return FilterEngine.T_IMAGE;
+                    case "woff": case "woff2": case "ttf": case "otf": case "eot": return FilterEngine.T_FONT;
+                    case "mp4": case "webm": case "m3u8": case "mpd": case "ts": case "m4s": case "mp3": case "aac": case "m4a": case "ogg": return FilterEngine.T_MEDIA;
+                    case "swf": return FilterEngine.T_OBJECT;
+                }
+            try { if (r.Headers.Contains("Range")) return FilterEngine.T_MEDIA; } catch { }
+            return FilterEngine.T_UNKNOWN;
+        }
+
         void OnRequest(object sender, CoreWebView2WebResourceRequestedEventArgs e)
         {
             string url = e.Request.Uri;
             if (S.DoNotTrack) try { e.Request.Headers.SetHeader("DNT", "1"); } catch { }
             string host = HostOf(url);
+#if AUTOMATION
+            // test builds: https://gb-block-test.invalid/<variant>/... answers with one kind of "blocked" response
+            if (host == "gb-block-test.invalid")
+            {
+                string v = new Uri(url).AbsolutePath.Split('/')[1];
+                try
+                {
+                    switch (v)
+                    {
+                        case "fail": e.Response = Fail(); break;
+                        case "s403": e.Response = env.CreateWebResourceResponse(null, 403, "Forbidden", ""); break;
+                        case "s0": e.Response = env.CreateWebResourceResponse(null, 0, "", ""); break;
+                        case "s999": e.Response = env.CreateWebResourceResponse(null, 999, "Blocked", ""); break;
+                        case "nullok": e.Response = env.CreateWebResourceResponse(null, 200, "OK", ""); break;
+                        case "r0000": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: https://0.0.0.0/"); break;
+                        case "rscheme": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: gbblocked:x"); break;
+                        case "rabout": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: about:blank"); break;
+                        case "rinvalid": e.Response = env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: https://blocked.invalid/"); break;
+                    }
+                }
+                catch (Exception ex) { TestLog.Add(v + ": " + ex.GetType().Name + " " + ex.Message); }
+                return;
+            }
+#endif
             if (host == null || !S.AdblockEnabled) return;
             bool main = e.ResourceContext == CoreWebView2WebResourceContext.Document && url == pendingMainUrl;
-            string page = PageHost;
+            string page = main ? host : PageHost;   // a new page is judged by its own site's switch
             if (page != null && !OnFor(page)) return;
             var eng = FilterEngine.Instance;
             if (eng == null) return;   // still loading (about 1 s after start)
             if (main && (!S.BlockAdSitePages || host == sessionAllowedHost)) return;
             int type = main ? FilterEngine.T_DOCUMENT : TypeOf(e.ResourceContext);
-            string decision = eng.Match(url, host, main ? null : page, type, Groups());
+            if (!main && (type == FilterEngine.T_XHR || type == FilterEngine.T_OTHER))
+                type = GuessType(e.Request, type);
+            string decision = eng.Match(url, host, main ? null : PageHost, type, Groups());
             if (decision == null) return;
             if (main) { e.Response = BlockPage(url, host); return; }
             Count();
@@ -174,20 +242,11 @@ namespace GBrowser
 
         // ---------------------------------------------------------------- responses
 
-        /// <summary>A body that fails while being read: the page sees a network error (like a blocked request in Chrome).</summary>
-        sealed class FailStream : Stream
-        {
-            public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false;
-            public override long Length => throw new IOException("blocked");
-            public override long Position { get => 0; set { } }
-            public override void Flush() { }
-            public override int Read(byte[] buffer, int offset, int count) => throw new IOException("blocked");
-            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-            public override void SetLength(long value) => throw new NotSupportedException();
-            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        }
-
-        CoreWebView2WebResourceResponse Fail() => env.CreateWebResourceResponse(new FailStream(), 200, "OK", "Content-Type: text/plain");
+        /// <summary>Blocked request = network error, as with Chrome's own blocking. Measured 2026-11-18 (WebView2 157):
+        /// any response WebView2 gets counts as the server's answer (no-cors fetch resolves, and with a failing body a
+        /// script element even fires "load"); a 307 redirect to about:blank is refused by Chromium as an unsafe
+        /// redirect, so fetch (cors and no-cors) rejects and img/script fire "error". No network request, no DNS.</summary>
+        CoreWebView2WebResourceResponse Fail() => env.CreateWebResourceResponse(null, 307, "Temporary Redirect", "Location: about:blank");
 
         CoreWebView2WebResourceResponse Stub(FilterEngine.Resource r)
         {

@@ -24,7 +24,8 @@ namespace GBrowser
             Text = "";
             BackColor = Color.White;
             float sc = DeviceDpi / 96f;
-            Size = new Size((int)(380 * sc), (int)(240 * sc));
+            Size = new Size((int)(800 * sc), (int)(600 * sc));
+            Opacity = 0;   // shown once sized to its content
             Location = new Point(anchorRightTop.X - Width, anchorRightTop.Y);
             Controls.Add(view);
             Load += async (s, e) =>
@@ -39,24 +40,33 @@ namespace GBrowser
                     {
                         // size the window to the popup document, within Chrome's popup limits (25..800 x 25..600)
                         await System.Threading.Tasks.Task.Delay(120);
-                        var r = await core.ExecuteScriptAsync("[Math.ceil(document.documentElement.scrollWidth), Math.ceil(document.documentElement.scrollHeight)]");
-                        var parts = r.Trim('[', ']').Split(',');
-                        int w = int.Parse(parts[0]), h = int.Parse(parts[1]);
-                        w = Math.Max(25, Math.Min(800, w)); h = Math.Max(25, Math.Min(600, h));
-                        var client = new Size((int)(w * view.ZoomFactor * DeviceDpi / 96f), (int)(h * view.ZoomFactor * DeviceDpi / 96f));
+                        float k = (float)view.ZoomFactor * DeviceDpi / 96f;
                         int right = Right;
-                        ClientSize = client;
+                        // 1) the width the content wants (max-content), 2) the height at that width
+                        var rw = await core.ExecuteScriptAsync("(()=>{const d=document.documentElement,o=d.style.width;d.style.width='max-content';" +
+                            "const w=Math.ceil(Math.max(d.getBoundingClientRect().width,document.body?document.body.scrollWidth:0));d.style.width=o;return w})()");
+                        int w = Math.Max(25, Math.Min(800, (int)double.Parse(rw, System.Globalization.CultureInfo.InvariantCulture)));
+                        ClientSize = new Size((int)(w * k), ClientSize.Height);
+                        await System.Threading.Tasks.Task.Delay(80);
+                        var rh = await core.ExecuteScriptAsync("Math.ceil(document.documentElement.scrollHeight)");
+                        int h = Math.Max(25, Math.Min(600, (int)double.Parse(rh, System.Globalization.CultureInfo.InvariantCulture)));
+                        ClientSize = new Size((int)(w * k), (int)(h * k));
                         Left = right - Width;
                         var wa = Screen.FromControl(this).WorkingArea;
                         if (Bottom > wa.Bottom) Top = Math.Max(wa.Top, wa.Bottom - Height);
                         if (Left < wa.Left) Left = wa.Left;
                     }
                     catch { }
+                    Opacity = 1;
                     ready = true;
                 };
                 core.Navigate(url);
             };
         }
+
+#if AUTOMATION
+        protected override bool ShowWithoutActivation => true;   // test builds never take the user's focus
+#endif
 
         protected override void OnDeactivate(EventArgs e)
         {
