@@ -382,9 +382,45 @@ namespace GBrowser
                 if (t == Current) UpdateUi();
             };
             core.NavigationStarting += (o, e) => { t.Loading = true; strip.RefreshTabs(); if (t == Current) UpdateUi(); };
+            string navTarget = null, lastErrUrl = null;
+            bool errorShown = false;
+            var lastErrStatus = CoreWebView2WebErrorStatus.Unknown;
+            var lastErrAt = DateTime.MinValue;
+            core.NavigationStarting += (o, e) => { navTarget = e.Uri; errorShown = false; };
+            // certificate problems: never proceed; cancel so the load fails like any other and GBrowser's page shows
+            // (the engine's own certificate screen cannot be replaced: scripts do not run in it)
+            core.ServerCertificateErrorDetected += (o, e) =>
+            {
+                e.Action = CoreWebView2ServerCertificateErrorAction.Cancel;
+                errorShown = true;   // the cancelled load reports "aborted": not the real reason
+                string code;
+                switch (e.ErrorStatus)
+                {
+                    case CoreWebView2WebErrorStatus.CertificateExpired: code = "ERR_CERT_DATE_INVALID"; break;
+                    case CoreWebView2WebErrorStatus.CertificateCommonNameIsIncorrect: code = "ERR_CERT_COMMON_NAME_INVALID"; break;
+                    case CoreWebView2WebErrorStatus.CertificateRevoked: code = "ERR_CERT_REVOKED"; break;
+                    case CoreWebView2WebErrorStatus.CertificateIsInvalid: code = "ERR_CERT_AUTHORITY_INVALID"; break;
+                    default: code = "ERR_CERT_INVALID"; break;
+                }
+                string target = e.RequestUri;
+                BeginInvoke((Action)(() => core.Navigate(Pages.Url("certerror") + "?u=" + Uri.EscapeDataString(target) + "&c=" + code)));
+            };
             core.NavigationCompleted += (o, e) =>
             {
                 t.Loading = false;
+                // after a failed load the engine starts a second load of its error page, which reports "aborted":
+                // the first, real reason for that address is kept (measured 18-11-2026: HostNameNotResolved, then ConnectionAborted)
+                if (!e.IsSuccess && e.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled && !errorShown)
+                {
+                    errorShown = true;
+                    string u = navTarget ?? core.Source;
+                    var status = e.WebErrorStatus;
+                    if (u == lastErrUrl && (DateTime.UtcNow - lastErrAt).TotalSeconds < 10 && status == CoreWebView2WebErrorStatus.ConnectionAborted)
+                        status = lastErrStatus;
+                    else { lastErrUrl = u; lastErrStatus = status; }
+                    lastErrAt = DateTime.UtcNow;
+                    _ = ErrorPage.Show(core, status, u);
+                }
                 if (e.IsSuccess && !t.Private) Store.AddHistory(core.Source, core.DocumentTitle);
                 strip.RefreshTabs();
                 if (t == Current) UpdateUi();
@@ -451,9 +487,15 @@ namespace GBrowser
             string pageHost = Blocking.HostOf(url);
             toolbar.ShieldOn = pageHost == null ? Store.Settings.AdblockEnabled : Blocking.OnFor(pageHost);
             string full = Pages.ToDisplay(url);
-            if (Pages.PageName(url) == "insecure")
+            if (Pages.PageName(url) == "insecure" || Pages.PageName(url) == "certerror")
             {
-                try { full = Uri.UnescapeDataString(url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3)); } catch { }
+                try
+                {
+                    string q = url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3);
+                    int amp = q.IndexOf('&');
+                    full = Uri.UnescapeDataString(amp >= 0 ? q.Substring(0, amp) : q);
+                }
+                catch { }
                 toolbar.Secure = false;
                 toolbar.PageKind = "insecure";
             }

@@ -48,6 +48,7 @@ namespace GBrowser
                 case "about": return "About GBrowser";
                 case "downloads": return "Downloads";
                 case "insecure": return "Not secure";
+                case "certerror": return "Privacy error";
                 default: return "New tab";
             }
         }
