@@ -269,7 +269,9 @@ namespace GBrowser
                 + "min-height:100vh;background:#fff8f2;color:#1f1b13}main{text-align:center;padding:24px;max-width:460px}"
                 + "svg{width:72px;height:72px;fill:#ba1a1a}h1{font-size:24px;font-weight:500;margin:16px 0 4px}"
                 + "p{color:#4d4639;margin:0 0 28px;word-break:break-all}a{display:inline-block;padding:10px 24px;border-radius:20px;"
-                + "border:1px solid #7f7667;color:#785a00;text-decoration:none;font-weight:600}a:hover{background:#f4ede1}</style></head><body><main>"
+                + "border:1px solid #7f7667;color:#785a00;text-decoration:none;font-weight:600}a:hover{background:#f4ede1}"
+                + "@media(prefers-color-scheme:dark){body{background:#17130b;color:#ece1d4}p{color:#d3c5b0}svg{fill:#ffb4ab}"
+                + "a{color:#f0bf48;border-color:#9c8f7c}a:hover{background:#241f17}}</style></head><body><main>"
                 + "<svg viewBox='0 -960 960 960'><path d='" + IconData.Block + "'/></svg>"
                 + "<h1>Blocked</h1><p>" + System.Net.WebUtility.HtmlEncode(host) + "</p>"
                 + "<a href=\"" + System.Net.WebUtility.HtmlEncode(allow) + "\">Open anyway</a></main></body></html>";

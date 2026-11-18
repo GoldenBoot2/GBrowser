@@ -39,7 +39,7 @@ namespace GBrowser
             Address.BackColor = Theme.SurfaceContainerHigh;
             Address.ForeColor = Theme.OnSurface;
             Address.KeyDown += Address_KeyDown;
-            Address.GotFocus += (s, e) => { Address.BackColor = Color.White; Invalidate(); BeginInvoke((Action)(() => Address.SelectAll())); };
+            Address.GotFocus += (s, e) => { Address.BackColor = Theme.Field; Invalidate(); BeginInvoke((Action)(() => Address.SelectAll())); };
             Address.LostFocus += (s, e) => { Address.BackColor = Theme.SurfaceContainerHigh; Address.Text = ShownUrl; Invalidate(); };
             Address.TextChanged += (s, e) => Invalidate();
             Address.MouseUp += (s, e) => { if (Address.SelectionLength == 0 && firstClick) Address.SelectAll(); firstClick = false; };
@@ -106,6 +106,14 @@ namespace GBrowser
 
         public void LayoutNow() { PerformLayout(); Invalidate(); }
 
+        public void ApplyTheme()
+        {
+            BackColor = Theme.Surface;
+            Address.BackColor = Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh;
+            Address.ForeColor = Theme.OnSurface;
+            Invalidate(true);
+        }
+
         bool ClearVisible => Address.Focused && Address.TextLength > 0;
 
         protected override void OnPaint(PaintEventArgs e)
@@ -116,7 +124,7 @@ namespace GBrowser
             // address pill
             using (var p = Theme.Round(pill, pill.Height / 2f))
             {
-                using (var b = new SolidBrush(Address.Focused ? Color.White : Theme.SurfaceContainerHigh)) g.FillPath(b, p);
+                using (var b = new SolidBrush(Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh)) g.FillPath(b, p);
                 if (Address.Focused) using (var pen = new Pen(Theme.Primary, S(2))) g.DrawPath(pen, p);
             }
             string leftIcon = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? IconData.Search : Secure ? IconData.Lock : IconData.Info;

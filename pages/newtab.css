@@ -4,7 +4,7 @@
 .brand .logo .icon { width: 34px; height: 34px; }
 .big-search { width: 100%; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 8px 0 18px; border-radius: 26px;
   background: var(--surface-container-high); color: var(--on-surface-variant); }
-.big-search:focus-within { background: #fff; box-shadow: 0 1px 6px rgba(31,27,19,.25), inset 0 0 0 2px var(--primary); }
+.big-search:focus-within { background: var(--field); box-shadow: 0 1px 6px rgba(31,27,19,.25), inset 0 0 0 2px var(--primary); }
 .big-search input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; font-size: 16px; color: var(--on-surface); caret-color: var(--primary); }
 .big-search .clear { visibility: hidden; }
 .big-search.has-text .clear { visibility: visible; }

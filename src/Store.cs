@@ -104,6 +104,7 @@ namespace GBrowser
     {
         public string HomePage { get; set; } = "gbrowser://newtab";
         public string SearchEngine { get; set; } = "google";
+        public string ThemeMode { get; set; } = "system";   // system | light | dark
         public bool RestoreTabs { get; set; } = true;
         public int SleepMinutes { get; set; } = 5;          // 0 = never put hidden tabs to sleep
         public bool LowMemoryHiddenTabs { get; set; } = true;

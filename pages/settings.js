@@ -15,6 +15,12 @@
       el('div', { class: 'title', text: title }), sub ? el('div', { class: 'sub', text: sub }) : null), control);
   }
 
+  // Appearance
+  const themeSel = el('select', { 'aria-label': 'Theme' }, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]
+    .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.ThemeMode || 'system') })));
+  themeSel.addEventListener('change', () => set('ThemeMode', themeSel.value));
+  main.append(el('div', { class: 'card' }, el('h2', { text: 'Appearance' }), row('Tune', 'Theme', null, themeSel)));
+
   // Start and search
   const engine = el('select', { 'aria-label': 'Search engine' }, engines.map(e => el('option', { value: e.id, text: e.name, selected: e.id === s.SearchEngine })));
   engine.addEventListener('change', () => set('SearchEngine', engine.value));

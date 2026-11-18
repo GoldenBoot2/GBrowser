@@ -32,6 +32,7 @@ namespace GBrowser
         public MainForm()
         {
             FilterEngine.Preload();
+            Theme.Update();
             Text = "GBrowser";
             BackColor = Theme.Surface;
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -99,9 +100,57 @@ namespace GBrowser
             };
             sleepTimer.Start();
             Load += async (s, e) => await Start();
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
 #if AUTOMATION
             Automation.Start(this);
 #endif
+        }
+
+        // ---------- theme ----------
+
+        void OnSystemPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+        {
+            // Windows light/dark switch arrives as a "General" preference change
+            if (e.Category == Microsoft.Win32.UserPreferenceCategory.General && IsHandleCreated)
+                BeginInvoke((Action)(() => ApplyTheme(false)));
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            ApplyTheme(true);   // controls were built before the theme was read
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+        /// <summary>Applies the current theme to the window, title bar, toolbars and all web content.</summary>
+        void ApplyTheme(bool force)
+        {
+            if (!Theme.Update() && !force) return;
+            BackColor = content.BackColor = bookmarksBar.BackColor = Theme.Surface;
+            strip.BackColor = Theme.SurfaceContainerHigh;
+            toolbar.ApplyTheme();
+            Theme.TitleBar(Handle);
+            SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0027);   // SWP_FRAMECHANGED|NOZORDER|NOMOVE|NOSIZE: redraw the title bar
+            foreach (var t in Tabs.Where(x => x.Created))
+            {
+                t.View.DefaultBackgroundColor = Theme.Surface;
+                ApplyColorScheme(t.View.CoreWebView2);
+            }
+            Invalidate(true);
+        }
+
+        /// <summary>prefers-color-scheme for web pages and GBrowser's own pages: Auto follows Windows.</summary>
+        static void ApplyColorScheme(CoreWebView2 core)
+        {
+            string mode = Store.Settings.ThemeMode ?? "system";
+            try
+            {
+                core.Profile.PreferredColorScheme = mode == "dark" ? CoreWebView2PreferredColorScheme.Dark
+                    : mode == "light" ? CoreWebView2PreferredColorScheme.Light : CoreWebView2PreferredColorScheme.Auto;
+            }
+            catch { }
         }
 
         void ApplyHeights()
@@ -211,6 +260,7 @@ namespace GBrowser
             s.IsGeneralAutofillEnabled = true;
             s.AreBrowserAcceleratorKeysEnabled = true;
             core.SetVirtualHostNameToFolderMapping(Pages.Host, Pages.Folder, CoreWebView2HostResourceAccessKind.Deny);
+            ApplyColorScheme(core);
             t.Blocking = new Blocking(t, env);
             t.Blocking.Changed += () => uiDirty = true;
             t.Blocking.Attach(core);
@@ -703,6 +753,11 @@ namespace GBrowser
                     {
                         case "HomePage": st.HomePage = string.IsNullOrWhiteSpace(v as string) ? "gbrowser://newtab" : ((string)v).Trim(); break;
                         case "SearchEngine": if (v is string se && Search.Engines.ContainsKey(se)) st.SearchEngine = se; break;
+                        case "ThemeMode":
+                            if (v is string tm && (tm == "system" || tm == "light" || tm == "dark")) st.ThemeMode = tm;
+                            Store.SaveSettings();
+                            ApplyTheme(true);
+                            break;
                         case "RestoreTabs": st.RestoreTabs = v is bool rb && rb; break;
                         case "SleepMinutes": st.SleepMinutes = Math.Max(0, Math.Min(240, Convert.ToInt32(v))); break;
                         case "LowMemoryHiddenTabs": st.LowMemoryHiddenTabs = v is bool lb && lb; break;
@@ -962,6 +1017,7 @@ namespace GBrowser
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
             var st = Store.Settings;
             st.Session = Tabs.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
             st.SessionIndex = Math.Max(0, strip.Selected);
