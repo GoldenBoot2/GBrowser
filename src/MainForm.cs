@@ -2137,6 +2137,17 @@ namespace GBrowser
                     return lastPopup.Handle.ToString() + " " + lastPopup.Width + "x" + lastPopup.Height;
                 }
                 case "popupclose": lastPopup?.Close(); return "ok";
+                case "popupclick":   // real mouse click at CSS x y inside the extension popup
+                {
+                    if (lastPopup?.Core == null) return "no popup";
+                    var xy = arg.Split(' ');
+                    string pt = "{\"x\":" + xy[0] + ",\"y\":" + xy[1] + ",\"button\":\"left\",\"clickCount\":1";
+                    await lastPopup.Core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", pt + ",\"type\":\"mouseMoved\"}");
+                    await lastPopup.Core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", pt + ",\"type\":\"mousePressed\"}");
+                    await lastPopup.Core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", pt + ",\"type\":\"mouseReleased\"}");
+                    return "ok";
+                }
+                case "popupeval": return lastPopup?.Core == null ? "no popup" : await lastPopup.Core.ExecuteScriptAsync(arg);
                 case "set":
                 {
                     int sp2 = arg.IndexOf(' ');

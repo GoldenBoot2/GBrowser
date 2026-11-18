@@ -178,3 +178,18 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 | Stats: rules, filter lists, blocked total with Reset | Missing (total shown in shield menu only) |
 | Daily host-list update + "Update host lists" button | Missing |
 | Element hiding switch | To verify ("Hide ad leftovers" may be the same) |
+
+## Undetectable page scripts (user 19-11-2026: "make all our scripts non detectable by any sites but it should work on those sites without compromising our protections")
+| Item | Status |
+|---|---|
+| Cloudflare managed challenge (visas-de.tlscontact.com) failed with Stealth on: getComputedStyle wrapper ran the hidden-by-us check on every call (507 us vs 1.6 us) | Fixed ba7f977 (passes with all protections on) |
+| Errors thrown through wrappers showed our stack frame (e.g. "at get offsetHeight (<anonymous>:2095:17)") | Fixed ba7f977 (nat(): browser-identical stack, also for Error.prepareStackTrace) |
+| Symbol(gbab) marker visible in Object.getOwnPropertySymbols(window) | Fixed ba7f977 |
+| Reading styles / sizes of an ad we hid costs up to 26 ms (all our style sheets switched off and on): timing trace on bait elements | Open (per-element override or user-origin CSS) |
+| Cosmetic hiding adds <style> elements a page can list (document.styleSheets); $csp rules add <meta> elements | Open (needs user-origin CSS, e.g. a built-in extension's insertCSS; engine support to verify) |
+| getComputedStyle result for an ad we hid is a Proxy whose methods are not the browser's own functions | Open |
+| Privacy-mode wrappers (methodOn, cookie masking) not yet on nat(); fixed values must still run the browser's receiver checks | Open (with Hide my identity) |
+| AdGuard scriptlet library wrappers: audit with the same probes | Open |
+| Repeatable check: tools/local/stealthprobe.js (on vs off diff), cftest.ps1 (Cloudflare), public detectors | In use |
+
+VPN test (19-11-2026, VeePN free extension, United Kingdom / London): the extension works in GBrowser (pages saw 51.195.242.237, OVH, AS16276), but TLScontact answers Cloudflare Error 1005: the site owner has banned that whole network (ASN) by IP, before any browser check. Not fixable in the browser: needs a VPN / proxy on a residential or non-banned network.

@@ -11,6 +11,7 @@ namespace GBrowser
     internal sealed class ExtensionPopup : Form
     {
         readonly WebView2 view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.White };
+        public CoreWebView2 Core => view.CoreWebView2;   // test channel: read / press things in the popup
         readonly Action<string> openTab;
         bool ready;
 
