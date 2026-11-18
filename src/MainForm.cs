@@ -2072,6 +2072,11 @@ namespace GBrowser
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
                 case "dbg": Blocking.TestDbg = arg; return "ok";
+                case "cdps":   // test: DevTools call in an attached frame session: "<session> <method> <json>"
+                {
+                    var parts = arg.Split(new[] { ' ' }, 3);
+                    return await Current.View.CoreWebView2.CallDevToolsProtocolMethodForSessionAsync(parts[0], parts[1], parts[2]);
+                }
                 case "cssstate": return Current.Blocking?.CssState ?? "no blocker";
                 case "siteinfo":
                     await ShowSiteInfo();
@@ -2163,6 +2168,7 @@ namespace GBrowser
                     return await Current.View.CoreWebView2.CallDevToolsProtocolMethodAsync(arg.Substring(0, sp2), arg.Substring(sp2 + 1));
                 }
                 case "testlog": return string.Join(" | ", Blocking.TestLog);
+                case "testlogclear": Blocking.TestLog.Clear(); return "ok";
                 case "ctrls":
                 {
                     var sb = new System.Text.StringBuilder();

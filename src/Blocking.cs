@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
 
 namespace GBrowser
@@ -22,26 +23,116 @@ namespace GBrowser
 
         // ---------------------------------------------------------------- hiding CSS the page cannot see
         // Element hiding used to add <style> elements, which a page can list (document.styleSheets, querySelectorAll).
-        // The main document's hiding CSS now goes into a stylesheet made through the engine's DevTools interface
+        // Each document's hiding CSS now goes into a stylesheet made through the engine's DevTools interface
         // (CSS.createStyleSheet): it applies like any author sheet but is in neither the DOM nor the CSSOM
         // (measured 19-11-2026), and it stays after CSS / DOM tracking is switched off again, so tracking is on
-        // only while the sheet is written. Rules sit in "@layer gbh" so Stealth can lift them for one synchronous
-        // read with an adopted override sheet (gbab.js unhidden()).
+        // only while a sheet is written. Frames get one too: frames of the page's own process by frame id, frames
+        // in other processes through their own DevTools session (Target.attachToTarget). Rules sit in
+        // "@layer gbh" so Stealth can lift them for one synchronous read (gbab.js unhidden()). When a frame cannot
+        // be found the page script is told (cssok) and goes back to style elements, so hiding never stops.
+        sealed class CssDoc
+        {
+            public string Doc, Href, Session, FrameId, SheetId;
+            public bool Top, Dirty, Broken;
+            public int Tries;
+            public readonly StringBuilder Text = new StringBuilder();
+        }
         CoreWebView2 core;
         System.Threading.SynchronizationContext ui;
-        string cssDoc, sheetDoc, sheetId;          // document id from the page script / the document the sheet is for
-        readonly StringBuilder cssText = new StringBuilder();
-        bool cssFlushing, cssAgain, cssBroken;
-        public string CssState => "doc " + cssDoc + " sheet " + sheetId + " chars " + cssText.Length + (cssBroken ? " broken" : "");
+        readonly Dictionary<string, CssDoc> cssDocs = new Dictionary<string, CssDoc>();
+        readonly Dictionary<string, string> attached = new Dictionary<string, string>();   // targetId -> sessionId
+        bool cssFlushing, cssAgain;
+        public string CssState => string.Join(" | ", cssDocs.Values.Select(d => (d.Top ? "top" : "frame") + " " +
+            (d.Session == null ? "" : "(session " + d.Session + ") ") + (d.SheetId ?? "-") + " " + d.Text.Length + (d.Broken ? " broken" : "") + " " +
+            (d.Href.Length > 50 ? d.Href.Substring(0, 50) : d.Href)));
 
-        /// <summary>From the page script (top document only): CSS to add. False = use a style element instead.</summary>
-        internal bool QueueCss(string doc, string css)
+        /// <summary>From the page script: CSS to add for its document. False = use a style element instead.</summary>
+        internal bool QueueCss(string doc, string href, bool top, string css)
         {
-            if (cssBroken || core == null || ui == null || string.IsNullOrEmpty(doc)) return false;
-            if (doc != cssDoc) { cssDoc = doc; cssText.Clear(); }
-            cssText.Append(css).Append('\n');
+            if (core == null || ui == null || string.IsNullOrEmpty(doc) || string.IsNullOrEmpty(href)) return false;
+            if (!cssDocs.TryGetValue(doc, out var d))
+            {
+                // a new top document: the previous page and its frames are gone
+                if (top) { cssDocs.Clear(); attached.Clear(); }
+                if (cssDocs.Count >= 64) return false;
+                d = new CssDoc { Doc = doc, Href = href, Top = top };
+                cssDocs[doc] = d;
+#if AUTOMATION
+                TestLog.Add("css new doc " + doc + (top ? " top " : " frame ") + href + " (blocker " + GetHashCode() + ")");
+#endif
+            }
+            if (d.Broken) return false;
+            if (css.Length > 0) d.Text.Append(css).Append('\n');
+            d.Dirty = true;
             ui.Post(_ => FlushCss(), null);
             return true;
+        }
+
+        internal bool CssOk(string doc)
+        {
+            bool ok = cssDocs.TryGetValue(doc ?? "", out var d) && !d.Broken;
+#if AUTOMATION
+            TestLog.Add("cssok " + doc + " " + ok + " (blocker " + GetHashCode() + ")" + (d == null ? " (unknown doc; known: " + string.Join(",", cssDocs.Keys) + ")" : ""));
+#endif
+            return ok;
+        }
+
+        Task<string> Cdp(string session, string method, object args) =>
+            session == null ? core.CallDevToolsProtocolMethodAsync(method, Store.ToJson(args))
+                            : core.CallDevToolsProtocolMethodForSessionAsync(session, method, Store.ToJson(args));
+
+        static readonly Dictionary<string, object> NoArgs = new Dictionary<string, object>();
+        static Dictionary<string, object> Obj(object o) => o as Dictionary<string, object>;
+        // the JSON reader gives nested arrays as ArrayList, top-level ones as object[]
+        static IEnumerable<object> List(object o) => o is System.Collections.IEnumerable e && !(o is string) ? e.Cast<object>() : Enumerable.Empty<object>();
+
+        /// <summary>Frames (id, url) of a frame tree, depth first.</summary>
+        static IEnumerable<KeyValuePair<string, string>> FramesOf(Dictionary<string, object> node)
+        {
+            var f = Obj(node?["frame"]);
+            if (f != null) yield return new KeyValuePair<string, string>(f["id"] as string, f.TryGetValue("url", out var u) ? u as string : "");
+            if (node != null && node.TryGetValue("childFrames", out var kids))
+                foreach (var k in List(kids)) foreach (var x in FramesOf(Obj(k))) yield return x;
+        }
+
+        async Task<bool> Resolve(CssDoc d)
+        {
+            var claimed = new HashSet<string>(cssDocs.Values.Where(x => x != d && x.FrameId != null).Select(x => (x.Session ?? "") + "/" + x.FrameId));
+            var tree = Obj(Store.FromJson<Dictionary<string, object>>(await Cdp(null, "Page.getFrameTree", NoArgs))["frameTree"]);
+            var frames = FramesOf(tree).ToList();
+            if (d.Top) { d.FrameId = frames[0].Key; return true; }
+            // a frame of the page's own process
+            foreach (var f in frames.Skip(1))
+                if (f.Value == d.Href && !claimed.Contains("/" + f.Key)) { d.FrameId = f.Key; return true; }
+            // a frame in another process: its own DevTools target
+            var targets = Store.FromJson<Dictionary<string, object>>(await Cdp(null, "Target.getTargets", NoArgs))["targetInfos"];
+            foreach (var t in List(targets))
+            {
+                var ti = Obj(t);
+                if (ti == null || ti["type"] as string != "iframe" || ti["url"] as string != d.Href) continue;
+                string tid = ti["targetId"] as string;
+                if (!attached.TryGetValue(tid, out var session))
+                {
+                    var a = Store.FromJson<Dictionary<string, object>>(await Cdp(null, "Target.attachToTarget",
+                        new Dictionary<string, object> { { "targetId", tid }, { "flatten", true } }));
+                    session = a["sessionId"] as string;
+                    attached[tid] = session;
+                }
+                var st = Obj(Store.FromJson<Dictionary<string, object>>(await Cdp(session, "Page.getFrameTree", NoArgs))["frameTree"]);
+                string fid = FramesOf(st).First().Key;
+                if (claimed.Contains(session + "/" + fid)) continue;
+                d.Session = session; d.FrameId = fid;
+                return true;
+            }
+            return false;
+        }
+
+        async void RetryCss(CssDoc d)
+        {
+            await Task.Delay(250);
+            if (!cssDocs.ContainsKey(d.Doc) || d.Broken) return;
+            d.Dirty = true;
+            FlushCss();
         }
 
         async void FlushCss()
@@ -53,41 +144,45 @@ namespace GBrowser
                 do
                 {
                     cssAgain = false;
-                    string doc = cssDoc, text = "@layer gbh{\n" + cssText + "}";
-                    await core.CallDevToolsProtocolMethodAsync("DOM.enable", "{}");
-                    await core.CallDevToolsProtocolMethodAsync("CSS.enable", "{}");
-                    try
+                    foreach (var d in cssDocs.Values.Where(x => x.Dirty && !x.Broken).ToList())
                     {
-                        if (sheetDoc != doc || sheetId == null)
+                        d.Dirty = false;
+                        try
                         {
-                            var tree = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("Page.getFrameTree", "{}"));
-                            string frameId = (((tree["frameTree"] as Dictionary<string, object>)["frame"]) as Dictionary<string, object>)["id"] as string;
-                            var made = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("CSS.createStyleSheet",
-                                Store.ToJson(new Dictionary<string, object> { { "frameId", frameId } })));
-                            sheetId = made["styleSheetId"] as string;
-                            sheetDoc = doc;
+                            if (d.FrameId == null && !await Resolve(d))
+                            {
+                                // the frame's script runs as its document starts, before the browser side lists the
+                                // frame under its new address: look again for about 2 s before giving up
+                                if (++d.Tries < 8) { RetryCss(d); continue; }
+                                d.Broken = true; TestLog.Add("css frame not found: " + d.Href); continue;
+                            }
+                            await Cdp(d.Session, "DOM.enable", NoArgs);
+                            await Cdp(d.Session, "CSS.enable", NoArgs);
+                            try
+                            {
+                                if (d.SheetId == null)
+                                    d.SheetId = Store.FromJson<Dictionary<string, object>>(await Cdp(d.Session, "CSS.createStyleSheet",
+                                        new Dictionary<string, object> { { "frameId", d.FrameId } }))["styleSheetId"] as string;
+                                await Cdp(d.Session, "CSS.setStyleSheetText",
+                                    new Dictionary<string, object> { { "styleSheetId", d.SheetId }, { "text", "@layer gbh{\n" + d.Text + "}" } });
+                            }
+                            finally
+                            {
+                                try { await Cdp(d.Session, "CSS.disable", NoArgs); } catch { }
+                                try { await Cdp(d.Session, "DOM.disable", NoArgs); } catch { }
+                            }
                         }
-                        await core.CallDevToolsProtocolMethodAsync("CSS.setStyleSheetText",
-                            Store.ToJson(new Dictionary<string, object> { { "styleSheetId", sheetId }, { "text", text } }));
-                    }
-                    finally
-                    {
-                        try { await core.CallDevToolsProtocolMethodAsync("CSS.disable", "{}"); } catch { }
-                        try { await core.CallDevToolsProtocolMethodAsync("DOM.disable", "{}"); } catch { }
+                        catch (Exception ex)
+                        {
+                            // a document replaced while writing, or a frame that went away: the page script falls back
+                            d.Broken = true;
+                            TestLog.Add("css sheet: " + ex.Message + " " + d.Href);
+                        }
                     }
                 } while (cssAgain);
             }
-            catch (Exception ex)
-            {
-                // a document replaced while writing: the next page's script starts a new sheet; repeated failures
-                // switch this tab back to style elements so hiding never stops
-                sheetId = null;
-                TestLog.Add("css sheet: " + ex.Message);
-                if (++cssErrors >= 3) cssBroken = true;
-            }
             finally { cssFlushing = false; }
         }
-        int cssErrors;
 #if AUTOMATION
         public static readonly List<string> TestLog = new List<string>();
         public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
@@ -447,10 +542,19 @@ namespace GBrowser
                 gbab = gbab.Replace("/*SCRIPTLETS*/null", lib.Length == 0 ? "null" : lib)
                            .Replace("/*RAWJS*/null", raw.Length == 0 ? "null" : raw)
                            .Replace("/*EXTCSS*/null", ec.Length == 0 ? "null" : "(function(){" + ec + "\n;return ExtendedCss;})()");
-                const string shim = "(function(){try{var w=window.chrome&&window.chrome.webview;var h=w&&w.hostObjects&&w.hostObjects.sync&&w.hostObjects.sync.gb;" +
-                    "if(!h)return;var c=function(n){return function(){try{return h[n].apply(h,arguments);}catch(e){return '';}};};" +
+                // WebView2's bridge looks up window.chrome.webview at every call, and HideWebView deletes it after this
+                // script (measured 19-11-2026: every later call then failed with "Cannot read properties of undefined
+                // (reading 'hostObjects')", so hiding for elements added later and collapsing blocked frames never
+                // happened). Each call puts chrome.webview back for its own duration only and restores whatever the
+                // page had there; no page code runs in between, and only built-ins captured now are used.
+                const string shim = "(function(){try{var ch=window.chrome,w=ch&&ch.webview;var h=w&&w.hostObjects&&w.hostObjects.sync&&w.hostObjects.sync.gb;" +
+                    "if(!h)return;var gd=Object.getOwnPropertyDescriptor,dp=Object.defineProperty,rd=Reflect.deleteProperty," +
+                    "ap=Function.prototype.call.bind(Function.prototype.apply);" +
+                    "var c=function(n){return function(){var d0=null,put=false;try{d0=gd(ch,'webview');" +
+                    "if(!d0||d0.value!==w){dp(ch,'webview',{value:w,writable:true,enumerable:true,configurable:true});put=true;}" +
+                    "return ap(h[n],h,arguments);}catch(e){return '';}finally{if(put){try{if(d0)dp(ch,'webview',d0);else rd(ch,'webview');}catch(e){}}}};};" +
                     "Object.defineProperty(window,'__gbAdblock',{value:{init:c('init'),js:c('js'),extra:c('extra'),rr:c('rr'),dbg:c('dbg')," +
-                    "dnt:c('dnt'),p:c('p'),keys:c('keys'),blocked:c('blocked'),css:c('css')},configurable:true,writable:true});}catch(e){}})();\n";
+                    "dnt:c('dnt'),p:c('p'),keys:c('keys'),blocked:c('blocked'),css:c('css'),cssok:c('cssok')},configurable:true,writable:true});}catch(e){}})();\n";
                 script = shim + gbab + "\n" + HideWebView;
             }
             catch { script = HideWebView; }
@@ -508,7 +612,8 @@ namespace GBrowser
         }
 
         public string dbg() => Blocking.TestDbg;
-        public bool css(string doc, string css) => b.QueueCss(doc, css);
+        public bool css(string doc, string href, bool top, string css) => b.QueueCss(doc, href, top, css);
+        public bool cssok(string doc) => b.CssOk(doc);
         public bool dnt() => S.DoNotTrack;
         public string p(string href) => "";   // privacy masking: WebView2 already is Edge, its values are genuine
 

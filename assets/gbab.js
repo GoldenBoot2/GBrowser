@@ -1151,14 +1151,34 @@
   // the top document's hiding CSS goes to GBrowser's invisible sheet (Blocking.QueueCss); frames, or when that
   // is not available, use style elements as before
   var DOC = Math.random().toString(36).slice(2) + Date.now().toString(36);
-  var useSheet = false;
-  try { useSheet = window === window.top && DBG.indexOf('y') < 0 && B.css(DOC, '') === true; } catch (e) {}
+  var IS_TOP = window === window.top, HERE = location.href, useSheet = false, sentCss = [];
+  var later2 = window.setTimeout;
+  try { useSheet = /^https?:/i.test(HERE) && DBG.indexOf('y') < 0 && B.css(DOC, HERE, IS_TOP, '') === true; } catch (e) {}
+  // GBrowser could not place the sheet (e.g. a frame it cannot find): back to style elements with everything so far
+  function sheetFailed() {
+    if (!useSheet) return;
+    var ok = true;
+    try { ok = B.cssok(DOC) === true; } catch (e) { ok = false; }
+    if (ok) return;
+    useSheet = false;
+    for (var i = 0; i < sentCss.length; i++) {
+      var s = document.createElement('style');
+      s.textContent = sentCss[i];
+      styles.push(s);
+      attach(s);
+    }
+    sentCss = [];
+  }
+  if (useSheet && later2) { bApply(later2, window, [sheetFailed, 1500]); bApply(later2, window, [sheetFailed, 6000]); }
+  if (DBG.indexOf('z') >= 0) window.__gbt = {ok: function () { try { return B.cssok(DOC); } catch (e) { return 'threw ' + e; } },
+    state: function () { return 'useSheet ' + useSheet + ' sent ' + sentCss.length + ' styles ' + styles.length + ' doc ' + DOC; }};
   var CSSS = window.CSSStyleSheet, replaceSync = CSSS && CSSS.prototype.replaceSync,
     adopt = gOPD(Document.prototype, 'adoptedStyleSheets'), arrSlice = Array.prototype.slice;
   function addStyle(css) {
     if (!css) return;
     var sent = false;
-    if (useSheet) { try { sent = B.css(DOC, css) === true; } catch (e) {} }
+    if (useSheet) { try { sent = B.css(DOC, HERE, IS_TOP, css) === true; } catch (e) {} }
+    if (sent) sentCss[sentCss.length] = css;
     if (!sent) {
       var s = document.createElement('style');
       s.textContent = css;

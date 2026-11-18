@@ -43,8 +43,9 @@ namespace GBrowser
                 var raw = Store.FromJson<object[]>(await core.ExecuteScriptAsync(Script)) ?? new object[0];
                 foreach (var o in raw)
                 {
-                    var a = o as object[];
-                    if (a == null || a.Length < 3) continue;
+                    // nested JSON arrays come back as ArrayList (not object[])
+                    var a = (o as System.Collections.IEnumerable)?.Cast<object>().ToArray();
+                    if (a == null || a.Length < 3 || o is string) continue;
                     string href = a[0] as string, type = a[2] as string ?? "";
                     int size = Convert.ToInt32(a[1]);
                     if (string.IsNullOrEmpty(href) || !href.StartsWith("http")) continue;
