@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -12,26 +13,41 @@ namespace GBrowser
     {
         public static bool Dark { get; private set; }
 
-        static Color L(int rgb) => Color.FromArgb(255, Color.FromArgb(rgb));
-        static Color Pick(int light, int dark) => Dark ? L(dark) : L(light);
+        // current scheme (Settings.ThemeColor: "gold", "accent" or "#RRGGBB"; see Palette.cs)
+        static Palette.Scheme scheme = Palette.For("gold", false);
+        static string schemeKey = "";
+        static Color R(string role) => scheme[role];
 
-        public static Color Primary => Pick(0x785A00, 0xF0BF48);
-        public static Color OnPrimary => Pick(0xFFFFFF, 0x402D00);
-        public static Color PrimaryContainer => Pick(0xFFDFA0, 0x5B4300);
-        public static Color OnPrimaryContainer => Pick(0x261A00, 0xFFDFA0);
-        public static Color Surface => Pick(0xFFF8F2, 0x17130B);
-        public static Color SurfaceContainer => Pick(0xF4EDE1, 0x241F17);
-        public static Color SurfaceContainerHigh => Pick(0xEEE7DB, 0x2F2921);
-        public static Color SurfaceContainerHighest => Pick(0xE8E1D5, 0x3A342B);
+        public static Color Primary => R("primary");
+        public static Color OnPrimary => R("on-primary");
+        public static Color PrimaryContainer => R("primary-container");
+        public static Color OnPrimaryContainer => R("on-primary-container");
+        public static Color Surface => R("surface");
+        public static Color SurfaceContainer => R("surface-container");
+        public static Color SurfaceContainerHigh => R("surface-container-high");
+        public static Color SurfaceContainerHighest => R("surface-container-highest");
         /// <summary>Focused address box (white in light mode).</summary>
-        public static Color Field => Pick(0xFFFFFF, 0x3E382F);
-        public static Color OnSurface => Pick(0x1F1B13, 0xECE1D4);
-        public static Color OnSurfaceVariant => Pick(0x4D4639, 0xD3C5B0);
-        public static Color Outline => Pick(0x7F7667, 0x9C8F7C);
-        public static Color OutlineVariant => Pick(0xD0C5B4, 0x4F4637);
-        public static Color Hover => Dark ? Color.FromArgb(0x14, 0xEC, 0xE1, 0xD4) : Color.FromArgb(0x14, 0x1F, 0x1B, 0x13);
-        public static Color Pressed => Dark ? Color.FromArgb(0x24, 0xEC, 0xE1, 0xD4) : Color.FromArgb(0x24, 0x1F, 0x1B, 0x13);
-        public static Color Disabled => Dark ? Color.FromArgb(0x61, 0xEC, 0xE1, 0xD4) : Color.FromArgb(0x61, 0x1F, 0x1B, 0x13);
+        public static Color Field => R("field");
+        public static Color OnSurface => R("on-surface");
+        public static Color OnSurfaceVariant => R("on-surface-variant");
+        public static Color Outline => R("outline");
+        public static Color OutlineVariant => R("outline-variant");
+        public static Color Hover => Color.FromArgb(0x14, OnSurface);
+        public static Color Pressed => Color.FromArgb(0x24, OnSurface);
+        public static Color Disabled => Color.FromArgb(0x61, OnSurface);
+
+        /// <summary>Both schemes as CSS custom properties for GBrowser's own pages.</summary>
+        public static Dictionary<string, object> CssVars()
+        {
+            string c = Store.Settings.ThemeColor;
+            Func<bool, Dictionary<string, string>> vars = d =>
+            {
+                var o = new Dictionary<string, string>();
+                foreach (var kv in Palette.For(c, d)) o["--" + kv.Key] = Palette.Hex(kv.Value);
+                return o;
+            };
+            return new Dictionary<string, object> { { "light", vars(false) }, { "dark", vars(true) } };
+        }
 
         /// <summary>Windows app mode: HKCU ...\Themes\Personalize\AppsUseLightTheme (0 = dark).</summary>
         public static bool SystemDark()
@@ -49,8 +65,12 @@ namespace GBrowser
         {
             string mode = Store.Settings.ThemeMode ?? "system";
             bool dark = mode == "dark" || (mode != "light" && SystemDark());
-            bool changed = dark != Dark;
+            string color = Store.Settings.ThemeColor ?? "gold";
+            var seed = Palette.SeedOf(color);
+            string key = dark + "|" + color + "|" + (seed.HasValue ? seed.Value.ToArgb().ToString() : "");
+            bool changed = key != schemeKey;
             Dark = dark;
+            if (changed) { scheme = Palette.For(color, dark); schemeKey = key; }
             return changed;
         }
 

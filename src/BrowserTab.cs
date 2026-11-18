@@ -20,6 +20,9 @@ namespace GBrowser
         public bool OpenedByPage;     // created for NewWindowRequested: the page fills it, don't navigate
         public int Blocked;           // ads / trackers blocked on the current page
         public Blocking Blocking;
+        /// <summary>Private tab (WebView2 InPrivate): own cookies/storage kept only in memory and dropped when the
+        /// last private tab closes; no history, not restored, not unloaded to disk, no extensions.</summary>
+        public bool Private;
         public DateTime HiddenSince = DateTime.UtcNow;
         public bool Created => View?.CoreWebView2 != null;
         Task creating;
@@ -32,7 +35,7 @@ namespace GBrowser
             else if (!string.IsNullOrEmpty(url)) Title = url;
         }
 
-        public string TooltipText => Title + (Blocked > 0 ? "\n" + Blocked + " blocked" : "") + (Sleeping ? "\nSleeping" : "");
+        public string TooltipText => (Private ? "Private: " : "") + Title + (Blocked > 0 ? "\n" + Blocked + " blocked" : "") + (Sleeping ? "\nSleeping" : "");
 
         public static string PageTitle(string url)
         {
@@ -44,6 +47,7 @@ namespace GBrowser
                 case "settings": return "Settings";
                 case "about": return "About GBrowser";
                 case "downloads": return "Downloads";
+                case "insecure": return "Not secure";
                 default: return "New tab";
             }
         }
@@ -60,7 +64,14 @@ namespace GBrowser
 
         async Task Create(CoreWebView2Environment env, Action<BrowserTab> setup)
         {
-            await View.EnsureCoreWebView2Async(env);
+            if (Private)
+            {
+                var o = env.CreateCoreWebView2ControllerOptions();
+                o.IsInPrivateModeEnabled = true;
+                o.ProfileName = "private";
+                await View.EnsureCoreWebView2Async(env, o);
+            }
+            else await View.EnsureCoreWebView2Async(env);
             setup(this);
         }
 
@@ -118,7 +129,7 @@ namespace GBrowser
         /// WebView2's TrySuspendAsync only freezes a page (5 news tabs: 1,092 -> 1,076 MB), so it is not used.</summary>
         public void Discard()
         {
-            if (!Created || View.Visible || PlayingAudio) return;
+            if (!Created || View.Visible || PlayingAudio || Private) return;   // a private session lives only in memory
             try { Url = View.CoreWebView2.Source; } catch { }
             string site = Blocking.SiteOf(Url);
             if (site != null && Store.Settings.KeepActiveSites.Contains(site)) return;   // user: always keep active

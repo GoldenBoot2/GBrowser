@@ -10,7 +10,7 @@ namespace GBrowser
     /// extensions, menu. Owner-drawn icon buttons around a borderless TextBox.</summary>
     internal sealed class Toolbar : Control
     {
-        public readonly TextBox Address = new TextBox();
+        public readonly MaterialTextBox Address = new MaterialTextBox { Placeholder = "Search or type a URL", AccessibleName = "Address and search bar" };
         public bool CanBack, CanForward, Loading, Bookmarked, Secure, StoreChip, ShieldOn = true;
         public int BlockedCount;
         public string StoreChipText = "Add to GBrowser";
@@ -34,16 +34,20 @@ namespace GBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Surface;
-            Address.BorderStyle = BorderStyle.None;
             Address.Font = new Font("Segoe UI", 10.5f);
             Address.BackColor = Theme.SurfaceContainerHigh;
             Address.ForeColor = Theme.OnSurface;
             Address.KeyDown += Address_KeyDown;
-            Address.GotFocus += (s, e) => { Address.BackColor = Theme.Field; Invalidate(); BeginInvoke((Action)(() => Address.SelectAll())); };
-            Address.LostFocus += (s, e) => { Address.BackColor = Theme.SurfaceContainerHigh; Address.Text = ShownUrl; Invalidate(); };
+            Address.GotFocus += (s, e) =>
+            {
+                Address.BackColor = Theme.Field;
+                Invalidate();
+                // keyboard focus (Ctrl+L, F6, new tab) selects the address; a click is handled by the field itself
+                if (MouseButtons == MouseButtons.None) BeginInvoke((Action)(() => Address.SelectAll()));
+            };
+            Address.LostFocus += (s, e) => { Address.BackColor = Theme.SurfaceContainerHigh; Address.Text = ShownUrl; Address.ResetView(); Invalidate(); };
             Address.TextChanged += (s, e) => Invalidate();
-            Address.MouseUp += (s, e) => { if (Address.SelectionLength == 0 && firstClick) Address.SelectAll(); firstClick = false; };
-            Address.Enter += (s, e) => firstClick = true;
+            Address.PasteAndGo += t => Go?.Invoke(t);
             Controls.Add(Address);
 
             Add("back", "Back (Alt+Left)", () => IconData.Back, () => CanBack, () => Back?.Invoke());
@@ -56,7 +60,6 @@ namespace GBrowser
             Add("menu", "Menu", () => IconData.More, () => true, () => MenuClicked?.Invoke());
         }
 
-        bool firstClick;
 
         void Add(string name, string tipText, Func<string> icon, Func<bool> enabled, Action click, Func<Color> color = null)
             => buttons.Add(new Btn { Name = name, Tip = tipText, Icon = icon, Enabled = enabled, Click = click, Color = color });
@@ -127,11 +130,8 @@ namespace GBrowser
                 using (var b = new SolidBrush(Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh)) g.FillPath(b, p);
                 if (Address.Focused) using (var pen = new Pen(Theme.Primary, S(2))) g.DrawPath(pen, p);
             }
-            string leftIcon = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? IconData.Search : Secure ? IconData.Lock : IconData.Info;
+            string leftIcon = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? IconData.Search : Secure ? IconData.Lock : IconData.Warning;
             Icons.Draw(g, leftIcon, pill.X + S(12), pill.Y + (pill.Height - S(18)) / 2, S(18), Theme.OnSurfaceVariant);
-            if (!Address.Focused && Address.TextLength == 0)
-                TextRenderer.DrawText(g, "Search or type a URL", Address.Font, Address.Bounds, Theme.Outline,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             if (ClearVisible)
             {
                 if (hoverClear) using (var b = new SolidBrush(Theme.Hover)) g.FillEllipse(b, clearRect);

@@ -18,7 +18,7 @@ namespace GBrowser
     /// store key so the extension keeps its real ID), load unpacked folders, enable/disable, remove.</summary>
     internal static class Extensions
     {
-        static readonly string IndexFile = Path.Combine(Store.DataDir, "extensions.json");
+        const string IndexFile = "extensions.json";   // encrypted (Store.ReadText / WriteText)
         static Dictionary<string, string> index;   // extension id -> folder
 
         public static Dictionary<string, string> Index
@@ -27,7 +27,8 @@ namespace GBrowser
             {
                 if (index == null)
                 {
-                    try { index = File.Exists(IndexFile) ? Store.FromJson<Dictionary<string, string>>(File.ReadAllText(IndexFile)) : null; } catch { }
+                    try { var t = Store.ReadText(IndexFile); index = t == null ? null : Store.FromJson<Dictionary<string, string>>(t); } catch { }
+                    if (index != null) SaveIndex();   // re-save: encrypts a plain file from an older version
                     if (index == null) index = new Dictionary<string, string>();
                 }
                 return index;
@@ -36,7 +37,7 @@ namespace GBrowser
 
         static void SaveIndex()
         {
-            try { File.WriteAllText(IndexFile, Store.ToJson(Index), new UTF8Encoding(false)); } catch { }
+            Store.WriteText(IndexFile, Store.ToJson(Index));
         }
 
         static readonly Regex IdRe = new Regex(@"(?<![a-p])([a-p]{32})(?![a-p])");
@@ -57,12 +58,16 @@ namespace GBrowser
             return ParseId(url.Split('?', '#')[0]);
         }
 
-        public static async Task<CoreWebView2BrowserExtension> InstallFromStore(CoreWebView2Profile profile, string id, string userAgent, string browserVersion)
+        /// <summary>Asked before an extension is added: its name, what it can access, its icon file (or null).</summary>
+        public delegate bool Confirm(string name, List<string> access, string iconFile);
+
+        public static async Task<CoreWebView2BrowserExtension> InstallFromStore(CoreWebView2Profile profile, string id, string userAgent,
+            string browserVersion, Confirm confirm)
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             string major = (browserVersion ?? "157").Split('.')[0];
             string url = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=" + major +
-                         ".0.0.0&acceptformat=crx2,crx3&x=id%3D" + id + "%26installsource%3Dondemand%26uc";
+                         ".0.0.0&acceptformat=crx3&x=id%3D" + id + "%26installsource%3Dondemand%26uc";
             byte[] crx;
             using (var http = new HttpClient(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate }))
             {
@@ -72,9 +77,19 @@ namespace GBrowser
                 if (!resp.IsSuccessStatusCode) throw new Exception("Download failed (" + (int)resp.StatusCode + ")");
                 crx = await resp.Content.ReadAsByteArrayAsync();
             }
-            var parsed = Crx.Parse(crx, id);
-            string folder = Path.Combine(Store.ExtensionsDir, id);
-            await Task.Run(() => Unpack(parsed.Zip, folder, parsed.PublicKey));
+            var parsed = Crx.Parse(crx, id);          // signature and ID checked, or it throws
+            string folder = Path.Combine(Store.ExtensionsDir, id), tmp = folder + ".new";
+            await Task.Run(() => Unpack(parsed.Zip, tmp, parsed.PublicKey));
+            Dictionary<string, object> m = null;
+            try { m = Store.FromJson<Dictionary<string, object>>(File.ReadAllText(Path.Combine(tmp, "manifest.json"), Encoding.UTF8).TrimStart('\uFEFF')); } catch { }
+            if (m == null) { TryDelete(tmp); throw new Exception("Bad manifest"); }
+            if (confirm != null && !confirm(LocalName(tmp, m) ?? id, AccessWarnings(m), IconPath(tmp, m)))
+            {
+                TryDelete(tmp);
+                return null;
+            }
+            if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            Directory.Move(tmp, folder);
             var ext = await profile.AddBrowserExtensionAsync(folder);
             Index[ext.Id] = folder;
             SaveIndex();
@@ -108,15 +123,20 @@ namespace GBrowser
             }
         }
 
-        static void Unpack(byte[] zip, string folder, byte[] publicKey)
+        static void TryDelete(string dir) { try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { } }
+
+        const long MaxUnpacked = 512L * 1024 * 1024;   // no "zip bombs": at most 512 MB / 20,000 files unpacked
+        const int MaxEntries = 20000;
+
+        static void Unpack(byte[] zip, string tmp, byte[] publicKey)
         {
-            string tmp = folder + ".new";
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
             Directory.CreateDirectory(tmp);
             string root = Path.GetFullPath(tmp) + Path.DirectorySeparatorChar;
             using (var ms = new MemoryStream(zip))
             using (var za = new ZipArchive(ms, ZipArchiveMode.Read))
             {
+                if (za.Entries.Count > MaxEntries || za.Entries.Sum(x => x.Length) > MaxUnpacked) throw new Exception("Package too large");
                 foreach (var e in za.Entries)
                 {
                     string dest = Path.GetFullPath(Path.Combine(tmp, e.FullName.Replace('/', Path.DirectorySeparatorChar)));
@@ -141,8 +161,72 @@ namespace GBrowser
                     File.WriteAllText(mf, text, new UTF8Encoding(false));
                 }
             }
-            if (Directory.Exists(folder)) Directory.Delete(folder, true);
-            Directory.Move(tmp, folder);
+        }
+
+        /// <summary>Name from the manifest, resolving __MSG_x__ with _locales/default_locale/messages.json.</summary>
+        static string LocalName(string dir, Dictionary<string, object> m)
+        {
+            string name = m.TryGetValue("name", out var n) ? n as string : null;
+            if (name == null || !name.StartsWith("__MSG_")) return name;
+            try
+            {
+                string key = name.Substring(6, name.Length - 8);
+                string loc = m.TryGetValue("default_locale", out var dl) ? dl as string : "en";
+                var msgs = Store.FromJson<Dictionary<string, object>>(File.ReadAllText(Path.Combine(dir, "_locales", loc, "messages.json"), Encoding.UTF8).TrimStart('\uFEFF'));
+                foreach (var kv in msgs)
+                    if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase) && kv.Value is Dictionary<string, object> d && d.TryGetValue("message", out var msg))
+                        return msg as string;
+            }
+            catch { }
+            return name;
+        }
+
+        static string IconPath(string dir, Dictionary<string, object> m)
+        {
+            if (!(m.TryGetValue("icons", out var ic) && ic is Dictionary<string, object> d)) return null;
+            var best = d.Where(kv => int.TryParse(kv.Key, out _) && kv.Value is string).OrderBy(kv => Math.Abs(int.Parse(kv.Key) - 48)).FirstOrDefault();
+            if (best.Value == null) return null;
+            var p = Path.Combine(dir, ((string)best.Value).TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+            return File.Exists(p) ? p : null;
+        }
+
+        static readonly string[] AllHosts = { "<all_urls>", "*://*/*", "http://*/*", "https://*/*", "*://*/" };
+
+        /// <summary>What the extension can access, worded like Chrome's install prompt.</summary>
+        public static List<string> AccessWarnings(Dictionary<string, object> m)
+        {
+            var perms = new List<string>();
+            foreach (var k in new[] { "permissions", "host_permissions", "optional_host_permissions" })
+                if (m.TryGetValue(k, out var v) && v is System.Collections.IEnumerable list && !(v is string))
+                    foreach (var o in list) if (o is string s) perms.Add(s);
+            if (m.TryGetValue("content_scripts", out var cs) && cs is System.Collections.IEnumerable csl)
+                foreach (var o in csl)
+                    if (o is Dictionary<string, object> c && c.TryGetValue("matches", out var mt) && mt is System.Collections.IEnumerable ml)
+                        foreach (var x in ml) if (x is string s) perms.Add(s);
+            var w = new List<string>();
+            var hosts = perms.Where(p => p.Contains("://") || p == "<all_urls>").ToList();
+            bool all = hosts.Any(h => AllHosts.Contains(h)) || perms.Contains("debugger") || perms.Contains("proxy") || perms.Contains("pageCapture");
+            if (all) w.Add("Read and change all your data on all websites");
+            else if (hosts.Count > 0)
+            {
+                var names = hosts.Select(h => { var x = h.Substring(h.IndexOf("://") + 3); int sl = x.IndexOf('/'); return (sl >= 0 ? x.Substring(0, sl) : x).TrimStart('*', '.'); })
+                    .Where(x => x.Length > 0).Distinct().ToList();
+                w.Add("Read and change your data on " + string.Join(", ", names.Take(3)) + (names.Count > 3 ? " and " + (names.Count - 3) + " more sites" : ""));
+            }
+            var map = new Dictionary<string, string>
+            {
+                { "history", "Read and change your browsing history" }, { "tabs", "Read your browsing history" },
+                { "webNavigation", "Read your browsing history" }, { "topSites", "Read a list of your most visited sites" },
+                { "bookmarks", "Read and change your bookmarks" }, { "downloads", "Manage your downloads" },
+                { "clipboardRead", "Read data you copy and paste" }, { "clipboardWrite", "Change data you copy and paste" },
+                { "nativeMessaging", "Communicate with programs on this computer" }, { "management", "Manage your apps, extensions and themes" },
+                { "privacy", "Change your privacy settings" }, { "contentSettings", "Change which features sites may use (cookies, camera, location ...)" },
+                { "geolocation", "Detect your physical location" }, { "notifications", "Show notifications" },
+                { "declarativeNetRequest", "Block content on any page" }, { "desktopCapture", "Capture what is on your screen" },
+                { "debugger", "Access the page debugger" }, { "cookies", "Read and change cookies of the sites above" },
+            };
+            foreach (var p in perms) if (map.TryGetValue(p, out var t) && !w.Contains(t)) w.Add(t);
+            return w;
         }
 
         /// <summary>Data the extensions page needs: from WebView2 plus the extension's manifest.</summary>
@@ -247,25 +331,84 @@ namespace GBrowser
         {
             if (b.Length < 16 || Encoding.ASCII.GetString(b, 0, 4) != "Cr24") throw new Exception("Not a CRX package");
             int version = BitConverter.ToInt32(b, 4);
-            if (version == 2)
-            {
-                int keyLen = BitConverter.ToInt32(b, 8), sigLen = BitConverter.ToInt32(b, 12);
-                var key = new byte[keyLen]; Array.Copy(b, 16, key, 0, keyLen);
-                int start = 16 + keyLen + sigLen;
-                return new Result { PublicKey = key, Zip = Slice(b, start, b.Length - start) };
-            }
-            if (version != 3) throw new Exception("Unknown CRX version " + version);
+            // CRX2 has a weaker signature scheme (SHA-1) and the Chrome Web Store no longer serves it: refused
+            if (version != 3) throw new Exception("Unsupported package format (CRX" + version + ")");
             int hlen = BitConverter.ToInt32(b, 8);
+            if (hlen <= 0 || 12 + hlen > b.Length) throw new Exception("Damaged package");
             var header = Slice(b, 12, hlen);
             var zip = Slice(b, 12 + hlen, b.Length - 12 - hlen);
-            byte[] chosen = null;
+            byte[] signedHeader = null;
+            var rsaProofs = new List<KeyValuePair<byte[], byte[]>>();
             foreach (var f in Proto(header))
             {
-                if (f.Key != 2 && f.Key != 3) continue;   // sha256_with_rsa / sha256_with_ecdsa proofs
-                foreach (var g in Proto(f.Value))
-                    if (g.Key == 1 && IdOf(g.Value) == expectedId) chosen = g.Value;
+                if (f.Key == 10000) signedHeader = f.Value;                    // SignedData { crx_id }
+                if (f.Key != 2) continue;                                       // sha256_with_rsa proofs
+                byte[] key = null, sig = null;
+                foreach (var g in Proto(f.Value)) { if (g.Key == 1) key = g.Value; else if (g.Key == 2) sig = g.Value; }
+                if (key != null && sig != null) rsaProofs.Add(new KeyValuePair<byte[], byte[]>(key, sig));
             }
-            return new Result { Zip = zip, PublicKey = chosen };
+            if (signedHeader == null) throw new Exception("Package is not signed");
+            // the ID the package claims must be the one we asked for
+            byte[] crxId = null;
+            foreach (var f in Proto(signedHeader)) if (f.Key == 1) crxId = f.Value;
+            if (crxId == null || crxId.Length != 16 || IdFromHash(crxId) != expectedId) throw new Exception("Package ID does not match");
+            // what is signed (CRX3 spec): "CRX3 SignedData\0" + LE32 length + signed header + the zip archive
+            var prefix = Encoding.ASCII.GetBytes("CRX3 SignedData\0");
+            var signedData = new byte[prefix.Length + 4 + signedHeader.Length + zip.Length];
+            Buffer.BlockCopy(prefix, 0, signedData, 0, prefix.Length);
+            Buffer.BlockCopy(BitConverter.GetBytes(signedHeader.Length), 0, signedData, prefix.Length, 4);
+            Buffer.BlockCopy(signedHeader, 0, signedData, prefix.Length + 4, signedHeader.Length);
+            Buffer.BlockCopy(zip, 0, signedData, prefix.Length + 4 + signedHeader.Length, zip.Length);
+            // the developer key (its hash is the extension ID) must have a valid RSA-SHA256 signature
+            byte[] devKey = null;
+            foreach (var p in rsaProofs)
+                if (IdOf(p.Key) == expectedId && VerifyRsa(p.Key, signedData, p.Value)) devKey = p.Key;
+            if (devKey == null) throw new Exception("Signature check failed");
+            return new Result { Zip = zip, PublicKey = devKey };
+        }
+
+        /// <summary>RSA PKCS#1 v1.5 SHA-256 signature check with a DER SubjectPublicKeyInfo key.</summary>
+        static bool VerifyRsa(byte[] spki, byte[] data, byte[] signature)
+        {
+            try
+            {
+                var p = new RSAParameters();
+                int i = 0;
+                Der(spki, ref i, 0x30, out int _);                 // SubjectPublicKeyInfo
+                Der(spki, ref i, 0x30, out int algLen); i += algLen; // AlgorithmIdentifier (skipped)
+                Der(spki, ref i, 0x03, out int _); i++;            // BIT STRING, unused-bits byte
+                Der(spki, ref i, 0x30, out int _);                 // RSAPublicKey
+                Der(spki, ref i, 0x02, out int nLen); p.Modulus = Unsigned(spki, i, nLen); i += nLen;
+                Der(spki, ref i, 0x02, out int eLen); p.Exponent = Unsigned(spki, i, eLen);
+                if (p.Modulus.Length < 256) return false;          // less than 2048-bit keys refused
+                using (var rsa = new RSACng())
+                {
+                    rsa.ImportParameters(p);
+                    return rsa.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                }
+            }
+            catch { return false; }
+        }
+
+        static void Der(byte[] b, ref int i, byte tag, out int len)
+        {
+            if (b[i++] != tag) throw new FormatException("DER");
+            int l = b[i++];
+            if ((l & 0x80) != 0) { int n = l & 0x7F; l = 0; for (int k = 0; k < n; k++) l = (l << 8) | b[i++]; }
+            len = l;
+        }
+
+        static byte[] Unsigned(byte[] b, int start, int len)
+        {
+            while (len > 1 && b[start] == 0) { start++; len--; }
+            return Slice(b, start, len);
+        }
+
+        static string IdFromHash(byte[] h16)
+        {
+            var sb = new StringBuilder(32);
+            for (int i = 0; i < 16; i++) { sb.Append((char)('a' + (h16[i] >> 4))); sb.Append((char)('a' + (h16[i] & 15))); }
+            return sb.ToString();
         }
 
         public static string IdOf(byte[] publicKey)

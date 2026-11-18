@@ -71,20 +71,42 @@ namespace GBrowser
             core.WebResourceRequested += OnRequest;
             core.NavigationStarting += OnNavigationStarting;
             core.ContentLoading += OnContentLoading;
+            core.NavigationCompleted += OnNavigationCompleted;
             var bridge = new PageBridge(this);
             core.AddHostObjectToScript("gb", bridge);
             core.FrameCreated += (s, e) =>
             {
                 try { e.Frame.AddHostObjectToScript("gb", bridge, new[] { "*" }); } catch { }
             };
-            var script = PageScript();
-            if (script.Length > 0) _ = core.AddScriptToExecuteOnDocumentCreatedAsync(script);
+            _ = core.AddScriptToExecuteOnDocumentCreatedAsync(PageScript());
         }
 
         void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
             var core = (CoreWebView2)sender;
             string uri = e.Uri ?? "";
+            // only GBrowser's own pages may message the app (the bridge also checks the sender)
+            try { core.Settings.IsWebMessageEnabled = Pages.IsInternal(uri); } catch { }
+            // HTTPS-First: http:// addresses open over https://; sites without HTTPS get a warning page first
+            if (S.HttpsFirst && uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            {
+                string h = HostOf(uri);
+                if (h != null && !Security.IsLocal(h) && !Security.HttpAllowed(h))
+                {
+                    e.Cancel = true;
+                    // the https address sent us back to http (a site that redirects to http): no secure version
+                    if (e.IsRedirected && h == upgradedHost && (DateTime.UtcNow - upgradedAt).TotalSeconds < 20)
+                        core.Navigate(Pages.Url("insecure") + "?u=" + Uri.EscapeDataString(uri));
+                    else
+                    {
+                        upgradedHost = h; upgradedAt = DateTime.UtcNow; upgradedFrom = uri;
+                        upgradedTo = "https://" + uri.Substring(7);
+                        core.Navigate(upgradedTo);
+                    }
+                    return;
+                }
+            }
+            if (upgradedTo != null && uri == upgradedTo) upgradedNavId = e.NavigationId;
             // "Open anyway" on the block page
             if (uri.StartsWith(Pages.Origin + "allow?", StringComparison.OrdinalIgnoreCase))
             {
@@ -115,6 +137,21 @@ namespace GBrowser
             // the page (and its count) changes only when the new document starts loading (OnContentLoading):
             // a navigation can also end as a download, which keeps the current page
             if (PageHost == null) { PageUrl = uri; PageHost = host; }
+        }
+
+        string upgradedHost, upgradedFrom, upgradedTo;
+        DateTime upgradedAt;
+        ulong upgradedNavId;
+
+        /// <summary>The upgraded https:// address failed (no HTTPS, bad certificate ...): ask before using http.</summary>
+        void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (upgradedFrom == null || e.NavigationId != upgradedNavId) return;
+            string from = upgradedFrom;
+            upgradedFrom = upgradedTo = null;
+            upgradedNavId = 0;
+            if (e.IsSuccess || e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
+            ((CoreWebView2)sender).Navigate(Pages.Url("insecure") + "?u=" + Uri.EscapeDataString(from));
         }
 
         void OnContentLoading(object sender, CoreWebView2ContentLoadingEventArgs e)
@@ -283,6 +320,13 @@ namespace GBrowser
 
         static string script;
 
+        /// <summary>Web pages must not see WebView2's chrome.webview (it marks the browser as an embedded app and
+        /// would let page scripts reach the host bridge). The page script already holds its own handle; this runs
+        /// after it, before any page script. GBrowser's own pages and extension pages keep it.</summary>
+        const string HideWebView = "(function(){try{var o=location.origin;if(o==='" + "https://" + Pages.Host + "'||location.protocol==='chrome-extension:')return;" +
+            "var c=window.chrome;if(c&&('webview' in c)){try{delete c.webview;}catch(e){}" +
+            "if('webview' in c){try{Object.defineProperty(c,'webview',{value:undefined,configurable:true,enumerable:false});}catch(e){}}}}catch(e){}})();";
+
         /// <summary>assets/gbab.js with the scriptlet library, AdGuard JS rules and ExtendedCss filled in, behind a
         /// small shim that hands it the bridge (chrome.webview.hostObjects.sync.gb) under the name it expects.</summary>
         static string PageScript()
@@ -302,9 +346,9 @@ namespace GBrowser
                     "if(!h)return;var c=function(n){return function(){try{return h[n].apply(h,arguments);}catch(e){return '';}};};" +
                     "Object.defineProperty(window,'__gbAdblock',{value:{init:c('init'),js:c('js'),extra:c('extra'),rr:c('rr'),dbg:c('dbg')," +
                     "dnt:c('dnt'),p:c('p'),keys:c('keys'),blocked:c('blocked')},configurable:true,writable:true});}catch(e){}})();\n";
-                script = shim + gbab;
+                script = shim + gbab + "\n" + HideWebView;
             }
-            catch { script = ""; }
+            catch { script = HideWebView; }
             return script;
         }
     }

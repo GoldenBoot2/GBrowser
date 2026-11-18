@@ -26,7 +26,7 @@ namespace GBrowser
             {
                 Directory.CreateDirectory(Store.DataDir);
                 File.AppendAllText(Path.Combine(Store.DataDir, "crash.log"),
-                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + (fatal ? " FATAL " : " ") + ex + Environment.NewLine + Environment.NewLine);
+                    DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + (fatal ? " FATAL " : " ") + ex + Environment.NewLine + Environment.NewLine);
             }
             catch { }
             if (!fatal) MessageBox.Show("Something went wrong:\n" + (ex?.Message ?? "unknown error"), "GBrowser", MessageBoxButtons.OK, MessageBoxIcon.Error);

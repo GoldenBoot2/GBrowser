@@ -111,7 +111,8 @@ namespace GBrowser
         void OnSystemPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
         {
             // Windows light/dark switch arrives as a "General" preference change
-            if (e.Category == Microsoft.Win32.UserPreferenceCategory.General && IsHandleCreated)
+            // Windows light/dark and accent colour changes arrive as General / Color preference changes
+            if ((e.Category == Microsoft.Win32.UserPreferenceCategory.General || e.Category == Microsoft.Win32.UserPreferenceCategory.Color) && IsHandleCreated)
                 BeginInvoke((Action)(() => ApplyTheme(false)));
         }
 
@@ -120,6 +121,9 @@ namespace GBrowser
             base.OnHandleCreated(e);
             ApplyTheme(true);   // controls were built before the theme was read
         }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
@@ -133,12 +137,15 @@ namespace GBrowser
             toolbar.ApplyTheme();
             Theme.TitleBar(Handle);
             SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0027);   // SWP_FRAMECHANGED|NOZORDER|NOMOVE|NOSIZE: redraw the title bar
+            string themeMsg = Store.ToJson(new Dictionary<string, object> { { "type", "theme" }, { "vars", Theme.CssVars() } });
             foreach (var t in Tabs.Where(x => x.Created))
             {
                 t.View.DefaultBackgroundColor = Theme.Surface;
                 ApplyColorScheme(t.View.CoreWebView2);
+                if (Pages.IsInternal(t.View.CoreWebView2.Source)) try { t.View.CoreWebView2.PostWebMessageAsJson(themeMsg); } catch { }
             }
             Invalidate(true);
+            strip.Invalidate(); toolbar.Invalidate(true); bookmarksBar.Invalidate();
         }
 
         /// <summary>prefers-color-scheme for web pages and GBrowser's own pages: Auto follows Windows.</summary>
@@ -149,6 +156,21 @@ namespace GBrowser
             {
                 core.Profile.PreferredColorScheme = mode == "dark" ? CoreWebView2PreferredColorScheme.Dark
                     : mode == "light" ? CoreWebView2PreferredColorScheme.Light : CoreWebView2PreferredColorScheme.Auto;
+            }
+            catch { }
+        }
+
+        /// <summary>Microsoft Defender SmartScreen (dangerous sites and downloads) and Edge tracking prevention.</summary>
+        static void ApplySecurity(CoreWebView2 core)
+        {
+            var st = Store.Settings;
+            try { core.Settings.IsReputationCheckingRequired = st.SmartScreen; } catch { }
+            try
+            {
+                core.Profile.PreferredTrackingPreventionLevel =
+                    st.TrackingPrevention == "strict" ? CoreWebView2TrackingPreventionLevel.Strict
+                    : st.TrackingPrevention == "basic" ? CoreWebView2TrackingPreventionLevel.Basic
+                    : CoreWebView2TrackingPreventionLevel.Balanced;
             }
             catch { }
         }
@@ -182,6 +204,7 @@ namespace GBrowser
             }
             // filters load in the background since the window was created (about a second); pages wait for them
             await FilterEngine.Preload();
+            _ = Downloads.All.Count;   // loads (and if needed encrypts) the downloads list
             var st = Store.Settings;
             var args = Environment.GetCommandLineArgs().Skip(1).Where(a => !a.StartsWith("--")).ToList();
             if (st.RestoreTabs && st.Session != null && st.Session.Count > 0)
@@ -217,6 +240,18 @@ namespace GBrowser
             return t;
         }
 
+        public BrowserTab NewPrivateTab(string url)
+        {
+            var t = new BrowserTab(url ?? Pages.Url("newtab")) { Private = true };
+            if (url == null) t.Title = "Private tab";
+            int index = Current == null ? Tabs.Count : strip.Selected + 1;
+            Tabs.Insert(index, t);
+            if (strip.Selected >= index) strip.Selected++;
+            Select(index);
+            if (url == null) BeginInvoke((Action)(() => toolbar.Address.Focus()));
+            return t;
+        }
+
         void Select(int i)
         {
             if (i < 0 || i >= Tabs.Count) return;
@@ -239,7 +274,7 @@ namespace GBrowser
         {
             if (i < 0 || i >= Tabs.Count) return;
             var t = Tabs[i];
-            if (!string.IsNullOrEmpty(t.Url) && Pages.PageName(t.Url) != "newtab") closedTabs.Push(t.Url);
+            if (!t.Private && !string.IsNullOrEmpty(t.Url) && Pages.PageName(t.Url) != "newtab") closedTabs.Push(t.Url);
             bool wasSel = i == strip.Selected;
             Tabs.RemoveAt(i);
             t.Dispose();
@@ -261,6 +296,7 @@ namespace GBrowser
             s.AreBrowserAcceleratorKeysEnabled = true;
             core.SetVirtualHostNameToFolderMapping(Pages.Host, Pages.Folder, CoreWebView2HostResourceAccessKind.Deny);
             ApplyColorScheme(core);
+            ApplySecurity(core);
             t.Blocking = new Blocking(t, env);
             t.Blocking.Changed += () => uiDirty = true;
             t.Blocking.Attach(core);
@@ -274,7 +310,7 @@ namespace GBrowser
             {
                 t.Title = string.IsNullOrEmpty(core.DocumentTitle) ? Pages.ToDisplay(core.Source) : core.DocumentTitle;
                 if (Pages.IsInternal(core.Source)) t.Title = BrowserTab.PageTitle(core.Source);
-                Store.UpdateHistoryTitle(core.Source, core.DocumentTitle);
+                if (!t.Private) Store.UpdateHistoryTitle(core.Source, core.DocumentTitle);
                 strip.RefreshTabs();
                 if (t == Current) UpdateUi();
             };
@@ -282,7 +318,7 @@ namespace GBrowser
             core.NavigationCompleted += (o, e) =>
             {
                 t.Loading = false;
-                if (e.IsSuccess) Store.AddHistory(core.Source, core.DocumentTitle);
+                if (e.IsSuccess && !t.Private) Store.AddHistory(core.Source, core.DocumentTitle);
                 strip.RefreshTabs();
                 if (t == Current) UpdateUi();
             };
@@ -301,7 +337,7 @@ namespace GBrowser
                 var deferral = e.GetDeferral();
                 try
                 {
-                    var nt = new BrowserTab(e.Uri) { OpenedByPage = true };
+                    var nt = new BrowserTab(e.Uri) { OpenedByPage = true, Private = t.Private };
                     int idx = Tabs.IndexOf(t) + 1;
                     Tabs.Insert(idx, nt);
                     if (strip.Selected >= idx) strip.Selected++;
@@ -344,7 +380,13 @@ namespace GBrowser
             toolbar.BlockedCount = t.Blocked;
             string pageHost = Blocking.HostOf(url);
             toolbar.ShieldOn = pageHost == null ? Store.Settings.AdblockEnabled : Blocking.OnFor(pageHost);
-            toolbar.SetUrl(Pages.ToDisplay(url));
+            string shown = Pages.ToDisplay(url);
+            if (Pages.PageName(url) == "insecure")
+            {
+                try { shown = Uri.UnescapeDataString(url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3)); } catch { }
+                toolbar.Secure = false;
+            }
+            toolbar.SetUrl(shown);
             var storeId = Extensions.StorePageId(url);
             bool chip = storeId != null;
             toolbar.StoreChipText = chip && Extensions.Index.ContainsKey(storeId) ? "Installed" : "Add to GBrowser";
@@ -425,6 +467,7 @@ namespace GBrowser
         {
             var m = NewMenu();
             m.Items.Add(Item("New tab", IconData.Tab, "Ctrl+T", () => NewTab(null)));
+            m.Items.Add(Item("New private tab", IconData.Private, "Ctrl+Shift+N", () => NewPrivateTab(null)));
             m.Items.Add(Item("Reopen closed tab", IconData.Restore, "Ctrl+Shift+T", ReopenClosed));
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(Item("Bookmarks", IconData.Bookmarks, "Ctrl+Shift+O", () => OpenPage("bookmarks")));
@@ -487,7 +530,7 @@ namespace GBrowser
             if (closedTabs.Count > 0) NewTab(closedTabs.Pop());
         }
 
-        CoreWebView2Profile Profile => Tabs.FirstOrDefault(t => t.Created)?.View.CoreWebView2.Profile;
+        CoreWebView2Profile Profile => Tabs.FirstOrDefault(t => t.Created && !t.Private)?.View.CoreWebView2.Profile;
         CoreWebView2 AnyCore => Tabs.FirstOrDefault(t => t.Created)?.View.CoreWebView2;
 
         bool extensionsLoaded;
@@ -582,6 +625,19 @@ namespace GBrowser
             if (Current?.Created == true && !Pages.IsInternal(Current.View.CoreWebView2.Source)) Current.View.CoreWebView2.Reload();
         }
 
+        /// <summary>Install prompt with what the extension can access (like Chrome's).</summary>
+        bool ConfirmExtension(string name, List<string> access, string iconFile)
+        {
+            Image img = null;
+            try { if (iconFile != null) using (var i = Image.FromFile(iconFile)) img = new Bitmap(i, 40, 40); } catch { }
+            var lines = new List<Tuple<string, string>>();
+            if (access.Count == 0) lines.Add(Tuple.Create(IconData.Verified, "No special access"));
+            else lines.Add(Tuple.Create((string)null, "It can:"));
+            foreach (var a in access) lines.Add(Tuple.Create(a.StartsWith("Read and change all") ? IconData.Warning : IconData.Policy, a));
+            try { return MaterialDialog.Ask(this, "Add \"" + name + "\"?", img, lines, "Add extension"); }
+            finally { img?.Dispose(); }
+        }
+
         void ShowExtensionPopup(string id, string page)
         {
             var r = toolbar.ButtonRect("ext");
@@ -601,13 +657,13 @@ namespace GBrowser
             try
             {
                 var core = Current.View.CoreWebView2;
-                var ext = await Extensions.InstallFromStore(core.Profile, id, core.Settings.UserAgent, env.BrowserVersionString);
-                toolbar.StoreChipText = "Installed";
+                var ext = await Extensions.InstallFromStore(core.Profile, id, core.Settings.UserAgent, env.BrowserVersionString, ConfirmExtension);
+                toolbar.StoreChipText = ext == null ? "Add to GBrowser" : "Installed";
             }
             catch (Exception ex)
             {
                 toolbar.StoreChipText = "Add to GBrowser";
-                MessageBox.Show(this, "Install failed: " + ex.Message, "GBrowser", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MaterialDialog.Info(this, "Not installed", ex.Message);
             }
             toolbar.LayoutNow();
         }
@@ -622,6 +678,7 @@ namespace GBrowser
                 case Keys.Control | Keys.W:
                 case Keys.Control | Keys.F4: CloseTab(strip.Selected); return true;
                 case Keys.Control | Keys.Shift | Keys.T: ReopenClosed(); return true;
+                case Keys.Control | Keys.Shift | Keys.N: NewPrivateTab(null); return true;
                 case Keys.Control | Keys.Tab:
                 case Keys.Control | Keys.PageDown: if (Tabs.Count > 1) Select((strip.Selected + 1) % Tabs.Count); return true;
                 case Keys.Control | Keys.Shift | Keys.Tab:
@@ -753,6 +810,15 @@ namespace GBrowser
                     {
                         case "HomePage": st.HomePage = string.IsNullOrWhiteSpace(v as string) ? "gbrowser://newtab" : ((string)v).Trim(); break;
                         case "SearchEngine": if (v is string se && Search.Engines.ContainsKey(se)) st.SearchEngine = se; break;
+                        case "ThemeColor":
+                        {
+                            string tc = (v as string ?? "").Trim();
+                            if (tc == "gold" || tc == "accent" || System.Text.RegularExpressions.Regex.IsMatch(tc, "^#[0-9a-fA-F]{6}$")) st.ThemeColor = tc.ToLowerInvariant();
+                            else throw new Exception("Bad colour");
+                            Store.SaveSettings();
+                            ApplyTheme(true);
+                            break;
+                        }
                         case "ThemeMode":
                             if (v is string tm && (tm == "system" || tm == "light" || tm == "dark")) st.ThemeMode = tm;
                             Store.SaveSettings();
@@ -769,6 +835,16 @@ namespace GBrowser
                         case "Stealth": st.Stealth = v is bool a5 && a5; break;
                         case "BlockAdSitePages": st.BlockAdSitePages = v is bool a6 && a6; break;
                         case "DoNotTrack": st.DoNotTrack = v is bool a7 && a7; break;
+                        case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
+                        case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
+                        case "SmartScreen":
+                            st.SmartScreen = v is bool s3 && s3;
+                            foreach (var x in Tabs.Where(x => x.Created)) ApplySecurity(x.View.CoreWebView2);
+                            break;
+                        case "TrackingPrevention":
+                            if (v is string tp && (tp == "basic" || tp == "balanced" || tp == "strict")) st.TrackingPrevention = tp;
+                            foreach (var x in Tabs.Where(x => x.Created)) ApplySecurity(x.View.CoreWebView2);
+                            break;
                         default: throw new Exception("Unknown setting");
                     }
                     Store.SaveSettings();
@@ -799,6 +875,17 @@ namespace GBrowser
                 case "openDataDir":
                     Process.Start("explorer.exe", "\"" + Store.DataDir + "\""); return null;
                 case "memory": return MemoryReport();
+                case "theme.vars": return Theme.CssVars();
+                case "theme.info":
+                {
+                    var acc = Palette.WindowsAccent();
+                    return new Dictionary<string, object>
+                    {
+                        { "color", st.ThemeColor ?? "gold" }, { "accent", acc.HasValue ? Palette.Hex(acc.Value) : "" },
+                        { "presets", Palette.Presets.Select(p => new Dictionary<string, object> {
+                            { "id", p[0] }, { "name", p[1] }, { "hex", p.Length > 2 ? p[2] : p[0] } }).ToList() },
+                    };
+                }
                 case "downloads.list":
                     return Downloads.All.Select(d => new Dictionary<string, object> {
                         { "id", d.Id }, { "url", d.Url }, { "path", d.Path }, { "name", Path.GetFileName(d.Path ?? "") },
@@ -836,6 +923,15 @@ namespace GBrowser
                         { "total", st.TotalBlocked }, { "allowed", st.AllowedSites },
                     };
                 }
+                case "insecure.allow":
+                {
+                    var u = Str(m, "url");
+                    if (u == null || !u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) return null;
+                    var h = Blocking.HostOf(u);
+                    if (h != null) Security.AllowHttp(h);
+                    tab.Navigate(u);
+                    return null;
+                }
                 case "allow.remove": st.AllowedSites.Remove(Str(m, "site")); Store.SaveSettings(); return null;
                 case "keep.add":
                 {
@@ -855,7 +951,8 @@ namespace GBrowser
                     var id = Extensions.ParseId(Str(m, "text"));
                     if (id == null) throw new Exception("No extension ID found");
                     var core = tab.View.CoreWebView2;
-                    var ext = await Extensions.InstallFromStore(core.Profile, id, core.Settings.UserAgent, env.BrowserVersionString);
+                    var ext = await Extensions.InstallFromStore(core.Profile, id, core.Settings.UserAgent, env.BrowserVersionString, ConfirmExtension);
+                    if (ext == null) throw new Exception("Cancelled");
                     return ext.Name;
                 }
                 case "ext.pick":
@@ -971,7 +1068,7 @@ namespace GBrowser
                 case "extinstall":
                 {
                     var core = Current.View.CoreWebView2;
-                    var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString);
+                    var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString, null);
                     return ext.Id + " " + ext.Name;
                 }
                 case "extpopup":
@@ -997,6 +1094,55 @@ namespace GBrowser
                     return await Current.View.CoreWebView2.CallDevToolsProtocolMethodAsync(arg.Substring(0, sp2), arg.Substring(sp2 + 1));
                 }
                 case "testlog": return string.Join(" | ", Blocking.TestLog);
+                case "addrtype":
+                {
+                    // WM_CHAR straight to the field: the same path real typing takes, no keys on the desktop
+                    toolbar.Address.Focus();
+                    foreach (char ch in arg) SendMessage(toolbar.Address.Handle, 0x0102, (IntPtr)ch, IntPtr.Zero);
+                    await Task.Delay(100);
+                    return toolbar.Address.Text + " | sel " + toolbar.Address.SelectionStart + "+" + toolbar.Address.SelectionLength;
+                }
+                case "addrkey":
+                {
+                    // keys without modifiers (Left, Right, Home, End, Back, Delete) as WM_KEYDOWN
+                    var k = (Keys)Enum.Parse(typeof(Keys), arg, true);
+                    SendMessage(toolbar.Address.Handle, 0x0100, (IntPtr)(int)k, IntPtr.Zero);
+                    await Task.Delay(50);
+                    return toolbar.Address.Text + " | sel " + toolbar.Address.SelectionStart + "+" + toolbar.Address.SelectionLength;
+                }
+                case "addrmenu": lastMenu = toolbar.Address.ShowMenu(new Point(40, toolbar.Address.Height)); await Task.Delay(300); return lastMenu.Handle.ToString();
+                case "addrselect": { var p = arg.Split(' '); toolbar.Address.Focus(); toolbar.Address.Select(int.Parse(p[0]), int.Parse(p[1])); return "ok"; }
+                case "newprivate": NewPrivateTab(arg.Length == 0 ? null : Search.ToUrl(arg)); return "ok";
+                case "storeinstall":
+                {
+                    var core = Current.View.CoreWebView2;
+                    _ = Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString, ConfirmExtension)
+                        .ContinueWith(tk => Blocking.TestLog.Add("install: " + (tk.IsFaulted ? "error " + tk.Exception.InnerException.Message : tk.Result == null ? "cancelled" : "added " + tk.Result.Name)),
+                            TaskScheduler.FromCurrentSynchronizationContext());
+                    return "started";
+                }
+                case "crxtest":
+                {
+                    // real package must pass; the same package with one byte changed, or under another ID, must fail
+                    string u = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=157.0.0.0&acceptformat=crx3&x=id%3D" + arg + "%26installsource%3Dondemand%26uc";
+                    byte[] crx;
+                    using (var http = new System.Net.Http.HttpClient()) crx = await http.GetByteArrayAsync(u);
+                    string r1, r2, r3;
+                    try { Crx.Parse(crx, arg); r1 = "original: accepted"; } catch (Exception ex) { r1 = "original: REJECTED " + ex.Message; }
+                    var bad = (byte[])crx.Clone(); bad[bad.Length - 100] ^= 0x01;
+                    try { Crx.Parse(bad, arg); r2 = "tampered: ACCEPTED (bad)"; } catch (Exception ex) { r2 = "tampered: rejected (" + ex.Message + ")"; }
+                    try { Crx.Parse(crx, "aaaabbbbccccddddeeeeffffgggghhhh"); r3 = "wrong id: ACCEPTED (bad)"; } catch (Exception ex) { r3 = "wrong id: rejected (" + ex.Message + ")"; }
+                    return r1 + " | " + r2 + " | " + r3;
+                }
+                case "forms": return string.Join(" | ", Application.OpenForms.Cast<Form>().Select(f => f.GetType().Name + "=" + f.Handle));
+                case "dialog":
+                {
+                    var d = Application.OpenForms.OfType<MaterialDialog>().FirstOrDefault();
+                    if (d == null) return "none";
+                    d.DialogResult = arg == "ok" ? DialogResult.OK : DialogResult.Cancel;
+                    d.Close();
+                    return "closed";
+                }
                 case "fullscreen": return fullscreen + " " + WindowState + " strip=" + strip.Visible;
                 case "eval":
                     if (Current?.Created != true) return "no tab";
@@ -1015,11 +1161,26 @@ namespace GBrowser
 
         // ---------- closing ----------
 
+        bool exitCleared;
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // "Clear browsing data when GBrowser closes": cookies, site data, cache, history (passwords kept)
+            if (Store.Settings.ClearOnExit && !exitCleared && Profile != null)
+            {
+                e.Cancel = true;
+                exitCleared = true;
+                var p = Profile;
+                Store.History.Clear();
+                Store.SaveHistory();
+                p.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.AllSite | CoreWebView2BrowsingDataKinds.DiskCache |
+                    CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory)
+                    .ContinueWith(_ => BeginInvoke((Action)Close));
+                return;
+            }
             Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
             var st = Store.Settings;
-            st.Session = Tabs.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
+            st.Session = Tabs.Where(t => !t.Private).Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
             st.SessionIndex = Math.Max(0, strip.Selected);
             st.WindowMax = WindowState == FormWindowState.Maximized || fullscreen;
             var b = WindowState == FormWindowState.Normal && !fullscreen ? Bounds : RestoreBounds;

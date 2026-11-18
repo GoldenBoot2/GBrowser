@@ -33,32 +33,53 @@ namespace GBrowser
             Settings = Read<Settings>("settings.json") ?? new Settings();
             Bookmarks = Read<List<Bookmark>>("bookmarks.json") ?? new List<Bookmark>();
             History = Read<List<HistoryItem>>("history.json") ?? new List<HistoryItem>();
+            EncryptLeftovers();
         }
 
         public static string ToJson(object o) => Json.Serialize(o);
         public static T FromJson<T>(string s) => Json.Deserialize<T>(s);
 
-        static T Read<T>(string name) where T : class
+        static readonly HashSet<string> plainFound = new HashSet<string>();
+
+        /// <summary>Decrypted text of one of GBrowser's data files (see SecureFile); null when missing.
+        /// A file that cannot be decrypted is kept as name.unreadable, never overwritten.</summary>
+        public static string ReadText(string name)
         {
+            var p = Path.Combine(DataDir, name);
             try
             {
-                var p = Path.Combine(DataDir, name);
-                return File.Exists(p) ? Json.Deserialize<T>(File.ReadAllText(p, Encoding.UTF8)) : null;
+                var t = SecureFile.Read(p, out bool wasPlain);
+                if (wasPlain) plainFound.Add(name);
+                return t;
             }
+            catch (Exception)
+            {
+                try { File.Move(p, p + "." + DateTime.Now.ToString("dd-MM-yyyy_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture) + ".unreadable"); } catch { }
+                return null;
+            }
+        }
+
+        public static bool WasPlain(string name) => plainFound.Contains(name);
+
+        public static void WriteText(string name, string text)
+        {
+            try { SecureFile.Write(Path.Combine(DataDir, name), text); plainFound.Remove(name); } catch { }
+        }
+
+        static T Read<T>(string name) where T : class
+        {
+            try { var t = ReadText(name); return t == null ? null : Json.Deserialize<T>(t); }
             catch { return null; }
         }
 
-        static void Write(string name, object o)
+        static void Write(string name, object o) => WriteText(name, Json.Serialize(o));
+
+        /// <summary>Re-saves files that were still plain text (older versions), now encrypted.</summary>
+        public static void EncryptLeftovers()
         {
-            try
-            {
-                Directory.CreateDirectory(DataDir);
-                var p = Path.Combine(DataDir, name);
-                var tmp = p + ".tmp";
-                File.WriteAllText(tmp, Json.Serialize(o), new UTF8Encoding(false));
-                if (File.Exists(p)) File.Replace(tmp, p, null); else File.Move(tmp, p);
-            }
-            catch { }
+            if (plainFound.Contains("settings.json")) SaveSettings();
+            if (plainFound.Contains("bookmarks.json")) SaveBookmarks();
+            if (plainFound.Contains("history.json")) SaveHistory();
         }
 
         public static void SaveSettings() => Write("settings.json", Settings);
@@ -79,6 +100,7 @@ namespace GBrowser
 
         public static void AddHistory(string url, string title)
         {
+            if (string.IsNullOrEmpty(url)) return;
             if (string.IsNullOrEmpty(url) || Pages.IsInternal(url) || url.StartsWith("about:") || url.StartsWith("data:")) return;
             var last = History.FirstOrDefault();
             if (last != null && last.Url == url && Now() - last.Time < 30 * 60 * 1000L)
@@ -105,6 +127,7 @@ namespace GBrowser
         public string HomePage { get; set; } = "gbrowser://newtab";
         public string SearchEngine { get; set; } = "google";
         public string ThemeMode { get; set; } = "system";   // system | light | dark
+        public string ThemeColor { get; set; } = "gold";    // gold | accent (Windows accent colour) | #RRGGBB
         public bool RestoreTabs { get; set; } = true;
         public int SleepMinutes { get; set; } = 5;          // 0 = never put hidden tabs to sleep
         public bool LowMemoryHiddenTabs { get; set; } = true;
@@ -118,6 +141,11 @@ namespace GBrowser
         public bool Stealth { get; set; } = true;              // hidden ads still measure like visible ones (anti ad-block detectors)
         public bool BlockAdSitePages { get; set; } = true;     // pages of ad / malware sites show a block page
         public bool DoNotTrack { get; set; } = false;
+        // security / privacy
+        public bool HttpsFirst { get; set; } = true;              // always use secure connections
+        public bool SmartScreen { get; set; } = true;             // Microsoft Defender SmartScreen (sites + downloads)
+        public string TrackingPrevention { get; set; } = "balanced";   // basic | balanced | strict (Edge tracking prevention)
+        public bool ClearOnExit { get; set; } = false;            // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }
         public List<string> Session { get; set; } = new List<string>();

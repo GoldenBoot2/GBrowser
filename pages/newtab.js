@@ -8,6 +8,8 @@
   f.append(icon('Search'), input, clear);
   input.addEventListener('input', () => f.classList.toggle('has-text', input.value.length > 0));
   f.addEventListener('submit', e => { e.preventDefault(); if (input.value.trim()) gb.send('go', { text: input.value }); });
+  document.body.append(el('button', { class: 'btn tonal customize', onclick: () => gb.send('open', { url: 'https://gbrowser.local/settings.html#appearance' }) },
+    icon('Edit'), 'Customize'));
   let data = { tiles: [], engine: 'Google' };
   try { data = await gb.send('newtab.data'); } catch (e) { }
   input.placeholder = 'Search ' + data.engine + ' or type a URL';

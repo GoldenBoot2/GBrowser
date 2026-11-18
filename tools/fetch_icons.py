@@ -23,12 +23,25 @@ ICONS = [
     ('Restore', 'restore_page', ''), ('Cookie', 'cookie', ''), ('Block', 'block', ''),
     ('Volume', 'volume_up', ''), ('Stop', 'close', ''),
     ('Check', 'check', ''), ('Pause', 'pause', ''), ('Play', 'play_arrow', ''), ('File', 'draft', ''),
+    ('ArrowDrop', 'arrow_drop_down', ''), ('Palette', 'palette', ''), ('Colorize', 'colorize', ''),
+    ('Desktop', 'desktop_windows', ''), ('Edit', 'edit', ''),
+    ('Private', 'domino_mask', ''), ('ShieldLock', 'shield_lock', ''), ('Warning', 'warning', ''), ('Policy', 'policy', ''),
 ]
 
+import socket
+socket.setdefaulttimeout(30)   # also covers stalled reads (a run hung for 20 min without it)
+
+
 def fetch(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode('utf-8')
+    # curl: Python's urlopen hung for 20+ minutes on this PC (name lookup is not covered by its timeouts)
+    import subprocess
+    for attempt in range(3):
+        r = subprocess.run(['curl', '-sS', '-f', '--max-time', '30', '-A', 'Mozilla/5.0', url], capture_output=True)
+        if r.returncode == 0:
+            return r.stdout.decode('utf-8')
+        if r.returncode == 22:   # HTTP error (404 ...)
+            raise urllib.error.HTTPError(url, 404, 'not found', None, None)
+    raise RuntimeError('download failed: ' + url)
 
 def main():
     paths = {}

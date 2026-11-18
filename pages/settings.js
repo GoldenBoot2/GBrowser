@@ -19,7 +19,36 @@
   const themeSel = el('select', { 'aria-label': 'Theme' }, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]
     .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.ThemeMode || 'system') })));
   themeSel.addEventListener('change', () => set('ThemeMode', themeSel.value));
-  main.append(el('div', { class: 'card' }, el('h2', { text: 'Appearance' }), row('Tune', 'Theme', null, themeSel)));
+  // colour: presets, Windows accent colour, or any colour (like Chrome's "Customize Chrome")
+  const ti = await gb.send('theme.info');
+  const swatches = el('div', { class: 'swatches' });
+  function swatch(id, title, hex, iconName) {
+    const b = el('button', { class: 'swatch' + (ti.color === id ? ' on' : ''), title, 'aria-label': title, 'aria-pressed': String(ti.color === id) });
+    if (hex) b.style.background = hex;
+    if (iconName) b.append(icon(iconName, 's20'));
+    b.addEventListener('click', () => choose(id));
+    return b;
+  }
+  async function choose(id) {
+    await set('ThemeColor', id);
+    ti.color = id;
+    drawSwatches();
+  }
+  function drawSwatches() {
+    swatches.textContent = '';
+    for (const p of ti.presets) swatches.append(swatch(p.id, p.name, p.hex));
+    if (ti.accent) swatches.append(swatch('accent', 'Windows accent colour', ti.accent, 'Desktop'));
+    const custom = ti.color.startsWith('#') && !ti.presets.some(p => p.id === ti.color);
+    const picker = el('input', { type: 'color', value: custom ? ti.color : '#785a00', 'aria-label': 'Custom colour' });
+    picker.addEventListener('change', () => choose(picker.value));
+    const cb = el('label', { class: 'swatch custom' + (custom ? ' on' : ''), title: 'Custom colour' }, icon('Colorize', 's20'), picker);
+    if (custom) cb.style.background = ti.color;
+    swatches.append(cb);
+  }
+  drawSwatches();
+  main.append(el('div', { class: 'card', id: 'appearance' }, el('h2', { text: 'Appearance' }), row('Tune', 'Theme', null, themeSel),
+    el('div', { class: 'row' }, icon('Palette'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Colour' }), swatches))));
+  if (location.hash === '#appearance') document.getElementById('appearance').scrollIntoView();
 
   // Start and search
   const engine = el('select', { 'aria-label': 'Search engine' }, engines.map(e => el('option', { value: e.id, text: e.name, selected: e.id === s.SearchEngine })));
@@ -54,7 +83,7 @@
     main.append(allowed);
     const lists = el('div', { class: 'card' }, el('h2', { text: 'Filter lists' }),
       row('Shield', ab.ready ? ab.rules.toLocaleString() + ' rules' : (ab.error || 'Loading'),
-        ab.ready ? 'Built ' + ab.built + ', loaded in ' + ab.loadMs + ' ms' : null, null));
+        ab.ready ? 'Built ' + fmtIsoDate(ab.built) + ', loaded in ' + ab.loadMs + ' ms' : null, null));
     for (const l of ab.lists)
       lists.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }),
         el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (l.version && !l.version.startsWith('%') ? ' - ' + l.version : '') }))));
@@ -104,7 +133,18 @@
   drawKeep();
   main.append(keepCard);
 
-  // Privacy
+  // Privacy and security
+  const tp = el('select', { 'aria-label': 'Tracking prevention' }, [['basic', 'Basic'], ['balanced', 'Balanced'], ['strict', 'Strict']]
+    .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.TrackingPrevention || 'balanced') })));
+  tp.addEventListener('change', () => set('TrackingPrevention', tp.value));
+  main.append(el('div', { class: 'card' }, el('h2', { text: 'Privacy and security' }),
+    row('Lock', 'Always use secure connections', 'Opens sites over HTTPS; warns before an insecure site', sw('HttpsFirst')),
+    row('ShieldLock', 'Dangerous site and download protection', 'Microsoft Defender SmartScreen', sw('SmartScreen')),
+    row('Policy', 'Tracking prevention', 'Microsoft Edge tracking prevention, on top of ad blocking', tp),
+    row('Delete', 'Clear data when GBrowser closes', 'Cookies, site data, cache and history (passwords kept)', sw('ClearOnExit')),
+    row('Verified', 'Your data is encrypted', 'History, bookmarks, tabs and settings: only your Windows account can read them', null)));
+
+  // Clear browsing data
   const kinds = [['cookies', 'Cookies and site data'], ['cache', 'Cached files'], ['history', 'Browsing and download history'], ['passwords', 'Saved passwords'], ['autofill', 'Autofill data']];
   const checks = kinds.map(([k, t]) => { const c = el('input', { type: 'checkbox', value: k }); if (k === 'cache') c.checked = true; return el('label', { class: 'row' }, c, el('span', { text: t })); });
   const clearBtn = el('button', { class: 'btn', onclick: async () => {

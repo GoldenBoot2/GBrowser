@@ -24,7 +24,7 @@ namespace GBrowser
             [System.Web.Script.Serialization.ScriptIgnore] public CoreWebView2DownloadOperation Op;
         }
 
-        static readonly string FileName = System.IO.Path.Combine(Store.DataDir, "downloads.json");
+        const string FileName = "downloads.json";   // encrypted (Store.ReadText / WriteText)
         static List<Item> items;
         static int nextId = 1;
         public static event Action Changed;
@@ -35,10 +35,11 @@ namespace GBrowser
             {
                 if (items == null)
                 {
-                    try { items = File.Exists(FileName) ? Store.FromJson<List<Item>>(File.ReadAllText(FileName, Encoding.UTF8)) : null; } catch { }
+                    try { var t = Store.ReadText(FileName); items = t == null ? null : Store.FromJson<List<Item>>(t); } catch { }
                     if (items == null) items = new List<Item>();
                     foreach (var i in items) if (i.State == "in_progress" || i.State == "paused") i.State = "interrupted";
                     nextId = items.Count == 0 ? 1 : items.Max(i => i.Id) + 1;
+                    if (Store.WasPlain(FileName)) Save();   // encrypt a plain file from an older version
                 }
                 return items;
             }
@@ -46,7 +47,7 @@ namespace GBrowser
 
         public static void Save()
         {
-            try { File.WriteAllText(FileName, Store.ToJson(All.Take(500).ToList()), new UTF8Encoding(false)); } catch { }
+            Store.WriteText(FileName, Store.ToJson(All.Take(500).ToList()));
         }
 
         public static void Track(CoreWebView2DownloadOperation op)

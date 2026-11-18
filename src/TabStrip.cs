@@ -95,6 +95,7 @@ namespace GBrowser
                         using (var pen = new Pen(Theme.Primary, S(2)))
                             g.DrawArc(pen, ix + S(1), iy + S(1), S(14), S(14), spinAngle, 270);
                     }
+                    else if (t.Private) Icons.Draw(g, IconData.Private, ix, iy, S(16), Theme.Primary);
                     else if (t.Favicon != null) g.DrawImage(t.Favicon, ix, iy, S(16), S(16));
                     else Icons.Draw(g, IconData.Public, ix, iy, S(16), Theme.OnSurfaceVariant);
                     int textLeft = ix + S(24);

@@ -12,5 +12,6 @@
 .tile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 8px 12px; border-radius: var(--radius);
   text-decoration: none; color: var(--on-surface); cursor: pointer; }
 .tile:hover { background: var(--surface-container); }
+.customize { position: fixed; right: 24px; bottom: 24px; }
 .tile .letter { width: 48px; height: 48px; font-size: 20px; }
 .tile span { font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

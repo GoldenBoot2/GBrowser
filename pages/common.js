@@ -1,11 +1,33 @@
 // Bridge between GBrowser's internal pages and the app (src/MainForm.cs, OnPageMessage / Handle).
 'use strict';
+
+// Colour scheme chosen in Settings > Appearance (src/Palette.cs builds it): {light:{--var:#hex}, dark:{...}}.
+// Cached so a page opens in the right colours at once; the app sends updates when the colour changes.
+const gbTheme = (() => {
+  let vars = null;
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  function apply() {
+    if (!vars) return;
+    const v = mq.matches ? vars.dark : vars.light;
+    for (const k in v) document.documentElement.style.setProperty(k, v[k]);
+  }
+  function set(v) {
+    vars = v;
+    try { localStorage.setItem('gbTheme', JSON.stringify(v)); } catch (e) { }
+    apply();
+  }
+  try { vars = JSON.parse(localStorage.getItem('gbTheme') || 'null'); } catch (e) { }
+  apply();
+  mq.addEventListener('change', apply);
+  return { set };
+})();
 const gb = (() => {
   let rid = 0;
   const pending = new Map();
   if (window.chrome && chrome.webview) {
     chrome.webview.addEventListener('message', e => {
       const m = e.data;
+      if (m && m.type === 'theme') { gbTheme.set(m.vars); return; }
       if (!m || !pending.has(m.rid)) return;
       const p = pending.get(m.rid); pending.delete(m.rid);
       if (m.error) p.reject(new Error(m.error)); else p.resolve(m.result);
@@ -21,6 +43,7 @@ const gb = (() => {
   }
   return { send };
 })();
+gb.send('theme.vars').then(v => gbTheme.set(v)).catch(() => { });
 
 function icon(name, cls) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -88,8 +111,11 @@ function fmtDay(ms) {
   const y = new Date(t); y.setDate(t.getDate() - 1);
   if (d.toDateString() === t.toDateString()) return 'Today';
   if (d.toDateString() === y.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // always day first (Wednesday 18 November 2026), whatever the system locale
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
+// "2026-11-16" (ISO from data files) -> "16-11-2026"
+function fmtIsoDate(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? m[3] + '-' + m[2] + '-' + m[1] : (s || ''); }
 
 function header(title, iconName, extra) {
   document.body.prepend(el('header', { class: 'bar' }, el('h1', {}, icon(iconName), title), extra || null));
