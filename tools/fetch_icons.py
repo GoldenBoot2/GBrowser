@@ -30,6 +30,8 @@ ICONS = [
     ('WinRestore', 'filter_none', 'wght300', 20), ('WinClose', 'close', 'wght300', 20),
     ('ExpandMore', 'expand_more', ''),
     ('Private', 'domino_mask', ''), ('ShieldLock', 'shield_lock', ''), ('Warning', 'warning', ''), ('Policy', 'policy', ''),
+    ('DockBottom', 'dock_to_bottom', ''), ('DockRight', 'dock_to_right', ''), ('Speed', 'speed', ''),
+    ('Link', 'link', ''), ('Copy', 'content_copy', ''),
 ]
 
 import socket

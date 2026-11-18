@@ -167,6 +167,21 @@
   const tp = el('select', { 'aria-label': 'Tracking prevention' }, [['basic', 'Basic'], ['balanced', 'Balanced'], ['strict', 'Strict']]
     .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.TrackingPrevention || 'balanced') })));
   tp.addEventListener('change', () => set('TrackingPrevention', tp.value));
+  // Downloads: folder, Save As for every file, multi-part downloads
+  const dlPath = el('div', { class: 'sub mono' });
+  const dlReset = el('button', { class: 'btn text', onclick: async () => showFolder(await gb.send('downloads.resetFolder')) }, 'Use Downloads');
+  function showFolder(f) { dlPath.textContent = f.path; dlReset.hidden = !f.custom; }
+  const conn = el('select', { 'aria-label': 'Parts per download' }, [[1, 'Off'], [2, '2'], [4, '4'], [8, '8'], [12, '12'], [16, '16']]
+    .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.DownloadConnections || 8) })));
+  conn.addEventListener('change', () => set('DownloadConnections', +conn.value));
+  main.append(el('div', { class: 'card', id: 'downloads' }, el('h2', { text: 'Downloads' }),
+    el('div', { class: 'row' }, icon('Folder'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Location' }), dlPath),
+      el('div', { class: 'actions' }, dlReset,
+        el('button', { class: 'btn tonal', onclick: async () => showFolder(await gb.send('downloads.pick')) }, 'Change'))),
+    row('Download', 'Ask where to save each file', null, sw('AskWhereToSave')),
+    row('Speed', 'Split downloads into parts', 'More connections where the server allows it', conn)));
+  gb.send('downloads.folder').then(showFolder);
+
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Privacy and security' }),
     row('Lock', 'Always use secure connections', 'Opens sites over HTTPS; warns before an insecure site', sw('HttpsFirst')),
     row('ShieldLock', 'Dangerous site and download protection', 'Microsoft Defender SmartScreen', sw('SmartScreen')),

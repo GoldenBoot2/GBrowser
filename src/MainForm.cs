@@ -90,6 +90,7 @@ namespace GBrowser
             };
             toolbar.Star += ToggleBookmark;
             toolbar.MenuClicked += ShowMenu;
+            toolbar.DownloadsClicked += OpenDownloads;
             toolbar.ExtensionsClicked += ShowExtensionsMenu;
             toolbar.StoreChipClicked += InstallFromStorePage;
             toolbar.ShieldClicked += ShowShieldMenu;
@@ -248,6 +249,9 @@ namespace GBrowser
                 var opts = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
                 env = await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
                 Updater.Changed += OnUpdateChanged;
+                Downloads.Changed += OnDownloadsChanged;
+                downloadsSeen = Downloads.All.Any(d => d.State == "in_progress" || d.State == "paused");
+                OnDownloadsChanged();
                 Updater.Start();
             }
             catch (WebView2RuntimeNotFoundException)
@@ -493,7 +497,7 @@ namespace GBrowser
                 finally { deferral.Complete(); }
             };
             core.WebMessageReceived += (o, e) => OnPageMessage(t, e);
-            core.DownloadStarting += (o, e) => Downloads.Track(e.DownloadOperation);   // the default download bubble stays
+            core.DownloadStarting += (o, e) => OnDownloadStarting(t, core, e);
             if (!t.OpenedByPage && !string.IsNullOrEmpty(t.Url) && core.Source != t.Url && (core.Source == "about:blank" || string.IsNullOrEmpty(core.Source)))
                 t.Navigate(t.Url);
         }
@@ -665,6 +669,116 @@ namespace GBrowser
             m.Add("About GBrowser", IconData.Info, null, () => OpenPage("about"));
             m.Add("Exit", IconData.Close, null, Close);
             m.ShowAt(toolbar, toolbar.ButtonRect("menu"), true, "menu");
+        }
+
+        // ---------- downloads ----------
+
+        /// <summary>Where downloads go: Settings > Downloads, else the Windows Downloads folder
+        /// (test builds: their own test folder unless a folder was chosen).</summary>
+        string DownloadFolder()
+        {
+            string f = Store.Settings.DownloadFolder;
+            if (!string.IsNullOrEmpty(f) && Directory.Exists(f)) return f;
+#if AUTOMATION
+            return Path.Combine(Store.DataDir, "Downloads");
+#else
+            return FolderPicker.WindowsDownloads();
+#endif
+        }
+
+        static string UniquePath(string path)
+        {
+            if (!File.Exists(path) && !File.Exists(path + ".gbdownload")) return path;
+            string dir = Path.GetDirectoryName(path), name = Path.GetFileNameWithoutExtension(path), ext = Path.GetExtension(path);
+            for (int i = 1; ; i++)
+            {
+                string p = Path.Combine(dir, name + " (" + i + ")" + ext);
+                if (!File.Exists(p) && !File.Exists(p + ".gbdownload")) return p;
+            }
+        }
+
+        /// <summary>Every download: the folder from Settings (or a Save As window), then GBrowser's multi-part engine
+        /// when the server allows it, else the engine's own download. Shown on GBrowser's download button and page.</summary>
+        async void OnDownloadStarting(BrowserTab t, CoreWebView2 core, CoreWebView2DownloadStartingEventArgs e)
+        {
+            var deferral = e.GetDeferral();
+            try
+            {
+                string name = Path.GetFileName(e.ResultFilePath);
+                if (string.IsNullOrEmpty(name)) name = "download";
+                string folder = DownloadFolder();
+                Directory.CreateDirectory(folder);
+                string path = UniquePath(Path.Combine(folder, name));
+                if (Store.Settings.AskWhereToSave)
+                {
+                    using (var dlg = new SaveFileDialog { FileName = name, InitialDirectory = folder, OverwritePrompt = true, AutoUpgradeEnabled = true, Title = "Save as" })
+                    {
+                        string ext = Path.GetExtension(name);
+                        dlg.Filter = (string.IsNullOrEmpty(ext) ? "File" : ext.TrimStart('.').ToUpperInvariant() + " file") + "|*" + ext + "|All files|*.*";
+                        if (dlg.ShowDialog(this) != DialogResult.OK) { e.Cancel = true; return; }
+                        path = dlg.FileName;
+                    }
+                }
+                e.ResultFilePath = path;
+                e.Handled = true;   // GBrowser's download button replaces the engine's download bubble
+                var fast = await FastDownload.TryTakeOver(e.DownloadOperation, path, t.Private ? null : core.Source, core.CookieManager);
+                if (fast != null) e.Cancel = true;   // GBrowser downloads it in parts
+                else Downloads.Track(e.DownloadOperation, path);
+                downloadsSeen = true;
+                OnDownloadsChanged();
+            }
+            catch { }
+            finally { deferral.Complete(); }
+        }
+
+        bool downloadsSeen;
+        string lastDownloadStates;
+
+        void OnDownloadsChanged()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { try { BeginInvoke((Action)OnDownloadsChanged); } catch { } return; }
+            var live = Downloads.All.Where(d => d.State == "in_progress").ToList();
+            long total = live.Sum(d => d.Total), got = live.Sum(d => d.Received);
+            toolbar.ShowDownloads = downloadsSeen;
+            // an open downloads page refreshes itself (new download, pause, finish...)
+            var states = string.Join(",", Downloads.All.Take(50).Select(d => d.Id + d.State));
+            if (states != lastDownloadStates)
+            {
+                lastDownloadStates = states;
+                foreach (var tab in Tabs)
+                    if (tab.Created && Pages.PageName(tab.View.CoreWebView2.Source) == "downloads")
+                        try { tab.View.CoreWebView2.PostWebMessageAsJson("{\"type\":\"downloads\"}"); } catch { }
+            }
+            toolbar.DownloadProgress = live.Count == 0 ? -1f : total > 0 ? (float)got / total : 0f;
+            toolbar.PerformLayout();
+            toolbar.Invalidate();
+        }
+
+        /// <summary>Pause / resume / cancel / retry from the downloads page, for both kinds of download.</summary>
+        void DownloadAction(Downloads.Item d, string action)
+        {
+            if (d.Engine == "multi")
+            {
+                if (d.Fast == null && (action == "resume" || action == "retry" || action == "cancel"))
+                    FastDownload.Restore(d, AnyCore?.CookieManager);
+                switch (action)
+                {
+                    case "pause": d.Fast?.Pause(); break;
+                    case "resume": case "retry":
+                        if (action == "retry" && string.IsNullOrEmpty(d.Parts)) { d.Fast = null; NewTab(d.Url, false); break; }
+                        d.Fast?.Start(); break;
+                    case "cancel": d.Fast?.Cancel(); break;
+                }
+                return;
+            }
+            switch (action)
+            {
+                case "cancel": d.Op?.Cancel(); break;
+                case "pause": d.Op?.Pause(); d.State = "paused"; Downloads.MarkStopped(d); break;
+                case "resume": if (d.Op != null && d.Op.CanResume) { d.Op.Resume(); d.State = "in_progress"; Downloads.MarkRunning(d); } break;
+                case "retry": NewTab(d.Url, false); break;
+            }
         }
 
         /// <summary>Runs the verified new setup in update mode and closes (the setup starts GBrowser again; tabs come back).</summary>
@@ -1078,6 +1192,8 @@ namespace GBrowser
                         case "DoNotTrack": st.DoNotTrack = v is bool a7 && a7; break;
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
+                        case "AskWhereToSave": st.AskWhereToSave = v is bool aw && aw; break;
+                        case "DownloadConnections": st.DownloadConnections = Math.Max(1, Math.Min(16, Convert.ToInt32(v))); break;
                         case "SecureDns":
                         {
                             string d = (v as string ?? "").Trim();
@@ -1150,7 +1266,23 @@ namespace GBrowser
                     return Downloads.All.Select(d => new Dictionary<string, object> {
                         { "id", d.Id }, { "url", d.Url }, { "path", d.Path }, { "name", Path.GetFileName(d.Path ?? "") },
                         { "total", d.Total }, { "received", d.Received }, { "state", d.State }, { "reason", d.Reason ?? "" },
-                        { "time", d.Time }, { "exists", !string.IsNullOrEmpty(d.Path) && File.Exists(d.Path) }, { "live", d.Op != null } }).ToList();
+                        { "time", d.Time }, { "exists", !string.IsNullOrEmpty(d.Path) && File.Exists(d.Path) },
+                        { "live", d.Op != null || d.Engine == "multi" }, { "multi", d.Engine == "multi" },
+                        { "speed", d.Fast != null ? d.Fast.Speed : d.State == "in_progress" ? d.EngineSpeed : 0 }, { "connections", d.Fast != null ? d.Fast.Connections : 0 },
+                        { "segments", d.Fast != null ? d.Fast.Segments() : null }, { "durationMs", d.DurationMs } }).ToList();
+                case "downloads.folder":
+                    return new Dictionary<string, object> { { "path", DownloadFolder() }, { "custom", !string.IsNullOrEmpty(st.DownloadFolder) } };
+                case "downloads.pick":
+                {
+                    string picked = FolderPicker.Pick(Handle, "Choose where downloads are saved", DownloadFolder());
+                    if (picked != null) { st.DownloadFolder = picked; Store.SaveSettings(); }
+                    return new Dictionary<string, object> { { "path", DownloadFolder() }, { "custom", !string.IsNullOrEmpty(st.DownloadFolder) } };
+                }
+                case "downloads.resetFolder":
+                    st.DownloadFolder = ""; Store.SaveSettings();
+                    return new Dictionary<string, object> { { "path", DownloadFolder() }, { "custom", false } };
+                case "downloads.openFolder":
+                    Process.Start("explorer.exe", "\"" + DownloadFolder() + "\""); return null;
                 case "downloads.do":
                 {
                     var d = Downloads.Find(Convert.ToInt32(m["id"]));
@@ -1159,10 +1291,7 @@ namespace GBrowser
                     {
                         case "open": if (File.Exists(d.Path)) Process.Start(new ProcessStartInfo(d.Path) { UseShellExecute = true }); break;
                         case "folder": if (File.Exists(d.Path)) Process.Start("explorer.exe", "/select,\"" + d.Path + "\""); break;
-                        case "cancel": d.Op?.Cancel(); break;
-                        case "pause": d.Op?.Pause(); d.State = "paused"; break;
-                        case "resume": if (d.Op != null && d.Op.CanResume) { d.Op.Resume(); d.State = "in_progress"; } break;
-                        case "retry": NewTab(d.Url, false); break;
+                        case "cancel": case "pause": case "resume": case "retry": DownloadAction(d, Str(m, "action")); break;
                         case "remove": Downloads.All.Remove(d); Downloads.Save(); break;
                     }
                     return null;

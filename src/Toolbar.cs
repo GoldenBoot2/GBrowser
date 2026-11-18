@@ -18,7 +18,10 @@ namespace GBrowser
         /// <summary>Full address (shown while editing) and the Chrome-style short form (shown otherwise).</summary>
         public string FullUrl = "";
         public int BlockedCount;
-        public bool UpdateDot;   // an update is downloaded: a dot on the menu button (like Chrome's update badge)
+        public bool UpdateDot;
+        public bool ShowDownloads;          // a download happened in this session: the download button is shown
+        public float DownloadProgress = -1; // 0..1 while downloads run (ring around the icon), -1 = none running
+        public event Action DownloadsClicked;   // an update is downloaded: a dot on the menu button (like Chrome's update badge)
         public string StoreChipText = "Add to GBrowser";
 
         public event Action Back, Forward, Reload, Stop, Home, Star, ExtensionsClicked, MenuClicked, StoreChipClicked, ShieldClicked;
@@ -63,6 +66,8 @@ namespace GBrowser
             Add("home", "Home", () => IconData.Home, () => true, () => Home?.Invoke());
             Add("star", null, () => Bookmarked ? IconData.StarFill : IconData.Star, () => true, () => Star?.Invoke(), () => Bookmarked ? Theme.Primary : Theme.OnSurfaceVariant);
             Add("shield", null, () => IconData.Shield, () => true, () => ShieldClicked?.Invoke(), () => ShieldOn ? Theme.Primary : Theme.Outline);
+            Add("downloads", "Downloads (Ctrl+J)", () => IconData.Download, () => true, () => DownloadsClicked?.Invoke(),
+                () => DownloadProgress >= 0 ? Theme.Primary : Theme.OnSurfaceVariant);
             Add("ext", "Extensions", () => IconData.Extension, () => true, () => ExtensionsClicked?.Invoke());
             Add("menu", "Menu", () => IconData.More, () => true, () => MenuClicked?.Invoke());
         }
@@ -82,7 +87,7 @@ namespace GBrowser
         protected override void OnLayout(LayoutEventArgs e)
         {
             base.OnLayout(e);
-            if (buttons.Count < 8) return;   // layout can run while the constructor is still adding controls
+            if (buttons.Count < 9) return;   // layout can run while the constructor is still adding controls
             int bs = S(34), y = (Height - bs) / 2, x = S(6);
             foreach (var n in new[] { "back", "forward", "reload", "home" })
             {
@@ -91,8 +96,9 @@ namespace GBrowser
                 x += bs + S(2);
             }
             int right = Width - S(6);
-            foreach (var n in new[] { "menu", "ext", "shield" })
+            foreach (var n in new[] { "menu", "ext", "downloads", "shield" })
             {
+                if (n == "downloads" && !ShowDownloads) { buttons.Find(b => b.Name == n).Rect = Rectangle.Empty; continue; }
                 right -= bs;
                 buttons.Find(b => b.Name == n).Rect = new Rectangle(right, y, bs, bs);
                 right -= S(2);
@@ -182,6 +188,14 @@ namespace GBrowser
                 int isz = S(20);
                 var col = !en ? Theme.Disabled : b.Color != null ? b.Color() : Theme.OnSurfaceVariant;
                 Icons.Draw(g, b.Icon(), b.Rect.X + (b.Rect.Width - isz) / 2f, b.Rect.Y + (b.Rect.Height - isz) / 2f, isz, col);
+                if (b.Name == "downloads" && DownloadProgress >= 0)
+                {
+                    // progress ring like Chrome's download button
+                    var ring = new RectangleF(b.Rect.X + S(4), b.Rect.Y + S(4), b.Rect.Width - S(8), b.Rect.Height - S(8));
+                    using (var track = new Pen(Theme.OutlineVariant, S(2))) g.DrawEllipse(track, ring);
+                    using (var arc = new Pen(Theme.Primary, S(2)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                        g.DrawArc(arc, ring, -90, Math.Max(6f, 360f * Math.Min(1f, DownloadProgress)));
+                }
                 if (b.Name == "menu" && UpdateDot)
                     using (var bb = new SolidBrush(Theme.Primary))
                         g.FillEllipse(bb, b.Rect.Right - S(13), b.Rect.Y + S(6), S(8), S(8));

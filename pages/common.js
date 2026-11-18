@@ -29,6 +29,7 @@ const gb = (() => {
       const m = e.data;
       if (m && m.type === 'theme') { gbTheme.set(m.vars); return; }
       if (m && m.type === 'update') { window.dispatchEvent(new CustomEvent('gbupdate', { detail: m.state })); return; }
+      if (m && m.type === 'downloads') { window.dispatchEvent(new CustomEvent('gbdownloads')); return; }
       if (!m || !pending.has(m.rid)) return;
       const p = pending.get(m.rid); pending.delete(m.rid);
       if (m.error) p.reject(new Error(m.error)); else p.resolve(m.result);

@@ -150,6 +150,9 @@ namespace GBrowser
         public bool SmartScreen { get; set; } = true;             // Microsoft Defender SmartScreen (sites + downloads)
         public string TrackingPrevention { get; set; } = "balanced";   // basic | balanced | strict (Edge tracking prevention)
         public string SecureDns { get; set; } = "cloudflare";     // off | cloudflare | google | quad9 | adguard | custom:<https template>
+        public string DownloadFolder { get; set; } = "";          // "" = the Windows Downloads folder
+        public bool AskWhereToSave { get; set; } = false;         // Save As window for every download
+        public int DownloadConnections { get; set; } = 8;         // multi-part downloads: most connections (1 = off)
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }

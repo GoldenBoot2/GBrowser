@@ -21,7 +21,22 @@ namespace GBrowser
             public string State { get; set; }   // in_progress, paused, completed, interrupted
             public string Reason { get; set; }
             public long Time { get; set; }
+            // multi-part downloads (FastDownload): saved so they resume after a restart
+            public string Engine { get; set; }        // null = the engine's own download, "multi" = FastDownload
+            public string Referer { get; set; }
+            public string ETag { get; set; }
+            public string LastModified { get; set; }
+            public string Parts { get; set; }         // "start,end,pos;..."
+            public long ActiveMs { get; set; }        // time spent downloading (pauses not counted)
+            [System.Web.Script.Serialization.ScriptIgnore] public DateTime? RunningSince;
+            // speed of the engine's own downloads (multi-part ones report theirs): bytes per second, smoothed
+            [System.Web.Script.Serialization.ScriptIgnore] public double EngineSpeed;
+            [System.Web.Script.Serialization.ScriptIgnore] public long SpeedBytes;
+            [System.Web.Script.Serialization.ScriptIgnore] public DateTime SpeedAt;
+            /// <summary>Downloading time so far, including the running stretch.</summary>
+            public long DurationMs => ActiveMs + (RunningSince.HasValue ? (long)(DateTime.UtcNow - RunningSince.Value).TotalMilliseconds : 0);
             [System.Web.Script.Serialization.ScriptIgnore] public CoreWebView2DownloadOperation Op;
+            [System.Web.Script.Serialization.ScriptIgnore] public FastDownload Fast;
         }
 
         const string FileName = "downloads.json";   // encrypted (Store.ReadText / WriteText)
@@ -37,7 +52,10 @@ namespace GBrowser
                 {
                     try { var t = Store.ReadText(FileName); items = t == null ? null : Store.FromJson<List<Item>>(t); } catch { }
                     if (items == null) items = new List<Item>();
-                    foreach (var i in items) if (i.State == "in_progress" || i.State == "paused") i.State = "interrupted";
+                    // the engine cannot resume its downloads after a restart; multi-part ones can (progress is saved)
+                    foreach (var i in items)
+                        if (i.State == "in_progress" || i.State == "paused")
+                            i.State = i.Engine == "multi" && !string.IsNullOrEmpty(i.Parts) ? "paused" : "interrupted";
                     nextId = items.Count == 0 ? 1 : items.Max(i => i.Id) + 1;
                     if (Store.WasPlain(FileName)) Save();   // encrypt a plain file from an older version
                 }
@@ -45,23 +63,64 @@ namespace GBrowser
             }
         }
 
+        static readonly object saveGate = new object();
+
         public static void Save()
         {
-            Store.WriteText(FileName, Store.ToJson(All.Take(500).ToList()));
+            // download threads save too: if the list changes while it is copied (a new or removed entry), copy again
+            lock (saveGate)
+                for (int i = 0; ; i++)
+                    try { Store.WriteText(FileName, Store.ToJson(All.Take(500).ToList())); return; }
+                    catch (InvalidOperationException) when (i < 5) { System.Threading.Thread.Sleep(20); }
         }
 
-        public static void Track(CoreWebView2DownloadOperation op)
+        /// <summary>A new list entry for a download GBrowser runs itself.</summary>
+        public static Item NewItem(string url, string path, long total)
+        {
+            var it = new Item { Id = nextId++, Url = url, Path = path, Total = total, State = "in_progress", Time = Store.Now() };
+            All.Insert(0, it);
+            Save();
+            return it;
+        }
+
+        public static void Notify(Item it) { try { Changed?.Invoke(); } catch { } }
+
+        /// <summary>Downloading time: counts while a download runs, stops while it is paused or done.</summary>
+        public static void MarkRunning(Item it) { if (!it.RunningSince.HasValue) it.RunningSince = DateTime.UtcNow; }
+        public static void MarkStopped(Item it)
+        {
+            if (!it.RunningSince.HasValue) return;
+            it.ActiveMs += (long)(DateTime.UtcNow - it.RunningSince.Value).TotalMilliseconds;
+            it.RunningSince = null;
+        }
+
+        public static void Track(CoreWebView2DownloadOperation op, string path = null)
         {
             var it = new Item
             {
-                Id = nextId++, Url = op.Uri, Path = op.ResultFilePath, Total = (long)(op.TotalBytesToReceive ?? 0),
+                Id = nextId++, Url = op.Uri, Path = path ?? op.ResultFilePath, Total = (long)(op.TotalBytesToReceive ?? 0),
                 Received = op.BytesReceived, State = "in_progress", Time = Store.Now(), Op = op,
             };
             All.Insert(0, it);
-            op.BytesReceivedChanged += (s, e) => { it.Received = op.BytesReceived; it.Total = (long)(op.TotalBytesToReceive ?? (ulong)it.Total); Changed?.Invoke(); };
+            MarkRunning(it);
+            op.BytesReceivedChanged += (s, e) =>
+            {
+                it.Received = op.BytesReceived; it.Total = (long)(op.TotalBytesToReceive ?? (ulong)it.Total);
+                var now = DateTime.UtcNow;
+                double sec = (now - it.SpeedAt).TotalSeconds;
+                if (it.SpeedAt == default(DateTime)) { it.SpeedAt = now; it.SpeedBytes = it.Received; }
+                else if (sec >= 0.5)
+                {
+                    double inst = Math.Max(0, it.Received - it.SpeedBytes) / sec;
+                    it.EngineSpeed = it.EngineSpeed <= 0 ? inst : it.EngineSpeed * 0.7 + inst * 0.3;
+                    it.SpeedAt = now; it.SpeedBytes = it.Received;
+                }
+                Changed?.Invoke();
+            };
             op.StateChanged += (s, e) =>
             {
                 it.Path = op.ResultFilePath;
+                if (op.State == CoreWebView2DownloadState.InProgress) MarkRunning(it); else MarkStopped(it);
                 switch (op.State)
                 {
                     case CoreWebView2DownloadState.Completed: it.State = "completed"; it.Received = op.BytesReceived; it.Op = null; break;
