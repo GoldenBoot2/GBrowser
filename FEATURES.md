@@ -4,6 +4,15 @@ What a current Chrome / Edge (2026) does, and where GBrowser stands. Kept up to 
 Status: **Done** · **Missing** (to build) · **Engine UI** (works, but shows the engine's Microsoft Edge interface: to replace) · **Not possible** (with reason).
 Last full audit: 19-11-2026.
 
+## Pending (build order, 19-11-2026)
+1. #7 New window (Ctrl+N, drag a tab out), set as default browser.
+2. #8 Import from Chrome / Edge, cookies and site data, passwords page, bookmark folders.
+3. Bookmarks (user, 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
+4. Ad blocking (user, 19-11-2026): built-in lists on / off, custom lists with trust check, user rules editor, element picker.
+5. Cookie manager, 19 features (user, 19-11-2026): see "Cookie manager" below.
+6. Android app features missing here (user, 19-11-2026): see "From the Android app" below.
+7. Remaining Missing rows in the tables below.
+
 ## Tabs and windows
 | Feature | Status |
 |---|---|
@@ -86,7 +95,7 @@ Last full audit: 19-11-2026.
 | Site permission prompts (camera, mic, location, notifications, clipboard, downloads, MIDI, sensors...) in GBrowser's own prompt, remembered choices, Site settings page with reset | Done (19-11-2026) |
 | Per-site toggles not tied to a request (JavaScript, images, pop-ups, sound) and a camera / mic "in use" indicator | Missing |
 | Web notifications shown by GBrowser (instead of the engine's toast) | To verify |
-| Cookies and site data page (see / delete per site) | Missing |
+| Cookies and site data page (see / delete per site) | Site delete Done in site info (19-11-2026); full page: see Cookie manager |
 | Password manager (save prompt, list, edit, delete, export) | Engine UI (save prompt) / list Missing |
 | Autofill addresses / payment | Engine UI |
 | Certificate viewer | Missing |
@@ -116,3 +125,44 @@ Last full audit: 19-11-2026.
 | DevTools docked / separate | Done (19-11-2026) |
 | Updates from GitHub, About page | Done |
 | Installer, uninstall | Done |
+
+## Cookie manager (planned 19-11-2026, user: "can we edit cookies values, block specific values, remove" + "add more features")
+Researched against Chrome DevTools Application > Cookies, Cookie-Editor, Cookie Editor Pro, EditThisCookie, Cookie AutoDelete.
+Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies / Network.setCookie for partition key, priority, size).
+
+| # | Feature | Status |
+|---|---|---|
+| 1 | Site cookies page from site info; "All cookies" manager in Settings (every site, counts, size) | Planned |
+| 2 | Fields: name, value, domain, path, expiry / session, size, HttpOnly, Secure, SameSite, partitioned (CHIPS), priority, first / third party | Planned |
+| 3 | Search name / value / domain; filters: third-party, session, trackers, expiring soon | Planned |
+| 4 | Readable values: URL-decoded, Base64, JSON, JWT (payload + expiry), timestamps as dd-mm-yyyy | Planned |
+| 5 | Tracker label (cookie domain on tracker lists; known names like _ga, _fbp explained) | Planned |
+| 6 | Edit every field (date picker for expiry); checks: SameSite=None needs Secure, __Host- / __Secure- rules | Planned |
+| 7 | Add a new cookie; duplicate a cookie | Planned |
+| 8 | Delete one / selected / all of the site / third-party only; Undo after delete or edit | Planned |
+| 9 | Block a cookie (this site / everywhere): page-script layer + Set-Cookie removed from responses | Planned |
+| 10 | Per-site cookie rule: Allow / Block all / Clear when closed (Chrome site settings) | Planned |
+| 11 | Block third-party cookies setting | Planned (engine support to verify) |
+| 12 | Protect (lock) a cookie: site changes are undone, never removed by clean-ups | Planned |
+| 13 | Auto-delete (Cookie AutoDelete style): site cookies removed after its last tab closes; keep list + keep-until-restart list | Planned |
+| 14 | Lifetime cap: long-lived cookies shortened (e.g. 7 days) except kept sites | Planned |
+| 15 | Export / import: JSON (Cookie-Editor format), Netscape cookies.txt, Cookie header; import shows a preview first | Planned |
+| 16 | Copy value / copy as Cookie header | Planned |
+| 17 | Live log: cookies set / changed / blocked on this page, by server or script | Planned |
+| 18 | Snapshots: save a site's cookies under a name, restore later (switch accounts) | Planned |
+| 19 | Other site data: local / session storage, IndexedDB, caches: view sizes, delete | Planned |
+
+## From the Android app (WebView Adblocker 2.9.4; user 19-11-2026: "we added some stuffs in the android browser are missing in this pc browser")
+| Feature | Status |
+|---|---|
+| Hide my identity (device / fingerprint masking). GBrowser leaves masking off on purpose so far (Blocking.cs: the engine's Edge values are genuine); a Chrome identity would use values measured from the user's Chrome 157 on this PC | Missing (decide with the user first) |
+| New identity, "Also sign out of all sites", new identity each start | Missing |
+| Canvas noise | Missing |
+| Masked cookie-consent records (OneTrust / Cookiebot) | Missing |
+| IP-lookup masking | Missing (no VPN / proxy without approval) |
+| Block tracker pages (strict) | Missing (compare with "Block pages of ad sites") |
+| Per-page request log: Blocked / Allowed / Cookies | Missing |
+| Ad-block Tests page (blocking + detection tests) | Missing |
+| Stats: rules, filter lists, blocked total with Reset | Missing (total shown in shield menu only) |
+| Daily host-list update + "Update host lists" button | Missing |
+| Element hiding switch | To verify ("Hide ad leftovers" may be the same) |
