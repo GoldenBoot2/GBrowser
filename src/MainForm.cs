@@ -17,6 +17,8 @@ namespace GBrowser
         readonly BookmarksBar bookmarksBar = new BookmarksBar { Dock = DockStyle.Top };
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
         readonly StatusBubble bubble = new StatusBubble();
+        readonly FindBar findBar = new FindBar();
+        string lastFindText = "";
         readonly Panel outer = new Panel { Dock = DockStyle.Fill };   // page area + docked DevTools
         Omnibox omni;
         PageMenu.Host pageMenuHost;
@@ -61,6 +63,11 @@ namespace GBrowser
             devDock = new DevToolsDock(this, content, () => Current, () => Tabs);
             content.Controls.Add(bubble);
             content.Resize += (s, e) => bubble.Place();
+            content.Controls.Add(findBar);
+            content.Resize += (s, e) => { if (findBar.Visible) findBar.Place(); };
+            findBar.Search += FindRun;
+            findBar.Step += FindStep;
+            findBar.Closed += () => CloseFind(true);
             Controls.Add(bookmarksBar);
             Controls.Add(toolbar);
             Controls.Add(strip);
@@ -233,6 +240,170 @@ namespace GBrowser
                 else core.Reload();
             }
             catch { try { core.Reload(); } catch { } }
+        }
+
+        // ---------- find in page ----------
+
+        void ShowFind()
+        {
+            var t = Current;
+            if (t?.Created != true) return;
+            t.FindOpen = true;
+            string text = t.FindText ?? lastFindText;
+            findBar.Place();
+            findBar.Visible = true;
+            findBar.BringToFront();
+            if (findBar.Box.Text != text) findBar.Box.Text = text;
+            findBar.Box.Focus();
+            findBar.Box.SelectAll();
+            if (text.Length > 0) FindRun(text);
+            else findBar.SetResult(-1, -1);
+        }
+
+        async void FindRun(string text)
+        {
+            var t = Current;
+            if (t?.Created != true) return;
+            t.FindText = text;
+            lastFindText = text;
+            var f = t.View.CoreWebView2.Find;
+            if (string.IsNullOrEmpty(text)) { try { f.Stop(); } catch { } findBar.SetResult(-1, -1); return; }
+            var o = env.CreateFindOptions();
+            o.FindTerm = text;
+            o.SuppressDefaultFindDialog = true;   // no engine (Microsoft Edge) find box
+            o.ShouldHighlightAllMatches = true;
+            try { await f.StartAsync(o); } catch { }
+            UpdateFindResult(t);
+        }
+
+        void UpdateFindResult(BrowserTab t)
+        {
+            if (t != Current || !findBar.Visible || !t.Created) return;
+            try { var f = t.View.CoreWebView2.Find; findBar.SetResult(f.ActiveMatchIndex, f.MatchCount); } catch { }
+        }
+
+        void FindStep(bool next)
+        {
+            var t = Current;
+            if (t?.Created != true) return;
+            if (!findBar.Visible) { ShowFind(); return; }
+            var f = t.View.CoreWebView2.Find;
+            if (f.MatchCount <= 0) { FindRun(findBar.Box.Text); return; }
+            if (next) f.FindNext(); else f.FindPrevious();
+        }
+
+        void CloseFind(bool focusPage)
+        {
+            var t = Current;
+            if (t != null) t.FindOpen = false;
+            findBar.Visible = false;
+            if (t?.Created != true) return;
+            try { t.View.CoreWebView2.Find.Stop(); } catch { }
+            if (focusPage) t.View.Focus();
+        }
+
+        /// <summary>Each tab keeps its own find bar: switching tabs shows or hides it with that tab's text.</summary>
+        void SyncFind(BrowserTab t)
+        {
+            if (t.FindOpen && t.Created) ShowFind();
+            else findBar.Visible = false;
+        }
+
+        // ---------- page dialogs, sign-in, app links ----------
+
+        static string DialogOrigin(string uri)
+        {
+            if (Pages.IsInternal(uri)) return "GBrowser";
+            try { var u = new Uri(uri); return u.Host.Length > 0 ? u.Host : u.Scheme + ":"; } catch { return "This page"; }
+        }
+
+        /// <summary>alert / confirm / prompt / "Leave site?" in GBrowser's own dialog (the engine's are Microsoft Edge's).</summary>
+        void OnScriptDialog(BrowserTab t, CoreWebView2ScriptDialogOpeningEventArgs e)
+        {
+            var deferral = e.GetDeferral();
+            BeginInvoke((Action)(() =>
+            {
+                try
+                {
+                    int i = Tabs.IndexOf(t);
+                    if (i >= 0 && t != Current) Select(i);
+                    string msg = e.Message ?? "";
+                    if (msg.Length > 2000) msg = msg.Substring(0, 2000) + "...";
+                    string title = DialogOrigin(e.Uri) + " says";
+                    var lines = msg.Length > 0 ? new[] { Tuple.Create((string)null, msg) } : new Tuple<string, string>[0];
+                    switch (e.Kind)
+                    {
+                        case CoreWebView2ScriptDialogKind.Alert:
+                            MaterialDialog.Ask(this, title, null, lines, "OK", null);
+                            e.Accept();
+                            break;
+                        case CoreWebView2ScriptDialogKind.Confirm:
+                            if (MaterialDialog.Ask(this, title, null, lines, "OK")) e.Accept();
+                            break;
+                        case CoreWebView2ScriptDialogKind.Prompt:
+                            var r = MaterialDialog.Prompt(this, title, lines, new[] { Tuple.Create("", e.DefaultText ?? "", false) }, "OK");
+                            if (r != null) { e.ResultText = r[0]; e.Accept(); }
+                            break;
+                        case CoreWebView2ScriptDialogKind.Beforeunload:
+                            if (MaterialDialog.Ask(this, "Leave site?", null, new[] { Tuple.Create((string)null, "Changes you made may not be saved.") }, "Leave"))
+                                e.Accept();
+                            break;
+                    }
+                }
+                catch { }
+                finally { try { deferral.Complete(); } catch { } }
+            }));
+        }
+
+        /// <summary>Sites that ask for a user name and password (HTTP authentication): GBrowser's own "Sign in".</summary>
+        void OnBasicAuth(BrowserTab t, CoreWebView2BasicAuthenticationRequestedEventArgs e)
+        {
+            var deferral = e.GetDeferral();
+            BeginInvoke((Action)(() =>
+            {
+                try
+                {
+                    string origin;
+                    try { var u = new Uri(e.Uri); origin = u.Scheme + "://" + u.Authority; } catch { origin = e.Uri; }
+                    var lines = new List<Tuple<string, string>> { Tuple.Create((string)null, origin) };
+                    if (origin.StartsWith("http://")) lines.Add(Tuple.Create(IconData.Warning, "Your connection to this site isn't private"));
+                    int i = Tabs.IndexOf(t);
+                    if (i >= 0 && t != Current) Select(i);
+                    var r = MaterialDialog.Prompt(this, "Sign in", lines,
+                        new[] { Tuple.Create("Username", "", false), Tuple.Create("Password", "", true) }, "Sign in");
+                    if (r == null) e.Cancel = true;
+                    else { e.Response.UserName = r[0]; e.Response.Password = r[1]; }
+                }
+                catch { try { e.Cancel = true; } catch { } }
+                finally { try { deferral.Complete(); } catch { } }
+            }));
+        }
+
+        /// <summary>Links that open another app (mailto:, zoommtg: ...): "Open [app]?" like Chrome, with "Always allow"
+        /// for secure sites (remembered per site and link type). GBrowser opens the app itself: no engine dialog.</summary>
+        void OnExternalApp(BrowserTab t, CoreWebView2LaunchingExternalUriSchemeEventArgs e)
+        {
+            string uri = e.Uri, origin = (e.InitiatingOrigin ?? "").TrimEnd('/');
+            e.Cancel = true;
+            string scheme = ExternalApp.SchemeOf(uri);
+            BeginInvoke((Action)(() =>
+            {
+                string app = ExternalApp.AppName(scheme);
+                if (app == null) return;   // nothing installed for this link type (Chrome does nothing either)
+                string key = origin + "|" + scheme;
+                if (!(Store.Settings.ExternalAllowed.TryGetValue(key, out var always) && always))
+                {
+                    var lines = new[] { Tuple.Create((string)null, (origin.Length > 0 ? origin : "A website") + " wants to open this application.") };
+                    bool remember = false, ok;
+                    if (origin.StartsWith("https://") && !t.Private)
+                        ok = MaterialDialog.AskWithCheck(this, "Open " + app + "?", lines,
+                            "Always allow " + DialogOrigin(origin) + " to open links of this type in the associated app", out remember, "Open " + app);
+                    else ok = MaterialDialog.Ask(this, "Open " + app + "?", null, lines, "Open " + app);
+                    if (!ok) return;
+                    if (remember) { Store.Settings.ExternalAllowed[key] = true; Store.SaveSettings(); }
+                }
+                try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { }
+            }));
         }
 
         // ---------- tab menu, pin, mute ----------
@@ -496,6 +667,7 @@ namespace GBrowser
             }
             else t.OnShown();
             bubble.SetText(t.Created ? t.View.CoreWebView2.StatusBarText : "");
+            SyncFind(t);
             devDock.Show(t);
             UpdateUi();
             strip.RefreshTabs();
@@ -520,6 +692,7 @@ namespace GBrowser
             var core = t.View.CoreWebView2;
             var s = core.Settings;
             s.AreDevToolsEnabled = true;
+            s.AreDefaultScriptDialogsEnabled = false;   // GBrowser's own alert / confirm / prompt / leave-site dialogs
             s.IsStatusBarEnabled = false;   // GBrowser's own, smaller bubble (StatusBubble)
             if (!t.Private) SessionCookies.Restore(core.CookieManager);   // session logins from last time, before any page loads
             // zoom is remembered per site (like Chrome): each site opens at its own zoom, others at 100%
@@ -531,6 +704,11 @@ namespace GBrowser
             core.ContextMenuRequested += (o, e) => PageMenu.Show(t, core, e, pageMenuHost);
             // site permissions in GBrowser's own prompt (Chrome's three choices) instead of the engine's Edge prompt
             core.ProcessFailed += (o, e) => OnProcessFailed(t, core, e);
+            core.ScriptDialogOpening += (o, e) => OnScriptDialog(t, e);
+            core.BasicAuthenticationRequested += (o, e) => OnBasicAuth(t, e);
+            core.LaunchingExternalUriScheme += (o, e) => OnExternalApp(t, e);
+            core.Find.MatchCountChanged += (o, e) => UpdateFindResult(t);
+            core.Find.ActiveMatchIndexChanged += (o, e) => UpdateFindResult(t);
             core.PermissionRequested += (o, e) => PermissionPrompt.Ask(e, this, () => toolbar.RectangleToScreen(toolbar.PillRect));
 #if AUTOMATION
             core.ContextMenuRequested += (o, e) =>
@@ -827,7 +1005,7 @@ namespace GBrowser
             m.AddSeparator();
             m.Add("Zoom in", IconData.ZoomIn, "Ctrl++", () => Zoom(1.1));
             m.Add("Zoom out", IconData.ZoomOut, "Ctrl+-", () => Zoom(1 / 1.1));
-            m.Add("Find on page", IconData.Find, "Ctrl+F", () => SendKeysToPage("^f"));
+            m.Add("Find on page", IconData.Find, "Ctrl+F", ShowFind);
             m.Add("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); });
             m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
             m.Add("Developer tools", IconData.Code, "F12", () =>
@@ -1074,13 +1252,6 @@ namespace GBrowser
             try { t.View.ZoomFactor = want; } finally { BeginInvoke((Action)(() => t.ApplyingZoom = false)); }
         }
 
-        void SendKeysToPage(string keys)
-        {
-            if (Current?.Created != true) return;
-            Current.View.Focus();
-            SendKeys.Send(keys);
-        }
-
         void Zoom(double f)
         {
             if (Current?.Created != true) return;
@@ -1282,6 +1453,11 @@ namespace GBrowser
             switch (keyData)
             {
                 case Keys.Control | Keys.T: NewTab(null); return true;
+                case Keys.Control | Keys.F: ShowFind(); return true;
+                case Keys.F3:
+                case Keys.Control | Keys.G: FindStep(true); return true;
+                case Keys.Shift | Keys.F3:
+                case Keys.Control | Keys.Shift | Keys.G: FindStep(false); return true;
                 case Keys.Control | Keys.W:
                 case Keys.Control | Keys.F4: CloseTab(strip.Selected); return true;
                 case Keys.Control | Keys.Shift | Keys.T: ReopenClosed(); return true;
@@ -1306,6 +1482,7 @@ namespace GBrowser
                 case Keys.Control | Keys.R: if (Current?.Created == true) Current.View.CoreWebView2.Reload(); return true;
                 case Keys.F11: SetFullscreen(!fullscreen); return true;
                 case Keys.Escape:
+                    if (findBar.Visible && findBar.ContainsFocus) { CloseFind(true); return true; }
                     if (fullscreen && Current?.Created == true && Current.View.CoreWebView2.ContainsFullScreenElement) break;
                     if (Current?.Loading == true && Current.Created) { Current.View.CoreWebView2.Stop(); return true; }
                     break;
@@ -1776,6 +1953,20 @@ namespace GBrowser
                 case "tabinfo":
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
+                case "find":
+                    ShowFind();
+                    if (arg.Length > 0) { findBar.Box.Clear(); findBar.Box.TypeForTest(arg); }
+                    await Task.Delay(800);
+                    return "'" + findBar.ResultText + "' visible=" + findBar.Visible + " active=" + findBar.Active;
+                case "findkey":
+                    findBar.Box.KeyForTest(arg == "prev" ? Keys.Shift | Keys.Enter : arg == "esc" ? Keys.Escape : Keys.Enter);
+                    await Task.Delay(500);
+                    return "'" + findBar.ResultText + "' visible=" + findBar.Visible + " active=" + findBar.Active;
+                case "dlg": return MaterialDialog.TestInfo();
+                case "dlgtype": { int at = arg.IndexOf(' '); MaterialDialog.TestType(int.Parse(arg.Substring(0, at)), arg.Substring(at + 1)); return "ok"; }
+                case "dlgcheck": MaterialDialog.TestCheck(); return "ok";
+                case "dlgclose": MaterialDialog.TestClose(arg == "ok"); await Task.Delay(500); return "ok";
+                case "dlgshot": return MaterialDialog.TestHandle.ToInt64().ToString();
                 case "killpage": lastProcessFailed = ""; await EndPageProcess(Current.View.CoreWebView2); await Task.Delay(1500); return Current.View.CoreWebView2.Source + " | events: " + lastProcessFailed;
                 case "permchoose":
                 {

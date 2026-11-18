@@ -34,7 +34,7 @@ ICONS = [
     ('Link', 'link', ''), ('Copy', 'content_copy', ''),
     ('Videocam', 'videocam', ''), ('Mic', 'mic', ''), ('Location', 'location_on', ''), ('Notifications', 'notifications', ''),
     ('VolumeOff', 'volume_off', ''), ('Pin', 'keep', ''), ('Unpin', 'keep_off', ''), ('Duplicate', 'tab_duplicate', ''),
-    ('Sad', 'sentiment_dissatisfied', ''),
+    ('Sad', 'sentiment_dissatisfied', ''), ('ExpandLess', 'expand_less', ''),
 ]
 
 import socket

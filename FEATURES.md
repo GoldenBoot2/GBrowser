@@ -38,15 +38,15 @@ Last full audit: 19-11-2026.
 |---|---|
 | Zoom (Ctrl +/-/0, wheel), remembered per site | Done (19-11-2026) |
 | Default page zoom setting | Missing |
-| Find in page (Ctrl+F, F3) | Engine UI |
+| Find in page (Ctrl+F, F3, Ctrl+G, Shift+F3, Enter / Shift+Enter, Esc; per-tab, match count) | Done, GBrowser find bar (19-11-2026) |
 | Page right-click menu (page, link, image, media, selection, text field) | Done (19-11-2026: GBrowser Material menu, engine commands behind it) |
 | Print (Ctrl+P) | Engine UI (print preview) |
 | Save page as (Ctrl+S), view source (Ctrl+U) | Missing / to verify |
 | PDF viewer | Engine UI (to verify branding) |
-| JavaScript alert / confirm / prompt dialogs | Engine UI |
-| Login dialog (HTTP basic auth) | Engine UI |
+| JavaScript alert / confirm / prompt dialogs, "Leave site?" | Done, GBrowser dialogs (19-11-2026) |
+| Login dialog (HTTP basic auth), password hidden | Done, GBrowser "Sign in" (19-11-2026) |
 | Client certificate selection | Engine UI |
-| "Open this app?" for mailto:, ms-settings:, zoommtg: ... | Engine UI |
+| "Open this app?" for mailto:, ms-settings:, zoommtg: ... with "Always allow" (secure sites) | Done (19-11-2026); remembered choices not yet listed in Site settings |
 | Full-screen video (F11 / page full screen) | Done (page full screen: to verify) |
 | Picture-in-picture | Engine (to verify) |
 | Error pages (no network, DNS, certificate) | Done (GBrowser pages) |

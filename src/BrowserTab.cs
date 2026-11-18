@@ -20,6 +20,8 @@ namespace GBrowser
         public bool Loading, Sleeping, PlayingAudio;
         public bool Pinned;           // narrow tab with only its icon, kept at the left (like Chrome)
         public bool Muted;            // the tab's sound is off (engine IsMuted)
+        public bool FindOpen;         // this tab's find bar is open (each tab keeps its own, like Chrome)
+        public string FindText;
         public bool OpenedByPage;     // created for NewWindowRequested: the page fills it, don't navigate
         public int Blocked;           // ads / trackers blocked on the current page
         public Blocking Blocking;

@@ -23,6 +23,8 @@ namespace GBrowser
         int clicks; DateTime lastClick; Point lastClickPt;
 
         public string Placeholder = "";
+        public bool Password;                       // shows dots, never copies
+        string Shown => Password ? new string('\u25CF', text.Length) : text;
         public event Action<string> PasteAndGo;
         /// <summary>The user changed the text (typing, deleting, paste). The flag: text was added at the end (the
         /// address bar then completes it inline, like Chrome; not after a deletion).</summary>
@@ -83,9 +85,10 @@ namespace GBrowser
             if (text.Length == 0) return;
             const TextFormatFlags f = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
             int n = Math.Min(text.Length, 4096);
+            string shown = Shown;
             using (var g = CreateGraphics())
                 for (int i = 1; i <= n; i++)
-                    pos[i] = TextRenderer.MeasureText(g, text.Substring(0, i), Font, new Size(int.MaxValue, int.MaxValue), f).Width;
+                    pos[i] = TextRenderer.MeasureText(g, shown.Substring(0, i), Font, new Size(int.MaxValue, int.MaxValue), f).Width;
             for (int i = n + 1; i <= text.Length; i++) pos[i] = pos[n];
         }
 
@@ -104,7 +107,7 @@ namespace GBrowser
             }
             else
             {
-                TextRenderer.DrawText(g, text, Font, new Point(-scroll, y), ForeColor, BackColor, f);
+                TextRenderer.DrawText(g, Shown, Font, new Point(-scroll, y), ForeColor, BackColor, f);
                 if (SelectionLength > 0 && Focused)
                 {
                     int x1 = pos[SelectionStart] - scroll, x2 = pos[SelectionStart + SelectionLength] - scroll;
@@ -112,7 +115,7 @@ namespace GBrowser
                     using (var b = new SolidBrush(Theme.PrimaryContainer)) g.FillRectangle(b, r);
                     var st = g.Save();
                     g.SetClip(r);
-                    TextRenderer.DrawText(g, text, Font, new Point(-scroll, y), Theme.OnPrimaryContainer, Theme.PrimaryContainer, f);
+                    TextRenderer.DrawText(g, Shown, Font, new Point(-scroll, y), Theme.OnPrimaryContainer, Theme.PrimaryContainer, f);
                     g.Restore(st);
                 }
             }
@@ -193,7 +196,7 @@ namespace GBrowser
             Changed(true);
         }
 
-        void Copy() { if (SelectionLength > 0) try { Clipboard.SetText(SelectedText); } catch { } }
+        void Copy() { if (SelectionLength > 0 && !Password) try { Clipboard.SetText(SelectedText); } catch { } }
         void Cut() { Copy(); DeleteSelection(); }
         void Paste() { try { if (Clipboard.ContainsText()) Insert(Clipboard.GetText()); } catch { } }
 
@@ -431,7 +434,7 @@ namespace GBrowser
         {
             readonly MaterialTextBox box;
             public Acc(MaterialTextBox b) : base(b) { box = b; }
-            public override string Value { get => box.text; set => box.Text = value; }
+            public override string Value { get => box.Shown; set => box.Text = value; }
             public override AccessibleRole Role => AccessibleRole.Text;
             public override string Name => box.AccessibleName ?? box.Placeholder;
         }
