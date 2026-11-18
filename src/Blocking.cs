@@ -274,6 +274,9 @@ namespace GBrowser
         {
             var core = (CoreWebView2)sender;
             string uri = e.Uri ?? "";
+#if AUTOMATION
+            TestLog.Add("nav " + uri + " user=" + e.IsUserInitiated + " redirect=" + e.IsRedirected + " kind=" + e.NavigationKind);
+#endif
             // only GBrowser's own pages may message the app (the bridge also checks the sender)
             try { core.Settings.IsWebMessageEnabled = Pages.IsInternal(uri); } catch { }
             // HTTPS-First: http:// addresses open over https://; sites without HTTPS get a warning page first
