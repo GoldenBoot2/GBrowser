@@ -130,6 +130,7 @@ def jhash(s):
 
 
 def fetch(name, url):
+    os.makedirs(LIST_DIR, exist_ok=True)   # git-ignored: missing on a fresh checkout (CI)
     path = os.path.join(LIST_DIR, name)
     if url and '--offline' not in sys.argv:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (filter build)'})
