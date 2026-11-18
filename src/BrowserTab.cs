@@ -104,15 +104,36 @@ namespace GBrowser
                     await s.CopyToAsync(ms);
                     // remembered for bookmarks / history / new tab (never from private tabs or GBrowser's own pages)
                     string src = View.CoreWebView2.Source;
-                    if (!Private && !Pages.IsInternal(src)) Favicons.Save(src, ms.ToArray());
+                    bool keep = !Private && !Pages.IsInternal(src);
+                    if (keep) Favicons.Save(src, ms.ToArray());
                     ms.Position = 0;
                     var old = Favicon;
-                    Favicon = new Bitmap(Image.FromStream(ms));
+                    // a sharper icon kept for the site (SharpIcons) is used on the tab too
+                    var sharp = keep ? Favicons.Image(src) : null;
+                    Favicon = sharp != null && sharp.Width > 16 ? new Bitmap(sharp) : new Bitmap(Image.FromStream(ms));
                     old?.Dispose();
+                    if (keep) GetSharpIcon(src, View.CoreWebView2.FaviconUri, done);
                 }
             }
             catch { Favicon = null; }
             done();
+        }
+
+        async void GetSharpIcon(string src, string engineIcon, Action done)
+        {
+            try
+            {
+                var png = await SharpIcons.Fetch(View.CoreWebView2, src, engineIcon);
+                if (png == null || !Created || View.CoreWebView2.Source != src) return;
+                Favicons.Save(src, png);
+                var img = Favicons.Image(src);
+                if (img == null || img.Width <= 16) return;
+                var old = Favicon;
+                Favicon = new Bitmap(img);
+                old?.Dispose();
+                done();
+            }
+            catch { }
         }
 
         /// <summary>Hidden tab: ask the engine to use less memory; after SleepMinutes it is suspended.</summary>

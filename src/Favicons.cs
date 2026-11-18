@@ -43,6 +43,9 @@ namespace GBrowser
             lock (gate)
             {
                 if (cache.TryGetValue(key, out var old) && old != null && old.SequenceEqual(png)) return;
+                // the engine's 16 px icon never replaces a sharper one (SharpIcons) already kept for the site
+                if (old == null && !cache.ContainsKey(key)) old = GetUnlocked(key);
+                if (old != null && PngWidth(png) <= 16 && PngWidth(old) > 16) return;
                 cache[key] = png;
                 if (images.TryGetValue(key, out var img)) { img?.Dispose(); images.Remove(key); }
             }
@@ -53,19 +56,25 @@ namespace GBrowser
         {
             string key = KeyOf(url);
             if (key == null) return null;
-            lock (gate)
-            {
-                if (cache.TryGetValue(key, out var png)) return png;
-                try
-                {
-                    var b64 = SecureFile.Read(FileOf(key), out _);
-                    png = b64 == null ? null : Convert.FromBase64String(b64);
-                }
-                catch { png = null; }
-                cache[key] = png;
-                return png;
-            }
+            lock (gate) return GetUnlocked(key);
         }
+
+        static byte[] GetUnlocked(string key)
+        {
+            if (cache.TryGetValue(key, out var png)) return png;
+            try
+            {
+                var b64 = SecureFile.Read(FileOf(key), out _);
+                png = b64 == null ? null : Convert.FromBase64String(b64);
+            }
+            catch { png = null; }
+            cache[key] = png;
+            return png;
+        }
+
+        /// <summary>Width from the PNG header (0 when not a PNG).</summary>
+        public static int PngWidth(byte[] png) =>
+            png != null && png.Length > 24 && png[0] == 0x89 && png[1] == (byte)'P' ? (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19] : 0;
 
         /// <summary>The icon as an image (cached), or null.</summary>
         public static Image Image(string url)

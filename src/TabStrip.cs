@@ -156,9 +156,13 @@ namespace GBrowser
                             g.DrawArc(pen, ix + S(1), iy + S(1), S(14), S(14), spinAngle, 270);
                     }
                     else if (t.Private) Icons.Draw(g, IconData.Private, ix, iy, S(16), Theme.Primary);
-                    else if (t.Favicon != null) g.DrawImage(t.Favicon, ix, iy, S(16), S(16));
+                    else if (t.Favicon != null)
+                    {
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(t.Favicon, ix, iy, S(16), S(16));
+                    }
                     else if (!t.Created && t.Url != null && Favicons.Image(t.Url) is Image remembered)
-                        g.DrawImage(remembered, ix, iy, S(16), S(16));   // a tab not loaded yet: the site's remembered icon (like Chrome)
+                        { g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic; g.DrawImage(remembered, ix, iy, S(16), S(16)); }   // a tab not loaded yet: the site's remembered icon (like Chrome)
                     else Icons.Draw(g, IconData.Public, ix, iy, S(16), Theme.OnSurfaceVariant);
                     int textLeft = ix + S(24);
                     int textRight = showClose ? CloseRect(r).X - S(4) : r.Right - S(10);
