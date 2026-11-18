@@ -71,9 +71,12 @@ namespace GBrowser
             strip.TabClosed += i => CloseTab(i);
             strip.NewTabClicked += () => NewTab(null);
             strip.TabSearchClicked += ShowTabSearch;
+            strip.TabMenu += ShowTabMenu;
+            strip.TabMuteClicked += i => SetMuted(Tabs[i], !Tabs[i].Muted);
             frame = new WindowFrame(this, strip);
             strip.TabMoved += (from, to) =>
             {
+                if (Tabs[from].Pinned != Tabs[to].Pinned) return;   // pinned and normal tabs keep their own block
                 var t = Tabs[from]; Tabs.RemoveAt(from); Tabs.Insert(to, t);
                 strip.Selected = Tabs.IndexOf(Current == null ? t : Current);
                 if (strip.Selected < 0) strip.Selected = to;
@@ -161,6 +164,56 @@ namespace GBrowser
             base.OnSizeChanged(e);
             bool max = WindowState == FormWindowState.Maximized;
             if (strip.WindowMaximized != max) { strip.WindowMaximized = max; strip.Invalidate(); }
+        }
+
+        // ---------- tab menu, pin, mute ----------
+
+        /// <summary>Right-click on a tab: Chrome's tab menu.</summary>
+        void ShowTabMenu(int i, Point screen)
+        {
+            if (i < 0 || i >= Tabs.Count) return;
+            var t = Tabs[i];
+            var m = NewMenu();
+            m.Add("New tab to the right", IconData.Add, null, () => NewTab(null, true, Tabs.IndexOf(t) + 1));
+            m.AddSeparator();
+            m.Add("Reload", IconData.Refresh, "Ctrl+R", () => { if (t.Created) t.View.CoreWebView2.Reload(); else Select(Tabs.IndexOf(t)); });
+            m.Add("Duplicate", IconData.Duplicate, null, () => DuplicateTab(t)).Enabled = !string.IsNullOrEmpty(t.Created ? t.View.CoreWebView2.Source : t.Url);
+            m.Add(t.Pinned ? "Unpin" : "Pin", t.Pinned ? IconData.Unpin : IconData.Pin, null, () => SetPinned(t, !t.Pinned));
+            m.Add(t.Muted ? "Unmute tab" : "Mute tab", t.Muted ? IconData.Volume : IconData.VolumeOff, null, () => SetMuted(t, !t.Muted));
+            m.AddSeparator();
+            m.Add("Close", IconData.Close, "Ctrl+W", () => CloseTab(Tabs.IndexOf(t)));
+            m.Add("Close other tabs", null, null, () => { foreach (var x in Tabs.Where(x => x != t && !x.Pinned).ToList()) CloseTab(Tabs.IndexOf(x)); })
+                .Enabled = Tabs.Any(x => x != t && !x.Pinned);
+            m.Add("Close tabs to the right", null, null, () => { foreach (var x in Tabs.Skip(Tabs.IndexOf(t) + 1).Where(x => !x.Pinned).ToList()) CloseTab(Tabs.IndexOf(x)); })
+                .Enabled = Tabs.Skip(i + 1).Any(x => !x.Pinned);
+            var p = strip.PointToClient(screen);
+            m.ShowAt(strip, new Rectangle(p.X, p.Y, 1, 1), false, null);
+        }
+
+        void DuplicateTab(BrowserTab t)
+        {
+            string url = t.Created ? t.View.CoreWebView2.Source : t.Url;
+            if (string.IsNullOrEmpty(url)) return;
+            if (t.Private) NewPrivateTab(url); else NewTab(url, true, Tabs.IndexOf(t) + 1);
+        }
+
+        /// <summary>Pinned tabs are a block at the left: pinning moves the tab to the end of that block.</summary>
+        void SetPinned(BrowserTab t, bool pin)
+        {
+            var cur = Current;
+            Tabs.Remove(t);
+            t.Pinned = pin;
+            int at = Tabs.TakeWhile(x => x.Pinned).Count();
+            Tabs.Insert(at, t);
+            strip.Selected = Tabs.IndexOf(cur);
+            strip.RefreshTabs();
+        }
+
+        void SetMuted(BrowserTab t, bool mute)
+        {
+            t.Muted = mute;
+            if (t.Created) try { t.View.CoreWebView2.IsMuted = mute; } catch { }
+            strip.RefreshTabs();
         }
 
         /// <summary>Tab search (the down-arrow at the left of the tab row, Ctrl+Shift+A): all open tabs.</summary>
@@ -292,7 +345,7 @@ namespace GBrowser
             bool restarted = Environment.GetCommandLineArgs().Contains("--restarted");
             if ((st.RestoreTabs || restarted) && st.Session != null && st.Session.Count > 0)
             {
-                foreach (var u in st.Session) Tabs.Add(new BrowserTab(u, TitleFor(u)));
+                foreach (var u in st.Session) Tabs.Add(new BrowserTab(u, TitleFor(u)) { Pinned = Tabs.Count < st.SessionPinned });
                 int sel = Math.Max(0, Math.Min(st.SessionIndex, Tabs.Count - 1));
                 if (args.Count == 0) Select(sel);
             }
@@ -516,6 +569,7 @@ namespace GBrowser
             core.HistoryChanged += (o, e) => { if (t == Current) UpdateUi(); };
             core.FaviconChanged += (o, e) => t.UpdateFavicon(() => { strip.RefreshTabs(); bookmarksBar.Invalidate(); });
             core.IsDocumentPlayingAudioChanged += (o, e) => { t.PlayingAudio = core.IsDocumentPlayingAudio; strip.RefreshTabs(); };
+            if (t.Muted) core.IsMuted = true;
             core.WindowCloseRequested += (o, e) => { int i = Tabs.IndexOf(t); if (i >= 0) CloseTab(i); };
             core.ContainsFullScreenElementChanged += (o, e) => SetFullscreen(core.ContainsFullScreenElement);
             core.NewWindowRequested += async (o, e) =>
@@ -1644,6 +1698,10 @@ namespace GBrowser
                     await Task.Delay(600);
                     return lastContextInfo ?? "no menu event";
                 }
+                case "tabmenu": ShowTabMenu(int.Parse(arg), strip.PointToScreen(new Point(200, 20))); await Task.Delay(300); return "ok";
+                case "tabinfo":
+                    return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
+                        (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
                 case "permchoose":
                 {
                     var p = PermissionPrompt.Open;
@@ -1827,6 +1885,7 @@ namespace GBrowser
             var st = Store.Settings;
             st.Session = Tabs.Where(t => !t.Private).Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
             st.SessionIndex = Math.Max(0, strip.Selected);
+            st.SessionPinned = Tabs.TakeWhile(t => t.Pinned).Count(t => !t.Private);
             st.WindowMax = WindowState == FormWindowState.Maximized || fullscreen;
             var b = WindowState == FormWindowState.Normal && !fullscreen ? Bounds : RestoreBounds;
             st.WindowX = b.X; st.WindowY = b.Y; st.WindowW = b.Width; st.WindowH = b.Height;

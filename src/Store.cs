@@ -162,6 +162,7 @@ namespace GBrowser
         public long TotalBlocked { get; set; }
         public List<string> Session { get; set; } = new List<string>();
         public int SessionIndex { get; set; }
+        public int SessionPinned { get; set; }    // the first N session tabs are pinned
         public int WindowX { get; set; } = -1;
         public int WindowY { get; set; } = -1;
         public int WindowW { get; set; } = 1200;

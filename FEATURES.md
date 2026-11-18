@@ -12,13 +12,14 @@ Last full audit: 19-11-2026.
 | Tab search (Ctrl+Shift+A) | Done |
 | Sleeping / unloaded background tabs, keep sites active | Done |
 | Private tabs (Ctrl+Shift+N) | Done |
-| Tab right-click menu (duplicate, pin, mute, reload, close others / to the right, move to new window) | Missing |
-| Pinned tabs | Missing |
-| Mute tab, sound icon click to mute | Missing (sound icon shown, no mute) |
+| Tab right-click menu (new tab to the right, reload, duplicate, pin, mute, close, close others / to the right) | Done (19-11-2026; "move to new window" comes with windows) |
+| Pinned tabs (icon only, kept at the left, restored after restart) | Done (19-11-2026) |
+| Mute tab, click the speaker icon to mute / unmute | Done (19-11-2026) |
 | Tab groups | Missing |
 | New window (Ctrl+N), drag a tab out into its own window, multiple windows | Missing |
 | Crashed tab ("Aw, snap" page with Reload) | Missing (renderer crash not handled) |
 | Tab hover card (title + site) | Missing |
+| Tabs not loaded yet show the site's remembered icon | Done (19-11-2026) |
 
 ## Address bar (omnibox)
 | Feature | Status |

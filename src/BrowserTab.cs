@@ -18,6 +18,8 @@ namespace GBrowser
         public Image Favicon;
         public bool ApplyingZoom;   // GBrowser is setting the site's saved zoom (not the user zooming)
         public bool Loading, Sleeping, PlayingAudio;
+        public bool Pinned;           // narrow tab with only its icon, kept at the left (like Chrome)
+        public bool Muted;            // the tab's sound is off (engine IsMuted)
         public bool OpenedByPage;     // created for NewWindowRequested: the page fills it, don't navigate
         public int Blocked;           // ads / trackers blocked on the current page
         public Blocking Blocking;

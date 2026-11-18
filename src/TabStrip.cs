@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -20,6 +21,8 @@ namespace GBrowser
         public event Action NewTabClicked;
         public event Action<int, int> TabMoved;
         public event Action TabSearchClicked;
+        public event Action<int, Point> TabMenu;       // right-click on a tab (screen point)
+        public event Action<int> TabMuteClicked;       // the speaker icon on a tab
 
         /// <summary>Window state for the caption buttons (set by the window).</summary>
         public bool WindowMaximized;
@@ -27,7 +30,7 @@ namespace GBrowser
         public int CaptionHover = -1, CaptionPressed = -1;
         bool hoverSearch;
 
-        int hover = -1; bool hoverClose, hoverPlus, pressPlus;
+        int hover = -1; bool hoverAudio, hoverClose, hoverPlus, pressPlus;
         int dragIndex = -1; Point dragStart; bool dragging;
         readonly Timer spin = new Timer { Interval = 50 };
         float spinAngle;
@@ -51,13 +54,32 @@ namespace GBrowser
         int CaptionWidth => S(46);
         public Rectangle CaptionRect(int i) => new Rectangle(Width - (3 - i) * CaptionWidth, 0, CaptionWidth, Height);
 
+        int PinnedW => S(44);
+
         Rectangle TabRect(int i)
         {
+            // pinned tabs (always first) are narrow; the others share the rest of the row
             int left = SearchRect.Right + S(6), plus = S(44);
+            int pinned = Tabs.Count(t => t.Pinned);
+            if (i < pinned) return new Rectangle(left + i * PinnedW, TopPad, PinnedW, Height - TopPad);
+            left += pinned * PinnedW;
             int avail = Width - left - plus - 3 * CaptionWidth - S(8);
-            int n = Math.Max(1, Tabs.Count);
+            int n = Math.Max(1, Tabs.Count - pinned);
             int w = Math.Min(S(240), Math.Max(S(56), avail / n));
-            return new Rectangle(left + i * w, TopPad, w, Height - TopPad);
+            return new Rectangle(left + (i - pinned) * w, TopPad, w, Height - TopPad);
+        }
+
+        /// <summary>The speaker icon of a tab that plays sound or is muted (click = mute / unmute).</summary>
+        Rectangle AudioRect(int i)
+        {
+            var t = Tabs[i];
+            if (!(t.PlayingAudio || t.Muted) || t.Pinned) return Rectangle.Empty;
+            var r = TabRect(i);
+            bool sel = i == Selected, narrow = r.Width < S(90);
+            bool showClose = sel || i == hover || !narrow;
+            int right = showClose ? CloseRect(r).X - S(4) : r.Right - S(10);
+            int iy = r.Y + (r.Height - S(16)) / 2 - (sel ? 0 : S(2));
+            return new Rectangle(right - S(18), iy - S(1), S(18), S(18));
         }
 
         /// <summary>0..2 = window button at p, -1 = none.</summary>
@@ -125,9 +147,9 @@ namespace GBrowser
                             using (var pen = new Pen(Theme.OutlineVariant, Math.Max(1, S(1))))
                                 g.DrawLine(pen, r.Right, r.Y + S(9), r.Right, r.Bottom - S(13));
                     }
-                    int ix = r.X + S(12), iy = r.Y + (r.Height - S(16)) / 2 - (sel ? 0 : S(2));
+                    int ix = t.Pinned ? r.X + (r.Width - S(16)) / 2 : r.X + S(12), iy = r.Y + (r.Height - S(16)) / 2 - (sel ? 0 : S(2));
                     bool narrow = r.Width < S(90);
-                    bool showClose = sel || i == hover || !narrow;
+                    bool showClose = !t.Pinned && (sel || i == hover || !narrow);
                     if (t.Loading)
                     {
                         using (var pen = new Pen(Theme.Primary, S(2)))
@@ -135,14 +157,25 @@ namespace GBrowser
                     }
                     else if (t.Private) Icons.Draw(g, IconData.Private, ix, iy, S(16), Theme.Primary);
                     else if (t.Favicon != null) g.DrawImage(t.Favicon, ix, iy, S(16), S(16));
+                    else if (!t.Created && t.Url != null && Favicons.Image(t.Url) is Image remembered)
+                        g.DrawImage(remembered, ix, iy, S(16), S(16));   // a tab not loaded yet: the site's remembered icon (like Chrome)
                     else Icons.Draw(g, IconData.Public, ix, iy, S(16), Theme.OnSurfaceVariant);
                     int textLeft = ix + S(24);
                     int textRight = showClose ? CloseRect(r).X - S(4) : r.Right - S(10);
                     // (the blocked count is shown on the toolbar's shield, not on tabs)
-                    if (t.PlayingAudio)
+                    if (t.Pinned)
                     {
-                        Icons.Draw(g, IconData.Volume, textRight - S(16), iy, S(16), Theme.Primary);
-                        textRight -= S(20);
+                        // a pinned tab shows only its icon; a small dot when it plays sound / is muted
+                        if (t.PlayingAudio || t.Muted)
+                            using (var b = new SolidBrush(t.Muted ? Theme.Outline : Theme.Primary)) g.FillEllipse(b, r.Right - S(12), r.Y + S(8), S(6), S(6));
+                        continue;
+                    }
+                    if (t.PlayingAudio || t.Muted)
+                    {
+                        var ar = AudioRect(i);
+                        if (i == hover && hoverAudio) using (var b = new SolidBrush(Theme.Pressed)) g.FillEllipse(b, ar);
+                        Icons.Draw(g, t.Muted ? IconData.VolumeOff : IconData.Volume, ar.X + S(1), ar.Y + S(1), S(16), t.Muted ? Theme.OnSurfaceVariant : Theme.Primary);
+                        textRight = ar.X - S(4);
                     }
                     if (textRight - textLeft > S(8))
                     {
@@ -212,14 +245,17 @@ namespace GBrowser
                 }
             }
             int h = HitTab(e.Location);
-            bool hc = h >= 0 && CloseRect(TabRect(h)).Contains(e.Location);
+            bool hc = h >= 0 && !Tabs[h].Pinned && CloseRect(TabRect(h)).Contains(e.Location);
+            bool ha = h >= 0 && AudioRect(h).Contains(e.Location);
+            if (ha != hoverAudio) { hoverAudio = ha; Invalidate(); }
             bool hp = PlusRect().Contains(e.Location);
             bool hs = SearchRect.Contains(e.Location);
             if (h != hover || hc != hoverClose || hp != hoverPlus || hs != hoverSearch)
             {
                 hover = h; hoverClose = hc; hoverPlus = hp; hoverSearch = hs;
                 Invalidate();
-                string text = hs ? "Search tabs (Ctrl+Shift+A)" : hp ? "New tab (Ctrl+T)" : hc ? "Close tab (Ctrl+W)" : h >= 0 ? Tabs[h].TooltipText : null;
+                string text = hs ? "Search tabs (Ctrl+Shift+A)" : hp ? "New tab (Ctrl+T)" : hc ? "Close tab (Ctrl+W)" :
+                    ha ? (Tabs[h].Muted ? "Unmute tab" : "Mute tab") : h >= 0 ? Tabs[h].TooltipText : null;
                 if (text != tipText) { tipText = text; tip.SetToolTip(this, text); }
             }
         }
@@ -236,7 +272,8 @@ namespace GBrowser
             {
                 if (PlusRect().Contains(e.Location)) { pressPlus = true; Invalidate(); return; }
                 if (SearchRect.Contains(e.Location)) { TabSearchClicked?.Invoke(); return; }
-                if (h >= 0 && !CloseRect(TabRect(h)).Contains(e.Location))
+                if (h >= 0 && AudioRect(h).Contains(e.Location)) { TabMuteClicked?.Invoke(h); return; }
+                if (h >= 0 && (Tabs[h].Pinned || !CloseRect(TabRect(h)).Contains(e.Location)))
                 {
                     TabSelected?.Invoke(h);
                     dragIndex = h; dragStart = e.Location; dragging = false;
@@ -250,8 +287,9 @@ namespace GBrowser
             if (e.Button == MouseButtons.Left)
             {
                 if (pressPlus) { pressPlus = false; Invalidate(); if (PlusRect().Contains(e.Location)) NewTabClicked?.Invoke(); }
-                else if (!dragging && h >= 0 && CloseRect(TabRect(h)).Contains(e.Location)) TabClosed?.Invoke(h);
+                else if (!dragging && h >= 0 && !Tabs[h].Pinned && CloseRect(TabRect(h)).Contains(e.Location)) TabClosed?.Invoke(h);
             }
+            else if (e.Button == MouseButtons.Right && h >= 0) TabMenu?.Invoke(h, PointToScreen(e.Location));
             else if (e.Button == MouseButtons.Middle && h >= 0) TabClosed?.Invoke(h);
             dragIndex = -1; dragging = false;
         }
