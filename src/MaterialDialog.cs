@@ -216,6 +216,7 @@ namespace GBrowser
             base.OnFormClosed(e);
         }
 
+#if AUTOMATION
         public static string TestInfo() => open == null ? "none" : open.title + " | " + string.Join(" / ", open.lines.Select(l => l.Item2)) +
             " | fields " + open.fields.Count + (open.checkText != null ? " | check: " + open.checkText + (open.isChecked ? " [x]" : " [ ]") : "") +
             " | buttons " + open.cancelText + " / " + open.okText;
@@ -223,6 +224,7 @@ namespace GBrowser
         public static void TestCheck() { if (open != null) { open.isChecked = !open.isChecked; open.Invalidate(); } }
         public static void TestClose(bool ok) { if (open != null) { open.DialogResult = ok ? DialogResult.OK : DialogResult.Cancel; open.Close(); } }
         public static IntPtr TestHandle => open != null && open.IsHandleCreated ? open.Handle : IntPtr.Zero;
+#endif
 
         /// <summary>A dialog with text fields (label, value, password): their texts when the user chose OK, else null.</summary>
         public static string[] Prompt(IWin32Window owner, string title, IEnumerable<Tuple<string, string>> lines, IEnumerable<Tuple<string, string, bool>> inputs,

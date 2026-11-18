@@ -154,7 +154,7 @@ namespace GBrowser
                                 // the frame's script runs as its document starts, before the browser side lists the
                                 // frame under its new address: look again for about 2 s before giving up
                                 if (++d.Tries < 8) { RetryCss(d); continue; }
-                                d.Broken = true; TestLog.Add("css frame not found: " + d.Href); continue;
+                                d.Broken = true; TestNote("css frame not found: " + d.Href); continue;
                             }
                             await Cdp(d.Session, "DOM.enable", NoArgs);
                             await Cdp(d.Session, "CSS.enable", NoArgs);
@@ -176,7 +176,7 @@ namespace GBrowser
                         {
                             // a document replaced while writing, or a frame that went away: the page script falls back
                             d.Broken = true;
-                            TestLog.Add("css sheet: " + ex.Message + " " + d.Href);
+                            TestNote("css sheet: " + ex.Message + " " + d.Href);
                         }
                     }
                 } while (cssAgain);
@@ -187,6 +187,13 @@ namespace GBrowser
         public static readonly List<string> TestLog = new List<string>();
         public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
 #endif
+        /// <summary>A note for the test channel's log; nothing in normal builds.</summary>
+        static void TestNote(string s)
+        {
+#if AUTOMATION
+            TestLog.Add(s);
+#endif
+        }
 
         static Settings S => Store.Settings;
 
@@ -614,7 +621,11 @@ namespace GBrowser
             return "{\"c\":[" + c + "],\"p\":[" + p + "]}";
         }
 
+#if AUTOMATION
         public string dbg() => Blocking.TestDbg;
+#else
+        public string dbg() => "";
+#endif
         public bool css(string doc, string href, bool top, string css) => b.QueueCss(doc, href, top, css);
         public bool cssok(string doc) => b.CssOk(doc);
         public bool dnt() => S.DoNotTrack;
