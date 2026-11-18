@@ -127,6 +127,9 @@ namespace GBrowser
         public string HomePage { get; set; } = "gbrowser://newtab";
         public string SearchEngine { get; set; } = "google";
         public string ThemeMode { get; set; } = "system";   // system | light | dark
+        public string DevToolsDock { get; set; } = "right";  // right | bottom (docked DevTools, DevToolsDock.cs)
+        public double DevToolsWidth { get; set; } = 0.38;    // share of the page area
+        public double DevToolsHeight { get; set; } = 0.4;
         public string ThemeColor { get; set; } = "gold";    // gold | accent (Windows accent colour) | #RRGGBB
         public bool RestoreTabs { get; set; } = true;
         public int SleepMinutes { get; set; } = 5;          // 0 = never put hidden tabs to sleep

@@ -17,6 +17,8 @@ namespace GBrowser
         readonly BookmarksBar bookmarksBar = new BookmarksBar { Dock = DockStyle.Top };
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
         readonly StatusBubble bubble = new StatusBubble();
+        readonly Panel outer = new Panel { Dock = DockStyle.Fill };   // page area + docked DevTools
+        DevToolsDock devDock;
         readonly Timer sleepTimer = new Timer { Interval = 30000 };
         readonly Stack<string> closedTabs = new Stack<string>();
         CoreWebView2Environment env;
@@ -51,7 +53,9 @@ namespace GBrowser
             Bounds = bounds;
             if (st.WindowMax) WindowState = FormWindowState.Maximized;
 
-            Controls.Add(content);
+            outer.Controls.Add(content);
+            Controls.Add(outer);
+            devDock = new DevToolsDock(this, content, () => Current, () => Tabs);
             content.Controls.Add(bubble);
             content.Resize += (s, e) => bubble.Place();
             Controls.Add(bookmarksBar);
@@ -336,6 +340,7 @@ namespace GBrowser
             }
             else t.OnShown();
             bubble.SetText(t.Created ? t.View.CoreWebView2.StatusBarText : "");
+            devDock.Show(t);
             UpdateUi();
             strip.RefreshTabs();
         }
@@ -347,6 +352,7 @@ namespace GBrowser
             if (!t.Private && !string.IsNullOrEmpty(t.Url) && Pages.PageName(t.Url) != "newtab") closedTabs.Push(t.Url);
             bool wasSel = i == strip.Selected;
             Tabs.RemoveAt(i);
+            devDock.CloseFor(t);
             t.Dispose();
             if (Tabs.Count == 0) { Close(); return; }
             if (wasSel) { strip.Selected = -1; Select(Math.Min(i, Tabs.Count - 1)); }
@@ -359,6 +365,7 @@ namespace GBrowser
             var s = core.Settings;
             s.AreDevToolsEnabled = true;
             s.IsStatusBarEnabled = false;   // GBrowser's own, smaller bubble (StatusBubble)
+            devDock.Attach((uint)core.BrowserProcessId);   // DevTools windows of the engine get docked
             core.StatusBarTextChanged += (o, e) => { if (t == Current) bubble.SetText(core.StatusBarText); };
             s.AreDefaultContextMenusEnabled = true;
             s.IsZoomControlEnabled = true;
@@ -635,7 +642,12 @@ namespace GBrowser
             m.Add("Find on page", IconData.Find, "Ctrl+F", () => SendKeysToPage("^f"));
             m.Add("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); });
             m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
-            m.Add("Developer tools", IconData.Code, "F12", () => { if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow(); });
+            m.Add("Developer tools", IconData.Code, "F12", () =>
+            {
+                // like Chrome: toggles this tab's DevTools (it docks itself when it opens)
+                if (devDock.Docked(Current)) devDock.CloseCurrent();
+                else if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow();
+            });
             m.AddSeparator();
             m.Add("Settings", IconData.Settings, null, () => OpenPage("settings"));
             m.Add("About GBrowser", IconData.Info, null, () => OpenPage("about"));
@@ -1311,6 +1323,12 @@ namespace GBrowser
                 }
                 case "menuclose": MaterialMenu.Current?.Close(); return "ok";
                 case "menuopen": return MaterialMenu.Current == null ? "closed" : "open";
+                case "devtools":
+                    if (arg == "open") { Current?.View.CoreWebView2.OpenDevToolsWindow(); await Task.Delay(2500); }
+                    else if (arg == "close") devDock.CloseCurrent();
+                    else if (arg == "side") devDock.ToggleSide();
+                    else if (arg == "undock") devDock.Undock();
+                    return "docked=" + devDock.Docked(Current) + " count=" + devDock.DockedCount + " frame=" + devDock.FrameInfo() + " page=" + content.Bounds + " splitter=" + devDock.SplitterOnScreen;
                 case "bubble": bubble.SetText(arg); return bubble.Visible ? bubble.Bounds.ToString() : "hidden";
                 case "extinstall":
                 {
@@ -1430,6 +1448,7 @@ namespace GBrowser
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            devDock?.Shutdown();   // docked DevTools windows go back to the engine before the window closes
             // "Clear browsing data when GBrowser closes": cookies, site data, cache, history (passwords kept)
             if (Store.Settings.ClearOnExit && !exitCleared && Profile != null)
             {
