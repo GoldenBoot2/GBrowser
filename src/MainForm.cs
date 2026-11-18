@@ -2071,6 +2071,7 @@ namespace GBrowser
                 case "tabinfo":
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
+                case "dbg": Blocking.TestDbg = arg; return "ok";
                 case "siteinfo":
                     await ShowSiteInfo();
                     await Task.Delay(300);

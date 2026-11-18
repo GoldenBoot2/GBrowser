@@ -21,6 +21,7 @@ namespace GBrowser
         public Blocking(BrowserTab tab, CoreWebView2Environment env) { this.tab = tab; this.env = env; }
 #if AUTOMATION
         public static readonly List<string> TestLog = new List<string>();
+        public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
 #endif
 
         static Settings S => Store.Settings;
@@ -435,7 +436,7 @@ namespace GBrowser
             return "{\"c\":[" + c + "],\"p\":[" + p + "]}";
         }
 
-        public string dbg() => "";
+        public string dbg() => Blocking.TestDbg;
         public bool dnt() => S.DoNotTrack;
         public string p(string href) => "";   // privacy masking: WebView2 already is Edge, its values are genuine
 

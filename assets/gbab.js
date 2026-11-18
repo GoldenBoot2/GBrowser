@@ -7,10 +7,8 @@
   var SL = /*SCRIPTLETS*/null;
   var RAWJS = /*RAWJS*/null;
   var EXTCSS = /*EXTCSS*/null;
-  var K = typeof Symbol === 'function' ? Symbol.for('gbab') : '__gbab';
   var B = window.__gbAdblock;
-  if (!B || window[K]) return;
-  try { Object.defineProperty(window, K, {value: true}); } catch (e) { return; }
+  if (!B) return;
   // keep the bridge out of the page's sight (ad-block detectors look for odd globals)
   try { delete window.__gbAdblock; } catch (e) {}
   var DBG = '';
@@ -22,14 +20,49 @@
   }
 
   // ---- functions we replace look like the browser's own ----
-  // errors thrown through our wrappers: drop our own frames (injected script lines carry
-  // "<anonymous>:line:col"; the browser's built-ins show plain "<anonymous>")
-  function cleanStack(e) {
+  // ---- calling the browser's own functions from our wrappers ----
+  // A wrapper is one more JavaScript frame. When the built-in throws (wrong receiver or argument: checks a
+  // site makes on purpose), the error's stack would show our line, e.g. "at get offsetHeight (<anonymous>:
+  // 2095:17)", and at the depth limit lose one of the page's frames (measured 19-11-2026: Cloudflare's check
+  // failed with Stealth on for exactly this). Such throws have no side effects, so the built-in runs once more
+  // with room for our frames, and our frames are taken out, also of the frames a page-installed
+  // Error.prepareStackTrace receives: the page gets exactly the error the browser itself throws.
+  // A bound apply captured now: no stack frame of its own (measured) and immune to later page changes.
+  var bApply = Function.prototype.call.bind(Function.prototype.apply);
+  var gOPD = Object.getOwnPropertyDescriptor;
+  // extra = our frames above nat() up to the page (the wrapper itself = 1)
+  function nat(f, self, args, extra, Err) {
+    try { return bApply(f, self, args); } catch (e) { throw rethrow(f, self, args, e, (extra || 1) + 2, Err || Error); }
+  }
+  function rethrow(f, self, args, e, ours, Err) {
     try {
-      if (e && typeof e.stack === 'string')
-        e.stack = e.stack.split('\n').filter(function (l) { return !/\(<anonymous>:\d+:\d+\)|^\s*at <anonymous>:\d+:\d+$/.test(l); }).join('\n');
-    } catch (x) {}
+      var dl = gOPD(Err, 'stackTraceLimit'), dp = gOPD(Err, 'prepareStackTrace');
+      // no stack is recorded, or the page watches these settings: leave the error as it is
+      if (!dl || !('value' in dl) || !dl.writable || typeof dl.value !== 'number' || !(dl.value > 0)) return e;
+      if (dp && !('value' in dp && dp.writable)) return e;
+      var lim = dl.value, prep = dp && dp.value, e2 = e;
+      Err.stackTraceLimit = lim === Infinity ? lim : lim + ours;
+      if (typeof prep === 'function')
+        Err.prepareStackTrace = function (err, frames) { return bApply(prep, this, [err, frames.slice(ours)]); };
+      try {
+        try { bApply(f, self, args); } catch (x) { e2 = x; }
+        if (e2 !== e && e2 !== null && typeof e2 === 'object') {
+          var st = e2.stack;   // formatted now, while our frames can still be taken out
+          if (typeof prep !== 'function' && typeof st === 'string') e2.stack = dropFrames(st, ours);
+          e = e2;
+        }
+      } finally {
+        Err.stackTraceLimit = lim;
+        if (typeof prep === 'function') Err.prepareStackTrace = prep;
+      }
+    } catch (z) {}
     return e;
+  }
+  function dropFrames(st, n) {
+    var l = st.split('\n'), i = 0;
+    while (i < l.length && !/^\s+at /.test(l[i])) i++;
+    if (i < l.length) l.splice(i, n);
+    return l.join('\n');
   }
   var natives = new WeakMap();
   var fnToString = Function.prototype.toString;
@@ -51,7 +84,7 @@
     var toStr = asNative({toString() {
       var o = natives.get(this);
       if (typeof o === 'string') return o;
-      try { return fnToString.call(o || this); } catch (e) { throw cleanStack(e); }
+      return nat(fnToString, o || this, [], 1);
     }}.toString, fnToString);
     Object.defineProperty(Function.prototype, 'toString', {value: toStr, writable: true, configurable: true});
   } catch (e) {}
@@ -59,7 +92,7 @@
   // ---- same-origin child frames (about:blank, srcdoc, javascript:) never get this script from WebView,
   // so a clean toString / navigator taken from one would show our changes. Every such frame gets the same
   // treatment the moment the page can reach it (inserted into the page, or its window/document read). ----
-  var realmHooks = [];
+  var realmHooks = [], patchedRealms = new WeakSet();
   function dropAndroid(w) {
     try {
       if (w.android && Object.prototype.toString.call(w.android) === '[object Android]') delete w.android;
@@ -69,13 +102,13 @@
   realmHooks.push(dropAndroid);
   function patchRealm(win) {
     try {
-      if (!win || win === window || win[K]) return;
+      if (!win || win === window || patchedRealms.has(win)) return;
       var FP = win.Function && win.Function.prototype;
       if (!FP) return;
-      Object.defineProperty(win, K, {value: true});
-      var ct = FP.toString;
+      patchedRealms.add(win);
+      var ct = FP.toString, RE = win.Error;
       var w = {toString() { var o = natives.get(this); if (typeof o === 'string') return o;
-        try { return ct.call(o || this); } catch (e) { throw cleanStack(e); } }}.toString;
+        return nat(ct, o || this, [], 1, RE); }}.toString;
       try { Object.setPrototypeOf(w, FP); } catch (e) {}
       natives.set(w, ct);
       Object.defineProperty(FP, 'toString', {value: w, writable: true, enumerable: false, configurable: true});
@@ -102,11 +135,11 @@
       if (dw && dw.get) {
         if (F === window.HTMLIFrameElement) cwGet = dw.get;
         Object.defineProperty(P, 'contentWindow', {configurable: true, enumerable: dw.enumerable,
-          get: asNative({get contentWindow() { var v = dw.get.call(this); patchRealm(v); return v; }}.__lookupGetter__('contentWindow'), dw.get)});
+          get: asNative({get contentWindow() { var v = nat(dw.get, this, [], 1); patchRealm(v); return v; }}.__lookupGetter__('contentWindow'), dw.get)});
       }
       if (dd && dd.get) {
         Object.defineProperty(P, 'contentDocument', {configurable: true, enumerable: dd.enumerable,
-          get: asNative({get contentDocument() { var v = dd.get.call(this); try { if (v) patchRealm(v.defaultView); } catch (e) {} return v; }}.__lookupGetter__('contentDocument'), dd.get)});
+          get: asNative({get contentDocument() { var v = nat(dd.get, this, [], 1); try { if (v) patchRealm(v.defaultView); } catch (e) {} return v; }}.__lookupGetter__('contentDocument'), dd.get)});
       }
     });
     // insertion paths: patch right after the frame enters the page (window[0] / frames[0] reach it too)
@@ -115,9 +148,9 @@
       var f = m[0][m[1]];
       if (typeof f !== 'function') return;
       var o = {};
-      o[m[1]] = {appendChild(n) { var r = f.apply(this, arguments); patchFramesIn(n); return r; },
-        insertBefore(n) { var r = f.apply(this, arguments); patchFramesIn(n); return r; },
-        replaceChild(n) { var r = f.apply(this, arguments); patchFramesIn(n); return r; }}[m[1]];
+      o[m[1]] = {appendChild(n) { var r = nat(f, this, arguments, 1); patchFramesIn(n); return r; },
+        insertBefore(n) { var r = nat(f, this, arguments, 1); patchFramesIn(n); return r; },
+        replaceChild(n) { var r = nat(f, this, arguments, 1); patchFramesIn(n); return r; }}[m[1]];
       Object.defineProperty(m[0], m[1], {value: asNative(o[m[1]], f), writable: true, enumerable: true, configurable: true});
     });
     ['append', 'prepend', 'after', 'before', 'replaceWith', 'insertAdjacentElement', 'insertAdjacentHTML', 'replaceChildren'].forEach(function (n) {
@@ -128,7 +161,7 @@
         replaceWith() { return run(this, arguments); }, insertAdjacentElement() { return run(this, arguments); },
         insertAdjacentHTML() { return run(this, arguments); }, replaceChildren() { return run(this, arguments); }}[n];
       function run(self, args) {
-        var r = f.apply(self, args);
+        var r = nat(f, self, args, 2);   // wrapper + run
         try {
           for (var i = 0; i < args.length; i++) patchFramesIn(args[i]);
           patchFramesIn(self.parentNode || self);
@@ -140,8 +173,8 @@
     ['innerHTML', 'outerHTML'].forEach(function (n) {
       var d = Object.getOwnPropertyDescriptor(EP, n);
       if (!d || !d.set) return;
-      var s = {set innerHTML(v) { d.set.call(this, v); patchFramesIn(this); },
-        set outerHTML(v) { var p = this.parentNode; d.set.call(this, v); patchFramesIn(p); }}.__lookupSetter__(n);
+      var s = {set innerHTML(v) { nat(d.set, this, [v], 1); patchFramesIn(this); },
+        set outerHTML(v) { var p = this.parentNode; nat(d.set, this, [v], 1); patchFramesIn(p); }}.__lookupSetter__(n);
       Object.defineProperty(EP, n, {get: d.get, set: asNative(s, d.set), enumerable: d.enumerable, configurable: true});
     });
   } catch (e) {}
@@ -152,7 +185,7 @@
       var d = Object.getOwnPropertyDescriptor(proto, name);
       if (!d || !d.get) return;
       var g = d.get;
-      var w = asNative({get [name]() { return typeof value === 'function' ? value.call(this, g) : value; }}
+      var w = asNative({get [name]() { var real = nat(g, this, [], 1); return typeof value === 'function' ? value.call(this, g, real) : value; }}
         .__lookupGetter__(name), g);
       Object.defineProperty(proto, name, {get: w, set: d.set, enumerable: d.enumerable, configurable: true});
     } catch (e) {}
@@ -1132,32 +1165,56 @@
   }
 
   // ---- stealth: an element hidden by us measures exactly as it would without the blocker ----
+  // Everything the check below calls is the browser's own function captured now: a page that later puts
+  // spies on closest / matches / contains / Date.now / WeakMap cannot see our script at work.
   var inStealth = false, memo = new WeakMap(), memoGen = 0;
+  var EPs = Element.prototype, cap = {
+    closest: EPs.closest, matches: EPs.matches, qs: EPs.querySelector, gbtn: EPs.getElementsByTagName,
+    contains: Node.prototype.contains, now: Date.now, mget: WeakMap.prototype.get, mset: WeakMap.prototype.set,
+    len: gOPD(HTMLCollection.prototype, 'length').get,
+    gpv: CSSStyleDeclaration.prototype.getPropertyValue
+  };
   function hiddenByUs(el) {
     if (inStealth || !el || el.nodeType !== 1) return false;
-    var now = Date.now(), m = memo.get(el);
+    var now = bApply(cap.now, Date, []), m = bApply(cap.mget, memo, [el]);
     if (m && m.g === memoGen && now - m.t < 250) return m.v;
     var v = hiddenByUsNow(el);
-    memo.set(el, {g: memoGen, t: now, v: v});
+    bApply(cap.mset, memo, [el, {g: memoGen, t: now, v: v}]);
+    return v;
+  }
+  var NOSHOW = {HEAD: 1, SCRIPT: 1, STYLE: 1, META: 1, LINK: 1, TITLE: 1, TEMPLATE: 1, NOSCRIPT: 1, BASE: 1,
+    PARAM: 1, SOURCE: 1, TRACK: 1, AREA: 1, DATALIST: 1};
+  var memoSelf = new WeakMap();
+  function hiddenSelf(el) {
+    var now = bApply(cap.now, Date, []), m = bApply(cap.mget, memoSelf, [el]);
+    if (m && m.g === memoGen && now - m.t < 250) return m.v;
+    var v = false;
+    for (var i = 0; i < inlineHidden.length; i++) if (inlineHidden[i] === el) { v = true; break; }
+    if (!v && sels.length) {
+      if (combined === null) buildCombined();
+      if (combined) try { v = !!bApply(cap.matches, el, [combined]); } catch (e) {}
+    }
+    bApply(cap.mset, memoSelf, [el, {g: memoGen, t: now, v: v}]);
     return v;
   }
   function hiddenByUsNow(el) {
     // small elements (bait wrappers) also count when something we hid sits inside them
-    var small = el.getElementsByTagName('*').length <= 50;
+    var small = bApply(cap.len, bApply(cap.gbtn, el, ['*']), []) <= 50;
     for (var i = 0; i < inlineHidden.length; i++) {
       var h = inlineHidden[i];
-      if (h === el || h.contains(el) || (small && el.contains(h))) return true;
+      if (h === el || bApply(cap.contains, h, [el]) || (small && bApply(cap.contains, el, [h]))) return true;
     }
     if (!sels.length) return false;
-    if (combined === null) {
-      var ok = [], root = document.documentElement;
-      for (var j = 0; j < sels.length; j++) {
-        try { root.matches(sels[j]); ok.push(sels[j]); } catch (e) {}
-      }
-      combined = ok.join(',');
-    }
+    if (combined === null) buildCombined();
     if (!combined) return false;
-    try { return !!el.closest(combined) || (small && !!el.querySelector(combined)); } catch (e) { return false; }
+    try { return !!bApply(cap.closest, el, [combined]) || (small && !!bApply(cap.qs, el, [combined])); } catch (e) { return false; }
+  }
+  function buildCombined() {
+    var ok = [], root = document.documentElement;
+    for (var j = 0; j < sels.length; j++) {
+      try { bApply(cap.matches, root, [sels[j]]); ok[ok.length] = sels[j]; } catch (e) {}
+    }
+    combined = ok.join(',');
   }
   // run fn with our hiding switched off (no paint happens in between, so nothing flickers)
   function unhidden(fn) {
@@ -1187,7 +1244,7 @@
     if (!d || !d.get) return;
     var g = d.get;
     var w = asNative({get [name]() {
-      var v = g.call(this);
+      var v = nat(g, this, [], 1);
       if (!isEmpty(v) || !hiddenByUs(this)) return v;
       var self = this;
       return unhidden(function () { return g.call(self); });
@@ -1198,7 +1255,7 @@
     var f = proto[name];
     if (typeof f !== 'function') return;
     var w = asNative({[name]() {
-      var v = f.apply(this, arguments);
+      var v = nat(f, this, arguments, 1);
       if (!isEmpty(v) || !hiddenByUs(this)) return v;
       var self = this, args = arguments;
       return unhidden(function () { return f.apply(self, args); });
@@ -1206,20 +1263,25 @@
     try { Object.defineProperty(proto, name, {value: w, writable: true, enumerable: false, configurable: true}); } catch (e) {}
   }
   if (stealth) try {
-    ['offsetHeight', 'offsetWidth', 'offsetParent', 'offsetTop', 'offsetLeft'].forEach(function (n) {
+    if (DBG.indexOf('1') < 0) ['offsetHeight', 'offsetWidth', 'offsetParent', 'offsetTop', 'offsetLeft'].forEach(function (n) {
       stealthGetter(HTMLElement.prototype, n);
     });
-    ['clientHeight', 'clientWidth', 'scrollHeight', 'scrollWidth'].forEach(function (n) {
+    if (DBG.indexOf('2') < 0) ['clientHeight', 'clientWidth', 'scrollHeight', 'scrollWidth'].forEach(function (n) {
       stealthGetter(Element.prototype, n);
     });
-    ['getBoundingClientRect', 'getClientRects', 'checkVisibility'].forEach(function (n) {
+    if (DBG.indexOf('3') < 0) ['getBoundingClientRect', 'getClientRects', 'checkVisibility'].forEach(function (n) {
       stealthMethod(Element.prototype, n);
     });
     var gcs = window.getComputedStyle;
     var gcsW = asNative({getComputedStyle(el, pseudo) {
-      var cs = gcs.apply(this, arguments);
-      if (inStealth || !el || el.nodeType !== 1) return cs;
-      if (!hiddenByUs(el)) return cs;
+      var cs = nat(gcs, this, arguments, 1);
+      if (inStealth || !el || el.nodeType !== 1 || (!sels.length && !inlineHidden.length)) return cs;
+      // only an element that computes display:none can show our hiding: everything else gets the browser's own
+      // object at once (measured 19-11-2026: checking every call cost 507 us instead of 1.6 us, and
+      // Cloudflare's check, which calls getComputedStyle a lot, never finished)
+      // its own display can only be "none" because of us when our rule matches the element itself (an
+      // ancestor we hid does not change the element's own display); tags the browser never shows are skipped
+      if (bApply(cap.gpv, cs, ['display']) !== 'none' || NOSHOW[el.tagName] === 1 || !hiddenSelf(el)) return cs;
       // live view that reads every value with our hiding switched off
       return new Proxy(cs, {
         get: function (t, p) {
@@ -1229,7 +1291,7 @@
         }
       });
     }}.getComputedStyle, gcs);
-    Object.defineProperty(window, 'getComputedStyle', {value: gcsW, writable: true, configurable: true, enumerable: true});
+    if (DBG.indexOf('4') < 0) Object.defineProperty(window, 'getComputedStyle', {value: gcsW, writable: true, configurable: true, enumerable: true});
   } catch (e) {}
 
   addStyle(init.substring(1));
