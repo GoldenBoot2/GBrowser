@@ -185,9 +185,9 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 | Cloudflare managed challenge (visas-de.tlscontact.com) failed with Stealth on: getComputedStyle wrapper ran the hidden-by-us check on every call (507 us vs 1.6 us) | Fixed ba7f977 (passes with all protections on) |
 | Errors thrown through wrappers showed our stack frame (e.g. "at get offsetHeight (<anonymous>:2095:17)") | Fixed ba7f977 (nat(): browser-identical stack, also for Error.prepareStackTrace) |
 | Symbol(gbab) marker visible in Object.getOwnPropertySymbols(window) | Fixed ba7f977 |
-| Reading styles / sizes of an ad we hid: one short-lived override sheet with only the selectors hiding that element (values exact: 10 px bait = 10 px) | Improved 19-11-2026; still 18.7 ms per read on BBC (layout + extra style update): Open |
+| Reading styles / sizes of an ad we hid: one lift per script run measures sizes and computed style together (values exact) | Improved 19-11-2026: a whole read burst costs one lift, 25-28 ms on BBC (the browser restyles the page when any sheet is added or removed: 10-20 ms each, measured; 0.7 ms on a light page). Open: below that needs a way to lift our rules without a sheet change |
 | Cosmetic hiding adds <style> elements a page can list | Fixed 19-11-2026 for the main document: DevTools stylesheet (CSS.createStyleSheet, @layer gbh), in neither DOM nor CSSOM; blocked frames / images hidden by an address rule instead of an inline style. Open: frames in other processes, ExtendedCss styles, $csp <meta> elements |
-| getComputedStyle result for an ad we hid is a Proxy whose methods are not the browser's own functions | Open |
+| getComputedStyle result for an ad we hid | Fixed 19-11-2026: its methods are the browser's own objects (identity, name, length, source text, errors identical, measured), values from the lift, writes give the browser's own read-only error. Left: a page calling a CSS property getter from the prototype directly on that object gets "Illegal invocation" |
 | Privacy-mode wrappers (methodOn, cookie masking) not yet on nat(); fixed values must still run the browser's receiver checks | Open (with Hide my identity) |
 | AdGuard scriptlet library wrappers: audit with the same probes | Open |
 | Repeatable check: tools/local/stealthprobe.js (on vs off diff), cftest.ps1 (Cloudflare), public detectors | In use |

@@ -1289,15 +1289,40 @@
     if (v && typeof v.width === 'number') return v.width === 0 && v.height === 0;      // DOMRect
     return false;
   }
+  // Sizes of an element we hid, read with our hiding lifted. Detectors read several values back to back
+  // (offsetHeight, offsetWidth, clientHeight, the rect...): one lift measures them all, and they are reused until
+  // the current script run ends (a microtask clears them) or the element's own style / class changes, so a
+  // burst of reads costs one layout instead of one per read.
+  var GEO = {}, geoNames = [], geo = null, styleSnap = null;
+  var getAttr = EPs.getAttribute, rectGet = EPs.getBoundingClientRect, DOMR = window.DOMRect;
+  var rx = gOPD(DOMRectReadOnly.prototype, 'x').get, ry = gOPD(DOMRectReadOnly.prototype, 'y').get,
+    rw = gOPD(DOMRectReadOnly.prototype, 'width').get, rh = gOPD(DOMRectReadOnly.prototype, 'height').get;
+  var later = typeof queueMicrotask === 'function' ? queueMicrotask : null;
+  function geoSig(el) { return bApply(getAttr, el, ['style']) + '|' + bApply(getAttr, el, ['class']); }
+  function geoFor(el) {
+    var sig = geoSig(el);
+    if (geo && geo.el === el && geo.g === memoGen && geo.sig === sig) return geo;
+    var v = {};
+    unhidden(function () {
+      for (var i = 0; i < geoNames.length; i++) v[geoNames[i]] = bApply(GEO[geoNames[i]], el, []);
+      var r = bApply(rectGet, el, []);
+      v.rect = [bApply(rx, r, []), bApply(ry, r, []), bApply(rw, r, []), bApply(rh, r, [])];
+      if (styleSnap) v.style = styleSnap(el);   // the computed style in the same lift (one style update)
+    }, el);
+    geo = {el: el, g: memoGen, sig: sig, v: v};
+    if (later) bApply(later, window, [function () { geo = null; }]);
+    else geo = null;
+    return {el: el, g: memoGen, sig: sig, v: v};
+  }
   function stealthGetter(proto, name) {
     var d = Object.getOwnPropertyDescriptor(proto, name);
     if (!d || !d.get) return;
     var g = d.get;
+    GEO[name] = g; geoNames[geoNames.length] = name;
     var w = asNative({get [name]() {
       var v = nat(g, this, [], 1);
       if (!isEmpty(v) || !hiddenByUs(this)) return v;
-      var self = this;
-      return unhidden(function () { return g.call(self); }, self);
+      return geoFor(this).v[name];
     }}.__lookupGetter__(name), g);
     try { Object.defineProperty(proto, name, {get: w, set: d.set, enumerable: d.enumerable, configurable: true}); } catch (e) {}
   }
@@ -1307,6 +1332,8 @@
     var w = asNative({[name]() {
       var v = nat(f, this, arguments, 1);
       if (!isEmpty(v) || !hiddenByUs(this)) return v;
+      // the rect from the shared measurement, as a new DOMRect each call (like the browser's own)
+      if (name === 'getBoundingClientRect' && DOMR) { var r = geoFor(this).v.rect; return new DOMR(r[0], r[1], r[2], r[3]); }
       var self = this, args = arguments;
       return unhidden(function () { return f.apply(self, args); }, self);
     }}[name], f);
@@ -1322,6 +1349,64 @@
     if (DBG.indexOf('3') < 0) ['getBoundingClientRect', 'getClientRects', 'checkVisibility'].forEach(function (n) {
       stealthMethod(Element.prototype, n);
     });
+    // Computed style of an element we hid: a stand-in that answers with the values the element has with our
+    // hiding lifted. Values come from one snapshot per script run (a microtask ends it); methods and other
+    // members are the browser's own objects (cs.getPropertyValue === CSSStyleDeclaration.prototype.
+    // getPropertyValue, like the real one), and the prototype methods answer for the stand-in; writes give the
+    // browser's own read-only error.
+    var CSD = CSSStyleDeclaration.prototype, styleProxies = new WeakMap(), PX = window.Proxy;
+    var gpv0 = CSD.getPropertyValue, gpp0 = CSD.getPropertyPriority, item0 = CSD.item,
+      lenGet = gOPD(CSD, 'length') && gOPD(CSD, 'length').get;
+    styleSnap = function (el) {
+      var t = nat(gcs, window, [el], 1), snap = Object.create(null);
+      for (var k in t) { var v = t[k]; if (typeof v !== 'function') snap[k] = v; }
+      var n = bApply(lenGet, t, []);
+      for (var q = 0; q < n; q++) {
+        var pn = bApply(item0, t, [q]);
+        snap['\u0001' + pn] = bApply(gpv0, t, [pn]);
+        snap['\u0002' + pn] = bApply(gpp0, t, [pn]);
+      }
+      return snap;
+    };
+    function snapOf(pr) { return geoFor(pr.el).v.style; }
+    function assign(o, k, v) { o[k] = v; }
+    function proxyFor(cs, el) {
+      if (!PX) return cs;
+      var pr = {t: cs, el: el, snap: null, g: -1, sig: ''};
+      var px = new PX(cs, {
+        get: function (t, p) {
+          if (typeof p === 'string') { var sn = snapOf(pr); if (p in sn) return sn[p]; }
+          return t[p];   // methods and the rest: the browser's own objects
+        },
+        set: function (t, p, v) {
+          var d = null, o = t;
+          while (o && !(d = gOPD(o, p))) o = Object.getPrototypeOf(o);
+          if (d && d.set) nat(d.set, t, [v], 1);
+          else nat(assign, undefined, [t, p, v], 2);   // the helper's own frame is ours too
+          return true;
+        }
+      });
+      bApply(cap.mset, styleProxies, [px, pr]);
+      return px;
+    }
+    // the browser's own methods, answering for the stand-in (anything else goes straight to the browser)
+    [['getPropertyValue', function (pr, a) { return snapOf(pr)['\u0001' + String(a[0])] || ''; }],
+     ['getPropertyPriority', function (pr, a) { return snapOf(pr)['\u0002' + String(a[0])] || ''; }],
+     ['item', null], ['setProperty', null], ['removeProperty', null]].forEach(function (m) {
+      var n = m[0], f = CSD[n], answer = m[1];
+      if (typeof f !== 'function') return;
+      var o = {};
+      o[n] = {getPropertyValue() { return call(this, arguments); }, getPropertyPriority() { return call(this, arguments); },
+        item() { return call(this, arguments); }, setProperty() { return call(this, arguments); },
+        removeProperty() { return call(this, arguments); }}[n];
+      function call(self, args) {
+        var pr = bApply(cap.mget, styleProxies, [self]);
+        if (!pr) return nat(f, self, args, 2);
+        if (answer && args.length >= 1) return answer(pr, args);
+        return nat(f, pr.t, args, 2);   // the real object answers (or throws the browser's own error)
+      }
+      try { Object.defineProperty(CSD, n, {value: asNative(o[n], f), writable: true, enumerable: true, configurable: true}); } catch (e) {}
+    });
     var gcs = window.getComputedStyle;
     var gcsW = asNative({getComputedStyle(el, pseudo) {
       var cs = nat(gcs, this, arguments, 1);
@@ -1332,14 +1417,7 @@
       // its own display can only be "none" because of us when our rule matches the element itself (an
       // ancestor we hid does not change the element's own display); tags the browser never shows are skipped
       if (bApply(cap.gpv, cs, ['display']) !== 'none' || NOSHOW[el.tagName] === 1 || !hiddenSelf(el)) return cs;
-      // live view that reads every value with our hiding switched off
-      return new Proxy(cs, {
-        get: function (t, p) {
-          var v = unhidden(function () { return t[p]; }, el);
-          if (typeof v !== 'function') return v;
-          return function () { var a = arguments; return unhidden(function () { return v.apply(t, a); }, el); };
-        }
-      });
+      return proxyFor(cs, el);
     }}.getComputedStyle, gcs);
     if (DBG.indexOf('4') < 0) Object.defineProperty(window, 'getComputedStyle', {value: gcsW, writable: true, configurable: true, enumerable: true});
   } catch (e) {}
