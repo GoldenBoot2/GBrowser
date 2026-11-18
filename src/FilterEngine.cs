@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.MemoryMappedFiles;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -46,13 +47,17 @@ namespace GBrowser
         public static long LoadMs;
 
         readonly PublicSuffix psl = new PublicSuffix();
-        long[] hostHash; int[] hostMeta;
-        Rule[] rules; Dictionary<int, int[]> index; int[] untokenized;
+        // Big files stay on disk, memory-mapped (MappedFile); only small index arrays live on the heap.
+        // hosts.bin: sorted hashes + meta, searched in place.
+        MappedFile hosts; int hostCount;
+        // net.txt: one line per rule; Rule objects are parsed on first use (most rules are never touched).
+        MappedFile net; int[] ruleOff, ruleLen, ruleMeta; Rule[] ruleCache; int[] untokenized;
+        int[] tokKeys, tokStart, tokIds;   // sorted URL tokens -> rule ids tokIds[tokStart[k] .. tokStart[k+1])
         PageRule[] pageRules;
         readonly Dictionary<string, string[]>[] keyed = new Dictionary<string, string[]>[3];
         readonly string[][] unkeyed = new string[3][];
         readonly string[] unkeyedCss = new string[3];
-        byte[] cosm; long[] specHash; int[] specOff, specLen; byte[] specKind, specGroup;
+        MappedFile cosm; long[] specHash; int[] specOff, specLen; byte[] specKind, specGroup;
         ParamRule[] paramRules = new ParamRule[0];
         RespRule[] respRules = new RespRule[0];
         readonly Dictionary<string, Resource> resources = new Dictionary<string, Resource>();
@@ -66,17 +71,20 @@ namespace GBrowser
             var sw = System.Diagnostics.Stopwatch.StartNew();
             for (int g = 0; g < 3; g++) keyed[g] = new Dictionary<string, string[]>(g == 0 ? 16384 : 1024, StringComparer.Ordinal);
             LoadPsl(File.ReadAllBytes(Path.Combine(dir, "psl.txt")));
-            LoadHosts(File.ReadAllBytes(Path.Combine(dir, "hosts.bin")));
-            LoadRules(File.ReadAllBytes(Path.Combine(dir, "net.txt")));
+            LoadHosts(new MappedFile(Path.Combine(dir, "hosts.bin")));
+            LoadRules(new MappedFile(Path.Combine(dir, "net.txt")));
             LoadPageRules(File.ReadAllText(Path.Combine(dir, "page.txt"), Encoding.UTF8));
-            LoadCosmetic(File.ReadAllBytes(Path.Combine(dir, "cosm.txt")));
+            LoadCosmetic(new MappedFile(Path.Combine(dir, "cosm.txt")));
             LoadRedirects(File.ReadAllText(Path.Combine(dir, "redirects.txt"), Encoding.UTF8));
             LoadParams(File.ReadAllText(Path.Combine(dir, "params.txt"), Encoding.UTF8));
             LoadResp(File.ReadAllText(Path.Combine(dir, "resp.txt"), Encoding.UTF8));
             ListInfo = File.ReadAllText(Path.Combine(dir, "info.txt"), Encoding.UTF8);
             Scriptlets = File.ReadAllText(Path.Combine(dir, "scriptlets.js"), Encoding.UTF8);
             RawJs = File.ReadAllText(Path.Combine(dir, "rawjs.js"), Encoding.UTF8);
-            RuleCount = hostHash.Length + rules.Length + pageRules.Length + cosmeticCount;
+            RuleCount = hostCount + ruleOff.Length + pageRules.Length + cosmeticCount;
+            // give back the memory used while parsing (temporary strings and lists) instead of keeping it as heap reserve
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
             LoadMs = sw.ElapsedMilliseconds;
         }
 
@@ -112,45 +120,100 @@ namespace GBrowser
 
         void LoadPsl(byte[] data) { foreach (var l in Lines(data)) psl.Add(l.Trim()); }
 
-        void LoadHosts(byte[] d)
+        // hosts.bin, big-endian (Java ByteBuffer): int count, long[count] hashes (sorted, signed), int[count] meta
+        void LoadHosts(MappedFile f) { hosts = f; hostCount = f.Length >= 4 ? f.BE32(0) : 0; }
+
+        long HostHash(int i) => hosts.BE64(4 + 8L * i);
+        int HostMeta(int i) => hosts.BE32(4 + 8L * hostCount + 4L * i);
+
+        /// <summary>First index whose hash is h, or -1.</summary>
+        int HostFirst(long h)
         {
-            // big-endian (Java ByteBuffer): int count, long[count] hashes (sorted, signed), int[count] meta
-            int n = (d[0] << 24) | (d[1] << 16) | (d[2] << 8) | d[3];
-            hostHash = new long[n]; hostMeta = new int[n];
-            int p = 4;
-            for (int i = 0; i < n; i++, p += 8)
+            int lo = 0, hi = hostCount - 1, found = -1;
+            while (lo <= hi)
             {
-                long v = 0;
-                for (int k = 0; k < 8; k++) v = (v << 8) | d[p + k];
-                hostHash[i] = v;
+                int mid = (int)((uint)(lo + hi) >> 1);
+                long v = HostHash(mid);
+                if (v < h) lo = mid + 1;
+                else { if (v == h) found = mid; hi = mid - 1; }
             }
-            for (int i = 0; i < n; i++, p += 4) hostMeta[i] = (d[p] << 24) | (d[p + 1] << 16) | (d[p + 2] << 8) | d[p + 3];
+            return found;
         }
 
-        void LoadRules(byte[] data)
+        /// <summary>Integer in bytes [s, e) (optional leading '-').</summary>
+        static unsafe int ParseInt(byte* d, long s, long e)
         {
-            var list = new List<Rule>(40000);
-            var byToken = new Dictionary<int, List<int>>(32768);
-            var untok = new List<int>();
-            foreach (var line in Lines(data))
-            {
-                var f = Split(line, 9);
-                var r = new Rule(int.Parse(f[0]), int.Parse(f[1]), int.Parse(f[2]), f[4], f[5], f[6], f[7], f[8]);
-                int id = list.Count;
-                list.Add(r);
-                if (f[3].Length == 0) untok.Add(id);
-                else
-                {
-                    int tok = int.Parse(f[3]);
-                    if (!byToken.TryGetValue(tok, out var ids)) byToken[tok] = ids = new List<int>(1);
-                    ids.Add(id);
-                }
-            }
-            rules = list.ToArray();
-            untokenized = untok.ToArray();
-            index = new Dictionary<int, int[]>(byToken.Count);
-            foreach (var kv in byToken) index[kv.Key] = kv.Value.ToArray();
+            bool neg = s < e && d[s] == '-';
+            if (neg) s++;
+            int v = 0;
+            for (; s < e; s++) unchecked { v = v * 10 + (d[s] - '0'); }
+            return neg ? -v : v;
         }
+
+        // net.txt line: group, flags, types, token, regex, domains, deny, literal, redirect (tab separated)
+        unsafe void LoadRules(MappedFile f)
+        {
+            net = f;
+            byte* d = f.P; long n = f.Length;
+            var offs = new List<int>(48000); var lens = new List<int>(48000); var metas = new List<int>(48000);
+            var pairs = new List<long>(48000); var untok = new List<int>();
+            var v = new int[3];
+            long s = 0;
+            for (long i = 0; i <= n; i++)
+            {
+                if (i != n && d[i] != '\n') continue;
+                if (i > s)
+                {
+                    int id = offs.Count;
+                    long p = s;
+                    for (int k = 0; k < 3; k++)
+                    {
+                        long b = p;
+                        while (p < i && d[p] != '\t') p++;
+                        v[k] = ParseInt(d, b, p);
+                        if (p < i) p++;
+                    }
+                    long t = p;
+                    while (p < i && d[p] != '\t') p++;
+                    if (p == t) untok.Add(id);
+                    else pairs.Add(((long)ParseInt(d, t, p) << 32) | (uint)id);
+                    offs.Add((int)s); lens.Add((int)(i - s));
+                    metas.Add(v[0] | (v[1] << 2) | (v[2] << 8));   // group 2 bits, flags 6 bits, types 13 bits
+                }
+                s = i + 1;
+            }
+            ruleOff = offs.ToArray(); ruleLen = lens.ToArray(); ruleMeta = metas.ToArray();
+            ruleCache = new Rule[ruleOff.Length];
+            untokenized = untok.ToArray();
+            // sorted by token, then id: rules of one token keep their file order (as before)
+            var pa = pairs.ToArray();
+            Array.Sort(pa);
+            var keys = new List<int>(32768); var starts = new List<int>(32768);
+            tokIds = new int[pa.Length];
+            for (int i = 0; i < pa.Length; i++)
+            {
+                int tok = (int)(pa[i] >> 32);
+                if (keys.Count == 0 || keys[keys.Count - 1] != tok) { keys.Add(tok); starts.Add(i); }
+                tokIds[i] = (int)pa[i];
+            }
+            starts.Add(pa.Length);
+            tokKeys = keys.ToArray(); tokStart = starts.ToArray();
+        }
+
+        /// <summary>The rule object for id, parsed from net.txt on first use.</summary>
+        Rule GetRule(int id)
+        {
+            var r = ruleCache[id];
+            if (r != null) return r;
+            var f = Split(net.Str(ruleOff[id], ruleLen[id]), 9);
+            r = new Rule(int.Parse(f[0]), int.Parse(f[1]), int.Parse(f[2]), f[4], f[5], f[6], f[7], f[8]);
+            ruleCache[id] = r;   // a race only parses the same line twice
+            return r;
+        }
+
+        /// <summary>Cheap checks from the packed meta before a rule is parsed (Rule.Matches repeats them).</summary>
+        static bool MetaOk(int m, int type, int party, int groups) =>
+            (groups & (1 << (m & 3))) != 0 && ((m >> 8) & type) != 0 && PartyOk((m >> 2) & 63, party);
 
         void LoadPageRules(string text)
         {
@@ -164,32 +227,34 @@ namespace GBrowser
             pageRules = list.ToArray();
         }
 
-        void LoadCosmetic(byte[] data)
+        unsafe void LoadCosmetic(MappedFile f)
         {
-            cosm = data;
+            cosm = f;
+            byte* data = f.P;
+            int dataLength = (int)f.Length;
             var unk = new[] { new List<string>(), new List<string>(), new List<string>() };
             var key = new[] { new Dictionary<string, List<string>>(StringComparer.Ordinal), new Dictionary<string, List<string>>(StringComparer.Ordinal), new Dictionary<string, List<string>>(StringComparer.Ordinal) };
             var hs = new List<long>(1 << 17); var offs = new List<int>(1 << 17); var lens = new List<int>(1 << 17);
             var kinds = new List<byte>(1 << 17); var grps = new List<byte>(1 << 17);
             int s = 0;
-            for (int i = 0; i <= data.Length; i++)
+            for (int i = 0; i <= dataLength; i++)
             {
-                if (i != data.Length && data[i] != '\n') continue;
+                if (i != dataLength && data[i] != '\n') continue;
                 if (i - s > 4)
                 {
                     byte kind = data[s];
                     int g = data[s + 2] - '0';
                     int a = s + 4;
-                    if (kind == 'u') { unk[g].Add(Encoding.UTF8.GetString(data, a, i - a)); cosmeticCount++; }
+                    if (kind == 'u') { unk[g].Add(f.Str(a, i - a)); cosmeticCount++; }
                     else
                     {
                         int tab = a;
                         while (tab < i && data[tab] != '\t') tab++;
-                        string k = Encoding.UTF8.GetString(data, a, tab - a);
+                        string k = f.Str(a, tab - a);
                         if (kind == 'k')
                         {
                             if (!key[g].TryGetValue(k, out var l)) key[g][k] = l = new List<string>(2);
-                            l.Add(Encoding.UTF8.GetString(data, tab + 1, i - tab - 1));
+                            l.Add(f.Str(tab + 1, i - tab - 1));
                         }
                         else
                         {
@@ -305,13 +370,12 @@ namespace GBrowser
                 int dot = host.IndexOf('.', start);
                 if (dot < 0) break;
                 long hh = Fnv64(start == 0 ? host : host.Substring(start));
-                int idx = Array.BinarySearch(hostHash, hh);
+                int idx = HostFirst(hh);
                 if (idx >= 0)
                 {
-                    while (idx > 0 && hostHash[idx - 1] == hostHash[idx]) idx--;
-                    for (int i = idx; i < hostHash.Length && hostHash[i] == hh; i++)
+                    for (int i = idx; i < hostCount && HostHash(i) == hh; i++)
                     {
-                        int m = hostMeta[i];
+                        int m = HostMeta(i);
                         int types = m & 0xFFF, flags = (m >> 12) & 0x1F, g = (m >> 20) & 3;
                         if ((groups & (1 << g)) == 0 || (types & type) == 0 || !PartyOk(flags, party)) continue;
                         if ((flags & F_EXC) != 0) { if ((flags & F_IMPORTANT) != 0) st.ImpExc = true; else st.Exc = true; }
@@ -328,19 +392,23 @@ namespace GBrowser
             {
                 char c = i < len ? lower[i] : '/';
                 if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '%') { unchecked { h = 31 * h + c; } tl++; continue; }
-                if (tl >= 2 && index.TryGetValue(h, out var ids))
-                    foreach (int id in ids)
+                int k;
+                if (tl >= 2 && (k = Array.BinarySearch(tokKeys, h)) >= 0)
+                    for (int j = tokStart[k], end = tokStart[k + 1]; j < end; j++)
                     {
-                        var r = rules[id];
-                        if ((groups & (1 << r.Group)) == 0 || st.Useless(r)) continue;
+                        int id = tokIds[j];
+                        if (!MetaOk(ruleMeta[id], type, party, groups)) continue;
+                        var r = GetRule(id);
+                        if (st.Useless(r)) continue;
                         if (r.Matches(this, url, lower, host, pageHost, type, party)) st.Add(r);
                     }
                 h = 0; tl = 0;
             }
             foreach (int id in untokenized)
             {
-                var r = rules[id];
-                if ((groups & (1 << r.Group)) == 0 || st.Useless(r)) continue;
+                if (!MetaOk(ruleMeta[id], type, party, groups)) continue;
+                var r = GetRule(id);
+                if (st.Useless(r)) continue;
                 if (r.Matches(this, url, lower, host, pageHost, type, party)) st.Add(r);
             }
             bool blocked = st.ImpExc ? false : st.ImpBlock ? true : !st.Exc && st.Block;
@@ -490,8 +558,12 @@ namespace GBrowser
         sealed class ParamRule
         {
             public readonly int Group; public readonly bool Exc, All, Negate;
-            public readonly string Name; public readonly Regex NameRe, UrlRe;
+            public readonly string Name;
             public readonly string[] DomPos, DomNeg, Skip;
+            // regexes are compiled on first use (most rules only ever need their domain check)
+            readonly string nameBody, urlPattern; readonly bool nameCi; Regex nameRe, urlRe;
+            public Regex NameRe => nameBody == null ? null : nameRe ?? (nameRe = Compile(nameBody, nameCi));
+            public Regex UrlRe => urlPattern == null ? null : urlRe ?? (urlRe = Compile(urlPattern, false));
 
             public ParamRule(int group, bool exc, string urlRegex, string domains, string spec)
             {
@@ -504,11 +576,11 @@ namespace GBrowser
                 {
                     int end = spec.LastIndexOf('/');
                     string body = end > 0 ? spec.Substring(1, end - 1) : spec.Substring(1);
-                    bool ci = end > 0 && spec.Substring(end + 1).Contains("i");
-                    NameRe = Compile(body, ci);
+                    nameCi = end > 0 && spec.Substring(end + 1).Contains("i");
+                    nameBody = body;
                 }
                 else Name = spec;
-                if (urlRegex.Length > 0) UrlRe = Compile(urlRegex, false);
+                if (urlRegex.Length > 0) urlPattern = urlRegex;
                 var d = ParseDomains(domains); DomPos = d[0]; DomNeg = d[1];
             }
 
@@ -627,11 +699,13 @@ namespace GBrowser
         public sealed class RespRule
         {
             public readonly int Group, Flags, Types; public readonly string Kind, Value;
-            public readonly Regex UrlRe; public readonly string[] DomPos, DomNeg;
+            public readonly string[] DomPos, DomNeg;
+            readonly string urlPattern; Regex urlRe;
+            public Regex UrlRe => urlPattern == null ? null : urlRe ?? (urlRe = Compile(urlPattern, false));
             public RespRule(int group, int flags, int types, string urlRegex, string domains, string kind, string value)
             {
                 Group = group; Flags = flags; Types = types; Kind = kind; Value = value;
-                if (urlRegex.Length > 0) UrlRe = Compile(urlRegex, false);
+                if (urlRegex.Length > 0) urlPattern = urlRegex;
                 var d = ParseDomains(domains); DomPos = d[0]; DomNeg = d[1];
             }
         }
@@ -721,7 +795,8 @@ namespace GBrowser
             {
                 cosCache[key] = c;
                 cosOrder.AddLast(key);
-                while (cosOrder.Count > 48) { cosCache.Remove(cosOrder.First.Value); cosOrder.RemoveFirst(); }
+                // ~0.3 MB per site; rebuilding one costs ~8 ms, so 16 recent sites (open tabs + their frames) are enough
+                while (cosOrder.Count > 16) { cosCache.Remove(cosOrder.First.Value); cosOrder.RemoveFirst(); }
             }
             return c;
         }
@@ -761,7 +836,7 @@ namespace GBrowser
                 {
                     int kind = specKind[i], g = specGroup[i];
                     if ((groups & (1 << g)) == 0) continue;
-                    var parts = Encoding.UTF8.GetString(cosm, specOff[i], specLen[i]).Split('\u001f');
+                    var parts = cosm.Str(specOff[i], specLen[i]).Split('\u001f');
                     switch ((char)kind)
                     {
                         case 's': sels.AddRange(parts); break;
@@ -826,6 +901,47 @@ namespace GBrowser
                 }
             }
             return sb?.ToString() ?? "";
+        }
+    }
+
+    /// <summary>A read-only memory-mapped filter file. Its pages are file-backed: Windows loads only the parts that are
+    /// read and can drop them again under memory pressure without writing them to the page file (unlike heap memory).</summary>
+    internal sealed unsafe class MappedFile
+    {
+        readonly MemoryMappedFile map;
+        readonly MemoryMappedViewAccessor view;
+        public readonly byte* P;
+        public readonly long Length;
+
+        public MappedFile(string path)
+        {
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Length = fs.Length;
+                if (Length == 0) return;
+                // the map keeps its own handle to the file, so the stream can be closed
+                map = MemoryMappedFile.CreateFromFile(fs, null, 0, MemoryMappedFileAccess.Read, null, HandleInheritability.None, true);
+            }
+            view = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            byte* p = null;
+            view.SafeMemoryMappedViewHandle.AcquirePointer(ref p);   // released never: the engine lives as long as the app
+            P = p + view.PointerOffset;
+        }
+
+        public string Str(long off, int len) => len <= 0 ? "" : Encoding.UTF8.GetString(P + off, len);
+
+        /// <summary>Big-endian (Java ByteBuffer) values, as written by tools/build_filters.py.</summary>
+        public long BE64(long off)
+        {
+            byte* b = P + off;
+            return ((long)b[0] << 56) | ((long)b[1] << 48) | ((long)b[2] << 40) | ((long)b[3] << 32) |
+                   ((long)b[4] << 24) | ((long)b[5] << 16) | ((long)b[6] << 8) | b[7];
+        }
+
+        public int BE32(long off)
+        {
+            byte* b = P + off;
+            return (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
         }
     }
 

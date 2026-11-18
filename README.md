@@ -8,7 +8,7 @@ Developer: **GoldenBoot**
 
 - Tabs: drag to reorder, middle-click to close, reopen closed tabs, tabs restored on start (loaded only when opened)
 - Sleeping tabs: background tabs use less memory and are suspended after a set time
-- Built-in ad and tracker blocking: over a million rules from AdGuard, EasyList, EasyPrivacy, uBlock, HaGeZi, OISD and more
+- Built-in ad and tracker blocking: over a million rules from AdGuard, EasyList, EasyPrivacy, uBlock, HaGeZi, OISD and more; the rule files are memory-mapped, so the engine keeps only about 11 MB on the heap
   - blocked count on every tab and in the toolbar
   - per-site switch, annoyances, trackers (also tracking codes in links), element hiding, stealth mode, block page for ad sites
   - scriptlets, extended CSS and redirect stubs, the same engine as the WebView Adblocker Android app
