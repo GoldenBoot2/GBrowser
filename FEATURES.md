@@ -65,6 +65,16 @@ Last full audit: 19-11-2026.
 | Warn when closing with downloads running | Missing |
 | "Always open files of this type" | Missing |
 
+## Ad blocking (AdGuard / uBlock level control)
+| Feature | Status |
+|---|---|
+| Built-in lists (AdGuard, EasyList, EasyPrivacy, uBlock, HaGeZi, OISD...), groups ads / annoyances / trackers | Done |
+| Turn each built-in list on / off | Missing (user, 19-11-2026) |
+| Custom filter lists by address, with a trust check like AdGuard's (known / trusted list sources vs unknown; unknown lists cannot use risky rule types such as scriptlets / $redirect) and update interval | Missing (user, 19-11-2026) |
+| User rules editor (block / allow / cosmetic rules, syntax check) | Missing (user, 19-11-2026) |
+| Element picker: hide an element on a page by pointing at it (creates a user rule) | Missing (user, 19-11-2026) |
+| Per-site switch, stealth mode, blocked count | Done |
+
 ## Privacy and security
 | Feature | Status |
 |---|---|
@@ -72,7 +82,9 @@ Last full audit: 19-11-2026.
 | HTTPS-First, Secure DNS, SmartScreen, tracking prevention, Do Not Track | Done |
 | Encrypted local data, clear data on close, clear browsing data | Done (time ranges: Missing) |
 | Logins kept after restart (session cookies) | Done (19-11-2026) |
-| Site permissions (camera, mic, location, notifications, clipboard, pop-ups, sound, JS, images) with GBrowser prompts and a settings page | Missing (engine prompts) |
+| Site permission prompts (camera, mic, location, notifications, clipboard, downloads, MIDI, sensors...) in GBrowser's own prompt, remembered choices, Site settings page with reset | Done (19-11-2026) |
+| Per-site toggles not tied to a request (JavaScript, images, pop-ups, sound) and a camera / mic "in use" indicator | Missing |
+| Web notifications shown by GBrowser (instead of the engine's toast) | To verify |
 | Cookies and site data page (see / delete per site) | Missing |
 | Password manager (save prompt, list, edit, delete, export) | Engine UI (save prompt) / list Missing |
 | Autofill addresses / payment | Engine UI |
@@ -84,6 +96,9 @@ Last full audit: 19-11-2026.
 |---|---|
 | Bookmarks: bar, page, edit, delete | Done |
 | Bookmark folders, bookmark manager, import / export (HTML) | Missing |
+| Bookmarks bar: right-click menu (open, open in new tab / private tab, edit, delete, add page / folder), drag to reorder, drop a link or the address-bar icon onto it | Missing (user, 19-11-2026) |
+| Bookmarks page: edit, delete, drag to reorder | Partly (edit / delete exist; reorder Missing) (user, 19-11-2026) |
+| Empty bookmarks bar handled like Chrome (hint "For quick access, place your bookmarks here on the bookmarks bar", "Import bookmarks now" link) | Missing (user, 19-11-2026) |
 | History page with search, delete | Done |
 | Import from Chrome / Edge (bookmarks, history; passwords if possible) | Missing |
 | Startup: continue where you left off / new tab / specific pages | Partly (restore on/off) |

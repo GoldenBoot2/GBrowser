@@ -32,6 +32,7 @@ ICONS = [
     ('Private', 'domino_mask', ''), ('ShieldLock', 'shield_lock', ''), ('Warning', 'warning', ''), ('Policy', 'policy', ''),
     ('DockBottom', 'dock_to_bottom', ''), ('DockRight', 'dock_to_right', ''), ('Speed', 'speed', ''),
     ('Link', 'link', ''), ('Copy', 'content_copy', ''),
+    ('Videocam', 'videocam', ''), ('Mic', 'mic', ''), ('Location', 'location_on', ''), ('Notifications', 'notifications', ''),
 ]
 
 import socket

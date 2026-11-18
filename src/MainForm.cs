@@ -407,6 +407,8 @@ namespace GBrowser
             core.StatusBarTextChanged += (o, e) => { if (t == Current) bubble.SetText(core.StatusBarText); };
             // GBrowser's own right-click menu (Material, Chrome's layout) instead of the engine's Edge menu
             core.ContextMenuRequested += (o, e) => PageMenu.Show(t, core, e, pageMenuHost);
+            // site permissions in GBrowser's own prompt (Chrome's three choices) instead of the engine's Edge prompt
+            core.PermissionRequested += (o, e) => PermissionPrompt.Ask(e, this, () => toolbar.RectangleToScreen(toolbar.PillRect));
 #if AUTOMATION
             core.ContextMenuRequested += (o, e) =>
             {
@@ -1381,6 +1383,21 @@ namespace GBrowser
                 case "update.status": return UpdateInfo();
                 case "update.check": await Updater.Check(); return UpdateInfo();
                 case "update.install": RelaunchToUpdate(); return null;
+                case "permissions.list":
+                {
+                    if (Profile == null) return new List<object>();
+                    var list = await Profile.GetNonDefaultPermissionSettingsAsync();
+                    return list.Select(p => new Dictionary<string, object> {
+                        { "kind", p.PermissionKind.ToString() }, { "what", PermissionPrompt.What(p.PermissionKind) },
+                        { "origin", p.PermissionOrigin }, { "state", p.PermissionState.ToString() } }).ToList();
+                }
+                case "permissions.reset":
+                {
+                    if (Profile == null) return null;
+                    var kind = (CoreWebView2PermissionKind)Enum.Parse(typeof(CoreWebView2PermissionKind), Str(m, "kind"));
+                    await Profile.SetPermissionStateAsync(kind, Str(m, "origin"), CoreWebView2PermissionState.Default);
+                    return null;
+                }
                 case "openDataDir":
                     Process.Start("explorer.exe", "\"" + Store.DataDir + "\""); return null;
                 case "memory": return MemoryReport();
@@ -1626,6 +1643,13 @@ namespace GBrowser
                     await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", p + ",\"type\":\"mouseReleased\"}");
                     await Task.Delay(600);
                     return lastContextInfo ?? "no menu event";
+                }
+                case "permchoose":
+                {
+                    var p = PermissionPrompt.Open;
+                    if (p == null) return "no prompt";
+                    if (arg == "close") p.Close(); else p.Choose(int.Parse(arg));
+                    return "ok";
                 }
                 case "omnitype":
                     toolbar.Address.Focus();

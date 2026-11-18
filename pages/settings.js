@@ -191,6 +191,24 @@
     row('Speed', 'Speed limit', 'GBrowser\'s own downloads; files the engine downloads itself are not limited', limit)));
   gb.send('downloads.folder').then(showFolder);
 
+  // Site settings: what sites were allowed / blocked (camera, microphone, location, notifications...)
+  const permCard = el('div', { class: 'card', id: 'sites' }, el('h2', { text: 'Site settings' }));
+  const permList = el('div');
+  permCard.append(permList);
+  async function drawPerms() {
+    const list = await gb.send('permissions.list').catch(() => []);
+    permList.textContent = '';
+    if (!list.length) { permList.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'sub', text: 'No site has asked yet' })))); return; }
+    for (const p of list) {
+      let site = p.origin; try { site = new URL(p.origin).host; } catch (e) { }
+      permList.append(row(p.kind === 'Camera' ? 'Videocam' : p.kind === 'Microphone' ? 'Mic' : p.kind === 'Geolocation' ? 'Location' : p.kind === 'Notifications' ? 'Notifications' : 'Tune',
+        site, p.what + ' \u00b7 ' + (p.state === 'Allow' ? 'Allowed' : 'Blocked'),
+        iconButton('Delete', 'Reset', async () => { await gb.send('permissions.reset', { kind: p.kind, origin: p.origin }); drawPerms(); })));
+    }
+  }
+  drawPerms();
+  main.append(permCard);
+
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Privacy and security' }),
     row('Lock', 'Always use secure connections', 'Opens sites over HTTPS; warns before an insecure site', sw('HttpsFirst')),
     row('ShieldLock', 'Dangerous site and download protection', 'Microsoft Defender SmartScreen', sw('SmartScreen')),
