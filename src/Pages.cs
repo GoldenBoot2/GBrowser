@@ -11,7 +11,7 @@ namespace GBrowser
         public const string Host = "gbrowser.local";
         public const string Origin = "https://" + Host + "/";
         public static readonly string Folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pages");
-        public static readonly string[] Names = { "newtab", "bookmarks", "history", "extensions", "settings", "about", "downloads", "insecure", "certerror" };
+        public static readonly string[] Names = { "newtab", "bookmarks", "history", "extensions", "settings", "about", "downloads", "insecure", "certerror", "crashed" };
 
         public static bool IsInternal(string url) =>
             url != null && url.StartsWith(Origin, StringComparison.OrdinalIgnoreCase);

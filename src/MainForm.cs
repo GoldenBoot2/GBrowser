@@ -166,6 +166,75 @@ namespace GBrowser
             if (strip.WindowMaximized != max) { strip.WindowMaximized = max; strip.Invalidate(); }
         }
 
+        // ---------- crashed / frozen pages ----------
+
+        bool unresponsiveAsked, engineAsked;
+
+        /// <summary>The engine reports a failed process. A page's process that ended: GBrowser's crashed page (Reload),
+        /// like Chrome's sad tab. A page that stopped responding: "Wait" or "Exit page" (ends that process). The whole
+        /// engine ended: every page is gone, GBrowser restarts and brings the tabs back. Other processes (GPU,
+        /// utilities, frames) are restarted by the engine itself.</summary>
+        string lastProcessFailed = "";   // test builds: what the engine reported
+
+        async void OnProcessFailed(BrowserTab t, CoreWebView2 core, CoreWebView2ProcessFailedEventArgs e)
+        {
+            lastProcessFailed += e.ProcessFailedKind + "/" + e.Reason + "/exit " + e.ExitCode + "; ";
+            switch (e.ProcessFailedKind)
+            {
+                case CoreWebView2ProcessFailedKind.RenderProcessExited:
+                {
+                    string url = t.Url;
+                    if (string.IsNullOrEmpty(url) || Pages.PageName(url) == "crashed") return;
+                    t.Loading = false;
+                    try { core.Navigate(Pages.Url("crashed") + "?u=" + Uri.EscapeDataString(url) + "&r=" + e.Reason); } catch { }
+                    strip.RefreshTabs();
+                    break;
+                }
+                case CoreWebView2ProcessFailedKind.RenderProcessUnresponsive:
+                {
+                    if (unresponsiveAsked) return;
+                    unresponsiveAsked = true;
+                    try
+                    {
+                        string host = Blocking.HostOf(t.Url) ?? "This page";
+                        int i = Tabs.IndexOf(t);
+                        if (i >= 0 && t != Current) Select(i);
+                        if (MaterialDialog.Ask(this, "Page unresponsive", null, new[] {
+                                Tuple.Create(IconData.Warning, host + " isn't responding. You can wait for it or exit the page.") }, "Exit page", "Wait"))
+                            await EndPageProcess(core);
+                    }
+                    finally { unresponsiveAsked = false; }
+                    break;
+                }
+                case CoreWebView2ProcessFailedKind.BrowserProcessExited:
+                {
+                    if (engineAsked || restarting) return;
+                    engineAsked = true;
+                    MaterialDialog.Info(this, "GBrowser needs to restart", "The browser engine stopped. GBrowser will restart and open your tabs again.");
+                    restarting = true;
+                    Close();
+                    break;
+                }
+            }
+        }
+
+
+        /// <summary>Ends the process showing this page (like Chrome's "Exit page"); the engine then reports it ended and
+        /// GBrowser shows the crashed page with Reload.</summary>
+        async Task EndPageProcess(CoreWebView2 core)
+        {
+            try
+            {
+                string src = core.Source;
+                var infos = await env.GetProcessExtendedInfosAsync();
+                var hit = infos.FirstOrDefault(pi => pi.ProcessInfo.Kind == CoreWebView2ProcessKind.Renderer &&
+                    pi.AssociatedFrameInfos.Any(f => f.Source == src));
+                if (hit != null) Process.GetProcessById(hit.ProcessInfo.ProcessId).Kill();
+                else core.Reload();
+            }
+            catch { try { core.Reload(); } catch { } }
+        }
+
         // ---------- tab menu, pin, mute ----------
 
         /// <summary>Right-click on a tab: Chrome's tab menu.</summary>
@@ -461,6 +530,7 @@ namespace GBrowser
             // GBrowser's own right-click menu (Material, Chrome's layout) instead of the engine's Edge menu
             core.ContextMenuRequested += (o, e) => PageMenu.Show(t, core, e, pageMenuHost);
             // site permissions in GBrowser's own prompt (Chrome's three choices) instead of the engine's Edge prompt
+            core.ProcessFailed += (o, e) => OnProcessFailed(t, core, e);
             core.PermissionRequested += (o, e) => PermissionPrompt.Ask(e, this, () => toolbar.RectangleToScreen(toolbar.PillRect));
 #if AUTOMATION
             core.ContextMenuRequested += (o, e) =>
@@ -493,6 +563,8 @@ namespace GBrowser
             core.SourceChanged += (o, e) => { t.Url = core.Source; if (t == Current) UpdateUi(); };
             core.DocumentTitleChanged += (o, e) =>
             {
+                // a crashed page keeps the page's own title on its tab, like Chrome
+                if (Pages.PageName(core.Source) == "crashed") { strip.RefreshTabs(); return; }
                 t.Title = string.IsNullOrEmpty(core.DocumentTitle) ? Pages.ToDisplay(core.Source) : core.DocumentTitle;
                 if (Pages.IsInternal(core.Source)) t.Title = BrowserTab.PageTitle(core.Source);
                 if (!t.Private) Store.UpdateHistoryTitle(core.Source, core.DocumentTitle);
@@ -629,8 +701,9 @@ namespace GBrowser
             string pageHost = Blocking.HostOf(url);
             toolbar.ShieldOn = pageHost == null ? Store.Settings.AdblockEnabled : Blocking.OnFor(pageHost);
             string full = Pages.ToDisplay(url);
-            if (Pages.PageName(url) == "insecure" || Pages.PageName(url) == "certerror")
+            if (Pages.PageName(url) == "insecure" || Pages.PageName(url) == "certerror" || Pages.PageName(url) == "crashed")
             {
+                bool crashedPage = Pages.PageName(url) == "crashed";
                 try
                 {
                     string q = url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3);
@@ -638,8 +711,9 @@ namespace GBrowser
                     full = Uri.UnescapeDataString(amp >= 0 ? q.Substring(0, amp) : q);
                 }
                 catch { }
-                toolbar.Secure = false;
-                toolbar.PageKind = "insecure";
+                // a crashed page keeps the page's own address and security state; warnings show as insecure
+                toolbar.Secure = crashedPage && full.StartsWith("https://");
+                toolbar.PageKind = !crashedPage ? "insecure" : full.StartsWith("https://") ? "secure" : "";
             }
             toolbar.SetUrl(full, ShortUrl(full));
             var storeId = Extensions.StorePageId(url);
@@ -1702,6 +1776,7 @@ namespace GBrowser
                 case "tabinfo":
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
+                case "killpage": lastProcessFailed = ""; await EndPageProcess(Current.View.CoreWebView2); await Task.Delay(1500); return Current.View.CoreWebView2.Source + " | events: " + lastProcessFailed;
                 case "permchoose":
                 {
                     var p = PermissionPrompt.Open;
@@ -1855,16 +1930,22 @@ namespace GBrowser
         {
             devDock?.Shutdown();   // docked DevTools windows go back to the engine before the window closes
             // session logins (cookies without an expiry date) are kept for next time, like Chrome's session restore
-            if (!sessionSaved && !Store.Settings.ClearOnExit)
+            // (not after the engine itself stopped: it cannot be asked any more, and closing must never be blocked)
+            if (!sessionSaved && !Store.Settings.ClearOnExit && !engineAsked)
             {
-                var normal = Tabs.FirstOrDefault(t => t.Created && !t.Private)?.View.CoreWebView2;
-                if (normal != null)
+                sessionSaved = true;
+                try
                 {
-                    e.Cancel = true;
-                    sessionSaved = true;
-                    SessionCookies.Save(normal.CookieManager).ContinueWith(_ => BeginInvoke((Action)Close));
-                    return;
+                    var normal = Tabs.FirstOrDefault(t => t.Created && !t.Private)?.View.CoreWebView2;
+                    if (normal != null)
+                    {
+                        var save = SessionCookies.Save(normal.CookieManager);
+                        e.Cancel = true;
+                        save.ContinueWith(_ => BeginInvoke((Action)Close));
+                        return;
+                    }
                 }
+                catch { }
             }
             if (Store.Settings.ClearOnExit) SessionCookies.Forget();
             // "Clear browsing data when GBrowser closes": cookies, site data, cache, history (passwords kept)

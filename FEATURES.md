@@ -17,7 +17,7 @@ Last full audit: 19-11-2026.
 | Mute tab, click the speaker icon to mute / unmute | Done (19-11-2026) |
 | Tab groups | Missing |
 | New window (Ctrl+N), drag a tab out into its own window, multiple windows | Missing |
-| Crashed tab ("Aw, snap" page with Reload) | Missing (renderer crash not handled) |
+| Crashed tab page with Reload (keeps address and title), "Page unresponsive" Wait / Exit page, restart with tabs restored when the engine stops | Done (19-11-2026) |
 | Tab hover card (title + site) | Missing |
 | Tabs not loaded yet show the site's remembered icon | Done (19-11-2026) |
 
