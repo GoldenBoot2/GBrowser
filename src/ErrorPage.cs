@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
@@ -75,12 +76,26 @@ namespace GBrowser
                 "button{height:40px;padding:0 20px 0 16px;border-radius:20px;border:0;font:inherit;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px}" +
                 "button svg{width:18px;height:18px;fill:currentColor}.filled{background:" + c["primary"] + ";color:" + c["onprimary"] + "}" +
                 ".text{background:transparent;color:" + c["primary"] + "}.text:hover{background:" + c["hover"] + "}" +
-                "button:focus-visible{outline:2px solid " + c["primary"] + ";outline-offset:2px}";
+                "button:focus-visible{outline:2px solid " + c["primary"] + ";outline-offset:2px}" +
+                ".diag{margin-top:36px;padding:18px 20px;border-radius:16px;background:" + Palette.Hex(Theme.SurfaceContainer) + "}" +
+                ".diag h2{font-size:15px;font-weight:600;margin:0 0 10px;color:" + c["primary"] + "}" +
+                ".diag ul{list-style:none;margin:0;padding:0}.diag li{display:flex;gap:12px;align-items:flex-start;padding:6px 0}" +
+                ".diag li svg{width:20px;height:20px;flex:none;margin-top:1px}.ok svg{fill:" + c["primary"] + "}.bad svg{fill:" + c["icon"] + "}" +
+                ".info svg{fill:" + c["fg2"] + "}.diag .n{font-weight:600}.diag .d{color:" + c["fg2"] + "}" +
+                ".tips{margin:12px 0 0;padding:0 0 0 20px;color:" + c["fg2"] + "}.tips li{display:list-item;padding:2px 0}" +
+                ".diag .actions{margin-top:16px}.tonal{background:" + Palette.Hex(Theme.PrimaryContainer) + ";color:" + Palette.Hex(Theme.OnPrimaryContainer) + "}";
             string html = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"color-scheme\" content=\"" + (Theme.Dark ? "dark" : "light") + "\">" +
                 "<title>" + E(host) + "</title><style>" + css + "</style></head><body><main>" +
                 Svg(t[0], "big") + "<h1>" + E(t[1]) + "</h1><p>" + E(t[2]) + "</p><div class=\"code\">" + E(t[3]) + "</div>" +
                 "<div class=\"actions\"><button class=\"filled\" id=\"r\">" + Svg(IconData.Refresh, "") + "Reload</button>" +
-                "<button class=\"text\" id=\"b\">" + Svg(IconData.Back, "") + "Go back</button></div></main></body></html>";
+                "<button class=\"text\" id=\"b\">" + Svg(IconData.Back, "") + "Go back</button></div>" +
+                (IsNetwork(status) ?
+                    "<section class=\"diag\"><h2>Checking your connection</h2><ul id=\"dl\"><li class=\"info\">" + Svg(IconData.Search, "") +
+                    "<span class=\"d\">Checking...</span></li></ul><ul class=\"tips\" id=\"tips\"></ul><div class=\"actions\">" +
+                    "<button class=\"tonal\" id=\"nd\">" + Svg(IconData.Tune, "") + "Windows Network Diagnostics</button>" +
+                    "<button class=\"text\" id=\"ns\">" + Svg(IconData.Settings, "") + "Network settings</button>" +
+                    "<button class=\"text\" id=\"da\" hidden>" + Svg(IconData.Language, "") + "Use automatic DNS</button></div></section>" : "") +
+                "</main></body></html>";
             var sb = new StringBuilder();
             sb.Append("(function(){if(location.protocol!=='chrome-error:')return 'skip';");
             sb.Append("var h=").Append(Store.ToJson(html)).Append(",u=").Append(Store.ToJson(url ?? "")).Append(";");
@@ -89,8 +104,50 @@ namespace GBrowser
             sb.Append("document.documentElement.replaceChildren(d.head,d.body);document.title=d.title;");
             sb.Append("document.getElementById('r').onclick=function(){location.replace(u);};");
             sb.Append("document.getElementById('b').onclick=function(){history.back();};");
+            // diagnostics buttons open GBrowser action addresses (accepted only from a click on this error page)
+            sb.Append("var act=function(x){location.href='" + Pages.Origin + "act?do='+x+'&u='+encodeURIComponent(u);};");
+            sb.Append("var q=function(i){return document.getElementById(i);};");
+            sb.Append("if(q('nd')){q('nd').onclick=function(){act('netdiag');};q('ns').onclick=function(){act('netsettings');};q('da').onclick=function(){act('dnsauto');};}");
+            // filled in by the app when the checks finish: {checks:[{n,d,s}], tips:[...], dns:bool}
+            sb.Append("var ic={ok:" + Store.ToJson(Svg(IconData.Check, "")) + ",bad:" + Store.ToJson(Svg(IconData.Warning, "")) + ",info:" + Store.ToJson(Svg(IconData.Info, "")) + "};");
+            sb.Append("window.gbDiag=function(r){var l=q('dl');if(!l)return;l.textContent='';r.checks.forEach(function(c){var li=document.createElement('li');li.className=c.s;");
+            sb.Append("li.innerHTML=ic[c.s];var t=document.createElement('div');var n=document.createElement('div');n.className='n';n.textContent=c.n;");
+            sb.Append("var d=document.createElement('div');d.className='d';d.textContent=c.d;t.append(n,d);li.append(t);l.append(li);});");
+            sb.Append("var tp=q('tips');tp.textContent='';r.tips.forEach(function(x){var li=document.createElement('li');li.textContent=x;tp.append(li);});");
+            sb.Append("q('da').hidden=!r.dns;};");
             sb.Append("return 'replaced';})()");
             return sb.ToString();
+        }
+
+        /// <summary>Errors where the network itself may be the cause (diagnostics are offered).</summary>
+        public static bool IsNetwork(CoreWebView2WebErrorStatus s) =>
+            s == CoreWebView2WebErrorStatus.Disconnected || s == CoreWebView2WebErrorStatus.HostNameNotResolved ||
+            s == CoreWebView2WebErrorStatus.CannotConnect || s == CoreWebView2WebErrorStatus.ServerUnreachable ||
+            s == CoreWebView2WebErrorStatus.ConnectionAborted || s == CoreWebView2WebErrorStatus.ConnectionReset ||
+            s == CoreWebView2WebErrorStatus.Timeout || s == CoreWebView2WebErrorStatus.Unknown;
+
+        /// <summary>Runs the network checks and shows them (with tips) on the error page.</summary>
+        public static async Task ShowDiagnostics(CoreWebView2 core, string url)
+        {
+            var r = await NetDiag.Run(url);
+            var tips = new List<string>();
+            var get = new Func<string, NetDiag.Check>(n => r.Checks.Find(c => c.Name == n));
+            var adapter = get("Network connection"); var inet = get("Internet"); var wdns = get("DNS (Windows)");
+            string host = Blocking.HostOf(url);
+            var site = host == null ? null : get(host);
+            if (adapter != null && !adapter.Ok) tips.Add("Connect to Wi-Fi or plug in a network cable.");
+            else if (inet != null && !inet.Ok) tips.Add("Restart your modem or router, or check your mobile data.");
+            else if (wdns != null && !wdns.Ok) tips.Add("Your DNS server is not answering: Windows Network Diagnostics can reset it.");
+            if (r.SecureDnsBlocked) tips.Add("Your Secure DNS provider is blocked on this network: use automatic DNS.");
+            if (site != null && !site.Ok && site.Detail == "This name does not exist") tips.Add("Check the address for typing mistakes.");
+            else if (site != null && !site.Ok && inet != null && inet.Ok) tips.Add("The site may be down. Try again later.");
+            if (r.Checks.Exists(c => c.Info)) tips.Add("A proxy or VPN may block this site: try without it.");
+            var data = new Dictionary<string, object>
+            {
+                { "checks", r.Checks.Select(c => new Dictionary<string, object> { { "n", c.Name }, { "d", c.Detail }, { "s", c.Info ? "info" : c.Ok ? "ok" : "bad" } }).ToList() },
+                { "tips", tips }, { "dns", r.SecureDnsBlocked },
+            };
+            try { await core.ExecuteScriptAsync("window.gbDiag&&window.gbDiag(" + Store.ToJson(data) + ")"); } catch { }
         }
 
         /// <summary>Called after a failed main-frame navigation; returns what the script did ("replaced" / "skip").</summary>

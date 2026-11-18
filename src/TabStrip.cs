@@ -194,8 +194,8 @@ namespace GBrowser
                 }
                 else if (hot || down)
                     using (var b = new SolidBrush(down ? Theme.Pressed : Theme.Hover)) g.FillRectangle(b, cr);
-                int isz = S(16);
-                Icons.Draw(g, cap[i], cr.X + (cr.Width - isz) / 2f, cr.Y + (cr.Height - isz) / 2f, isz, fg);
+                // every glyph scaled to the same visible 10 px (like Chrome), whatever padding the icon file has
+                Icons.DrawFit(g, cap[i], cr.X + cr.Width / 2f, cr.Y + cr.Height / 2f, S(10), fg);
             }
             var pr = PlusRect();
             if (hoverPlus || pressPlus)

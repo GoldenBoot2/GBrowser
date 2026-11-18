@@ -32,6 +32,24 @@ namespace GBrowser
             g.Restore(state);
         }
 
+        /// <summary>Draws icon d so that its visible glyph (not its 960-unit box) fills a size x size square centred
+        /// at (cx, cy): icons with different amounts of padding then look the same size (window buttons).</summary>
+        public static void DrawFit(Graphics g, string d, float cx, float cy, float size, Color color)
+        {
+            var p = Path(d);
+            var b = p.GetBounds();   // in icon units (y from -960 to 0)
+            if (b.Width <= 0 || b.Height <= 0) return;
+            float k = size / Math.Max(b.Width, b.Height);
+            var state = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.TranslateTransform(cx, cy);
+            g.ScaleTransform(k, k);
+            g.TranslateTransform(-(b.X + b.Width / 2), -(b.Y + b.Height / 2));
+            using (var br = new SolidBrush(color)) g.FillPath(br, p);
+            g.Restore(state);
+        }
+
         public static Bitmap Bitmap(string d, int size, Color color, Color? background = null)
         {
             var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);

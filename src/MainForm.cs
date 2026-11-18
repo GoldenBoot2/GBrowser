@@ -386,7 +386,20 @@ namespace GBrowser
             bool errorShown = false;
             var lastErrStatus = CoreWebView2WebErrorStatus.Unknown;
             var lastErrAt = DateTime.MinValue;
-            core.NavigationStarting += (o, e) => { navTarget = e.Uri; errorShown = false; };
+            core.NavigationStarting += (o, e) =>
+            {
+                // diagnostics buttons on GBrowser's error page: only from a click, only while that error page is shown
+                if (e.Uri.StartsWith(Pages.Origin + "act?", StringComparison.OrdinalIgnoreCase))
+                {
+                    e.Cancel = true;
+                    // (core.Source is the failed address while the error page shows, so GBrowser's own flag is used)
+                    // run after this event returns: a modal dialog inside a WebView2 event handler blocks the engine
+                    string act = e.Uri;
+                    if (e.IsUserInitiated && errorShown) BeginInvoke((Action)(() => ErrorAction(act)));
+                    return;
+                }
+                navTarget = e.Uri; errorShown = false;
+            };
             // certificate problems: never proceed; cancel so the load fails like any other and GBrowser's page shows
             // (the engine's own certificate screen cannot be replaced: scripts do not run in it)
             core.ServerCertificateErrorDetected += (o, e) =>
@@ -419,7 +432,11 @@ namespace GBrowser
                         status = lastErrStatus;
                     else { lastErrUrl = u; lastErrStatus = status; }
                     lastErrAt = DateTime.UtcNow;
-                    _ = ErrorPage.Show(core, status, u);
+                    var shownStatus = status;
+                    ErrorPage.Show(core, status, u).ContinueWith(tk =>
+                    {
+                        if (tk.Result == "replaced" && ErrorPage.IsNetwork(shownStatus)) _ = ErrorPage.ShowDiagnostics(core, u);
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
                 }
                 if (e.IsSuccess && !t.Private) Store.AddHistory(core.Source, core.DocumentTitle);
                 strip.RefreshTabs();
@@ -751,6 +768,47 @@ namespace GBrowser
         {
             UpdateUi();
             if (Current?.Created == true && !Pages.IsInternal(Current.View.CoreWebView2.Source)) Current.View.CoreWebView2.Reload();
+        }
+
+        void ErrorAction(string actUri)
+        {
+            string q = actUri.Substring(actUri.IndexOf('?') + 1), what = null, url = null;
+            foreach (var part in q.Split('&'))
+            {
+                int eq = part.IndexOf('=');
+                if (eq < 0) continue;
+                string k = part.Substring(0, eq), v = Uri.UnescapeDataString(part.Substring(eq + 1));
+                if (k == "do") what = v; else if (k == "u") url = v;
+            }
+            switch (what)
+            {
+                case "netdiag":
+                    // Windows Network Diagnostics shows its own window and waits: run it off the UI thread
+                    IntPtr owner = Handle;
+                    var th = new System.Threading.Thread(() =>
+                    {
+                        if (!NetDiag.WindowsDiagnostics(url ?? "", owner))
+                            try { Process.Start(new ProcessStartInfo("ms-settings:troubleshoot") { UseShellExecute = true }); } catch { }
+                    });
+                    th.SetApartmentState(System.Threading.ApartmentState.STA);
+                    th.IsBackground = true;
+                    th.Start();
+                    break;
+                case "netsettings":
+                    try { Process.Start(new ProcessStartInfo("ms-settings:network-status") { UseShellExecute = true }); } catch { }
+                    break;
+                case "dnsauto":
+                    if (MaterialDialog.Ask(this, "Use automatic DNS?", null, new[] {
+                            Tuple.Create(IconData.Language, "Secure DNS is blocked on this network. GBrowser will use the network's DNS (encrypted when it supports it) and restart.") },
+                            "Use automatic DNS"))
+                    {
+                        Store.Settings.SecureDns = "off";
+                        Store.SaveSettings();
+                        restarting = true;
+                        Close();
+                    }
+                    break;
+            }
         }
 
         /// <summary>Install prompt with what the extension can access (like Chrome's).</summary>
