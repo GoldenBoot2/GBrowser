@@ -5,6 +5,7 @@ Status: **Done** · **Missing** (to build) · **Engine UI** (works, but shows th
 Last full audit: 19-11-2026.
 
 ## Pending (build order, 19-11-2026)
+0. Undetectable page scripts, open part (user, 19-11-2026; in progress): AdGuard scriptlet audit; ExtendedCss inline styles; $csp <meta> (with the cookie manager's response-header editing); Stealth read cost on heavy pages (25-28 ms); privacy wrappers (with Hide my identity). See "Undetectable page scripts" below.
 1. #7 New window (Ctrl+N, drag a tab out), set as default browser.
 2. #8 Import from Chrome / Edge, cookies and site data, passwords page, bookmark folders.
 3. Bookmarks (user, 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
