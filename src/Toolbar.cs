@@ -28,6 +28,10 @@ namespace GBrowser
 
         public event Action Back, Forward, Reload, Stop, Home, Star, ExtensionsClicked, MenuClicked, StoreChipClicked, ShieldClicked;
         public event Action<string> Go;
+        public event Action SiteInfoClicked;            // the icon at the left of the address (Chrome's "View site information")
+        public Rectangle SiteInfoRect => siteRect;
+        Rectangle siteRect;
+        bool hoverSite;
 
         readonly List<Btn> buttons = new List<Btn>();
         Btn hover, press;
@@ -157,6 +161,11 @@ namespace GBrowser
                 using (var b = new SolidBrush(Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh)) g.FillPath(b, p);
                 if (Address.Focused) using (var pen = new Pen(Theme.Primary, S(2))) g.DrawPath(pen, p);
             }
+            // site-info button: the icon (and "Not secure") at the left of the address, clickable like Chrome's
+            siteRect = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? Rectangle.Empty
+                : new Rectangle(pill.X + S(3), pill.Y + S(3), (notSecureRect.IsEmpty ? S(30) : notSecureRect.Right - pill.X + S(6)), pill.Height - S(6));
+            if (hoverSite && !siteRect.IsEmpty)
+                using (var p = Theme.Round(siteRect, siteRect.Height / 2f)) using (var b = new SolidBrush(Theme.Hover)) g.FillPath(b, p);
             // site-info icon like Chrome: "tune" for secure sites, the GBrowser logo for its own pages, a warning for http
             string leftIcon = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? IconData.Search
                 : PageKind == "secure" ? IconData.Tune : PageKind == "internal" ? IconData.Language
@@ -223,10 +232,11 @@ namespace GBrowser
             var h = Hit(e.Location);
             bool hc = ClearVisible && clearRect.Contains(e.Location);
             bool hch = StoreChip && chipRect.Contains(e.Location);
-            if (h != hover || hc != hoverClear || hch != hoverChip)
+            bool hs = !siteRect.IsEmpty && siteRect.Contains(e.Location);
+            if (h != hover || hc != hoverClear || hch != hoverChip || hs != hoverSite)
             {
-                hover = h; hoverClear = hc; hoverChip = hch; Invalidate();
-                string t = h == null ? (hc ? "Clear" : hch ? "Install this extension" : null)
+                hover = h; hoverClear = hc; hoverChip = hch; hoverSite = hs; Invalidate();
+                string t = h == null ? (hc ? "Clear" : hch ? "Install this extension" : hs ? "View site information" : null)
                     : h.Name == "reload" ? (Loading ? "Stop (Esc)" : "Reload (F5)")
                     : h.Name == "star" ? (Bookmarked ? "Remove bookmark (Ctrl+D)" : "Bookmark this page (Ctrl+D)")
                     : h.Name == "shield" ? (ShieldOn ? BlockedCount + " blocked" : "Blocking off")
@@ -234,15 +244,16 @@ namespace GBrowser
                     : h.Tip;
                 if (t != tipText) { tipText = t; tip.SetToolTip(this, t); }
             }
-            Cursor = hc || hch ? Cursors.Hand : Cursors.Default;
+            Cursor = hc || hch || hs ? Cursors.Hand : Cursors.Default;
         }
 
-        protected override void OnMouseLeave(EventArgs e) { hover = null; hoverClear = hoverChip = false; Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { hover = null; hoverClear = hoverChip = hoverSite = false; Invalidate(); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
             if (ClearVisible && clearRect.Contains(e.Location)) { Address.Clear(); Address.Focus(); return; }
+            if (!siteRect.IsEmpty && siteRect.Contains(e.Location)) return;   // opens on mouse up
             if (pill.Contains(e.Location) && Hit(e.Location) == null) { Address.Focus(); return; }
             press = Hit(e.Location);
             if (press != null && !press.Enabled()) press = null;
@@ -253,6 +264,7 @@ namespace GBrowser
         {
             if (e.Button != MouseButtons.Left) return;
             if (StoreChip && chipRect.Contains(e.Location)) { StoreChipClicked?.Invoke(); return; }
+            if (!siteRect.IsEmpty && siteRect.Contains(e.Location)) { SiteInfoClicked?.Invoke(); return; }
             var p = press; press = null; Invalidate();
             if (p != null && p.Rect.Contains(e.Location)) p.Click();
         }

@@ -28,7 +28,7 @@ Last full audit: 19-11-2026.
 | Short URL when not focused, full when focused | Done |
 | Suggestions while typing (history, bookmarks, open tabs, search suggestions), inline autocomplete, Shift+Delete removes | Done (19-11-2026; setting to turn search suggestions off) |
 | Search engines: choose default | Done; custom engines / keywords: Missing |
-| Site info panel (padlock: connection, certificate, permissions, cookies, site settings) | Missing |
+| Site info panel (icon left of the address: connection, permissions with switches + reset, cookies count + delete site data, ad blocking on the site, site settings) | Done (19-11-2026); certificate viewer missing |
 | Zoom indicator in the address bar (click to reset) | Missing |
 | Bookmark star | Done |
 | Copy link / QR code / share page | Missing |

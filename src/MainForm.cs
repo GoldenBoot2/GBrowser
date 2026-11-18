@@ -125,6 +125,7 @@ namespace GBrowser
             toolbar.ExtensionsClicked += ShowExtensionsMenu;
             toolbar.StoreChipClicked += InstallFromStorePage;
             toolbar.ShieldClicked += ShowShieldMenu;
+            toolbar.SiteInfoClicked += () => { _ = ShowSiteInfo(); };
             uiTimer.Tick += (s, e) =>
             {
                 if (!uiDirty) return;
@@ -1323,6 +1324,123 @@ namespace GBrowser
             m.ShowAt(toolbar, toolbar.ButtonRect("ext"), true, "ext");
         }
 
+        /// <summary>Chrome's "View site information": connection state, this site's permissions (switches + reset),
+        /// cookies and site data (count, delete), ad blocking on the site, and Site settings.</summary>
+        async Task ShowSiteInfo()
+        {
+            var t = Current;
+            string url = t?.Created == true ? t.View.CoreWebView2.Source : t?.Url;
+            if (string.IsNullOrEmpty(url)) return;
+            var m = NewMenu();
+            string pn = Pages.PageName(url);
+            bool standIn = pn == "crashed" || pn == "insecure" || pn == "certerror";   // pages that stand for a site
+            if (Pages.IsInternal(url) && !standIn)
+            {
+                m.AddHeader("GBrowser page", IconData.Language);
+                m.AddNote("Secure GBrowser page");
+                m.ShowAt(toolbar, toolbar.SiteInfoRect, false, "siteinfo");
+                return;
+            }
+            // the crashed / warning pages show the page they stand for
+            string page = url;
+            if (standIn)
+                try { page = Uri.UnescapeDataString(url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3).Split('&')[0]); } catch { }
+            Uri u;
+            try { u = new Uri(page); } catch { return; }
+            string host = u.Host.StartsWith("www.") ? u.Host.Substring(4) : u.Host;
+            string origin = u.Scheme + "://" + u.Authority;
+            bool secure = u.Scheme == "https" && Pages.PageName(url) != "insecure" && Pages.PageName(url) != "certerror";
+            m.AddHeader(host, secure ? IconData.Lock : IconData.Warning);
+            m.AddNote(secure ? "Connection is secure" : "Connection is not secure");
+
+            // permissions this site has a remembered choice for
+            var perms = new List<CoreWebView2PermissionSetting>();
+            try { if (Profile != null) perms = (await Profile.GetNonDefaultPermissionSettingsAsync()).Where(p => p.PermissionOrigin.TrimEnd('/') == origin).ToList(); } catch { }
+            if (perms.Count > 0)
+            {
+                m.AddSeparator();
+                foreach (var p in perms)
+                {
+                    var kind = p.PermissionKind;
+                    bool on = p.PermissionState == CoreWebView2PermissionState.Allow;
+                    m.AddToggle(PermissionName(kind), on, true, async () =>
+                    {
+                        try { await Profile.SetPermissionStateAsync(kind, origin, on ? CoreWebView2PermissionState.Deny : CoreWebView2PermissionState.Allow); } catch { }
+                    });
+                }
+                m.Add("Reset permissions", IconData.Restore, null, async () =>
+                {
+                    foreach (var p in perms) try { await Profile.SetPermissionStateAsync(p.PermissionKind, origin, CoreWebView2PermissionState.Default); } catch { }
+                    if (t.Created) t.View.CoreWebView2.Reload();
+                });
+            }
+
+            // cookies the page uses, and deleting this site's data
+            int cookies = 0;
+            try { if (t.Created) cookies = (await t.View.CoreWebView2.CookieManager.GetCookiesAsync(page)).Count; } catch { }
+            m.AddSeparator();
+            m.Add("Cookies and site data", IconData.Cookie, cookies + " in use", () => DeleteSiteData(t, u, host));
+            var st = Store.Settings;
+            string site = Blocking.SiteOf(page);
+            if (site != null)
+                m.AddToggle("Block ads on this site", st.AdblockEnabled && !st.AllowedSites.Contains(site), st.AdblockEnabled, () =>
+                {
+                    if (!st.AllowedSites.Remove(site)) st.AllowedSites.Add(site);
+                    Store.SaveSettings();
+                    ReloadAfterSettingChange();
+                });
+            m.Add("Site settings", IconData.Settings, null, () => OpenPage("settings"));
+            m.ShowAt(toolbar, toolbar.SiteInfoRect, false, "siteinfo");
+        }
+
+        static string PermissionName(CoreWebView2PermissionKind k)
+        {
+            switch (k)
+            {
+                case CoreWebView2PermissionKind.Camera: return "Camera";
+                case CoreWebView2PermissionKind.Microphone: return "Microphone";
+                case CoreWebView2PermissionKind.Geolocation: return "Location";
+                case CoreWebView2PermissionKind.Notifications: return "Notifications";
+                case CoreWebView2PermissionKind.ClipboardRead: return "Clipboard";
+                case CoreWebView2PermissionKind.MultipleAutomaticDownloads: return "Automatic downloads";
+                case CoreWebView2PermissionKind.FileReadWrite: return "File editing";
+                case CoreWebView2PermissionKind.Autoplay: return "Sound and autoplay";
+                case CoreWebView2PermissionKind.LocalFonts: return "Fonts";
+                case CoreWebView2PermissionKind.MidiSystemExclusiveMessages: return "MIDI devices";
+                case CoreWebView2PermissionKind.WindowManagement: return "Window management";
+                case CoreWebView2PermissionKind.OtherSensors: return "Motion sensors";
+                default: return k.ToString();
+            }
+        }
+
+        /// <summary>Deletes the site's cookies (its own domain and subdomains) and stored data (local storage,
+        /// IndexedDB, caches, service workers), then reloads, like Chrome's "Delete data" in site information.</summary>
+        async void DeleteSiteData(BrowserTab t, Uri u, string host)
+        {
+            if (!MaterialDialog.Ask(this, "Delete site data?", null, new[] { Tuple.Create(IconData.Cookie, "Cookies and stored data of " + host + ". You may be signed out.") }, "Delete"))
+                return;
+            if (t?.Created != true) return;
+            var core = t.View.CoreWebView2;
+            string site = Blocking.SiteOf(u.AbsoluteUri) ?? host;
+            try
+            {
+                foreach (var c in await core.CookieManager.GetCookiesAsync(""))
+                {
+                    string d = c.Domain.TrimStart('.');
+                    if (d == site || d.EndsWith("." + site)) core.CookieManager.DeleteCookie(c);
+                }
+            }
+            catch { }
+            foreach (var o in new[] { u.Scheme + "://" + u.Authority, "https://" + site, "https://www." + site }.Distinct())
+                try
+                {
+                    await core.CallDevToolsProtocolMethodAsync("Storage.clearDataForOrigin", Store.ToJson(new Dictionary<string, object> {
+                        { "origin", o }, { "storageTypes", "local_storage,indexeddb,websql,cache_storage,service_workers,file_systems,shader_cache" } }));
+                }
+                catch { }
+            core.Reload();
+        }
+
         void ShowShieldMenu()
         {
             var st = Store.Settings;
@@ -1953,6 +2071,10 @@ namespace GBrowser
                 case "tabinfo":
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
+                case "siteinfo":
+                    await ShowSiteInfo();
+                    await Task.Delay(300);
+                    return "ok";
                 case "find":
                     ShowFind();
                     if (arg.Length > 0) { findBar.Box.Clear(); findBar.Box.TypeForTest(arg); }
