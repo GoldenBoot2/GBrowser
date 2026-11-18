@@ -185,8 +185,8 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 | Cloudflare managed challenge (visas-de.tlscontact.com) failed with Stealth on: getComputedStyle wrapper ran the hidden-by-us check on every call (507 us vs 1.6 us) | Fixed ba7f977 (passes with all protections on) |
 | Errors thrown through wrappers showed our stack frame (e.g. "at get offsetHeight (<anonymous>:2095:17)") | Fixed ba7f977 (nat(): browser-identical stack, also for Error.prepareStackTrace) |
 | Symbol(gbab) marker visible in Object.getOwnPropertySymbols(window) | Fixed ba7f977 |
-| Reading styles / sizes of an ad we hid costs up to 26 ms (all our style sheets switched off and on): timing trace on bait elements | Open (per-element override or user-origin CSS) |
-| Cosmetic hiding adds <style> elements a page can list (document.styleSheets); $csp rules add <meta> elements | Open (needs user-origin CSS, e.g. a built-in extension's insertCSS; engine support to verify) |
+| Reading styles / sizes of an ad we hid: one short-lived override sheet with only the selectors hiding that element (values exact: 10 px bait = 10 px) | Improved 19-11-2026; still 18.7 ms per read on BBC (layout + extra style update): Open |
+| Cosmetic hiding adds <style> elements a page can list | Fixed 19-11-2026 for the main document: DevTools stylesheet (CSS.createStyleSheet, @layer gbh), in neither DOM nor CSSOM; blocked frames / images hidden by an address rule instead of an inline style. Open: frames in other processes, ExtendedCss styles, $csp <meta> elements |
 | getComputedStyle result for an ad we hid is a Proxy whose methods are not the browser's own functions | Open |
 | Privacy-mode wrappers (methodOn, cookie masking) not yet on nat(); fixed values must still run the browser's receiver checks | Open (with Hide my identity) |
 | AdGuard scriptlet library wrappers: audit with the same probes | Open |

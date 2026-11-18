@@ -19,6 +19,75 @@ namespace GBrowser
         public event Action Changed;
 
         public Blocking(BrowserTab tab, CoreWebView2Environment env) { this.tab = tab; this.env = env; }
+
+        // ---------------------------------------------------------------- hiding CSS the page cannot see
+        // Element hiding used to add <style> elements, which a page can list (document.styleSheets, querySelectorAll).
+        // The main document's hiding CSS now goes into a stylesheet made through the engine's DevTools interface
+        // (CSS.createStyleSheet): it applies like any author sheet but is in neither the DOM nor the CSSOM
+        // (measured 19-11-2026), and it stays after CSS / DOM tracking is switched off again, so tracking is on
+        // only while the sheet is written. Rules sit in "@layer gbh" so Stealth can lift them for one synchronous
+        // read with an adopted override sheet (gbab.js unhidden()).
+        CoreWebView2 core;
+        System.Threading.SynchronizationContext ui;
+        string cssDoc, sheetDoc, sheetId;          // document id from the page script / the document the sheet is for
+        readonly StringBuilder cssText = new StringBuilder();
+        bool cssFlushing, cssAgain, cssBroken;
+        public string CssState => "doc " + cssDoc + " sheet " + sheetId + " chars " + cssText.Length + (cssBroken ? " broken" : "");
+
+        /// <summary>From the page script (top document only): CSS to add. False = use a style element instead.</summary>
+        internal bool QueueCss(string doc, string css)
+        {
+            if (cssBroken || core == null || ui == null || string.IsNullOrEmpty(doc)) return false;
+            if (doc != cssDoc) { cssDoc = doc; cssText.Clear(); }
+            cssText.Append(css).Append('\n');
+            ui.Post(_ => FlushCss(), null);
+            return true;
+        }
+
+        async void FlushCss()
+        {
+            if (cssFlushing) { cssAgain = true; return; }
+            cssFlushing = true;
+            try
+            {
+                do
+                {
+                    cssAgain = false;
+                    string doc = cssDoc, text = "@layer gbh{\n" + cssText + "}";
+                    await core.CallDevToolsProtocolMethodAsync("DOM.enable", "{}");
+                    await core.CallDevToolsProtocolMethodAsync("CSS.enable", "{}");
+                    try
+                    {
+                        if (sheetDoc != doc || sheetId == null)
+                        {
+                            var tree = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("Page.getFrameTree", "{}"));
+                            string frameId = (((tree["frameTree"] as Dictionary<string, object>)["frame"]) as Dictionary<string, object>)["id"] as string;
+                            var made = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("CSS.createStyleSheet",
+                                Store.ToJson(new Dictionary<string, object> { { "frameId", frameId } })));
+                            sheetId = made["styleSheetId"] as string;
+                            sheetDoc = doc;
+                        }
+                        await core.CallDevToolsProtocolMethodAsync("CSS.setStyleSheetText",
+                            Store.ToJson(new Dictionary<string, object> { { "styleSheetId", sheetId }, { "text", text } }));
+                    }
+                    finally
+                    {
+                        try { await core.CallDevToolsProtocolMethodAsync("CSS.disable", "{}"); } catch { }
+                        try { await core.CallDevToolsProtocolMethodAsync("DOM.disable", "{}"); } catch { }
+                    }
+                } while (cssAgain);
+            }
+            catch (Exception ex)
+            {
+                // a document replaced while writing: the next page's script starts a new sheet; repeated failures
+                // switch this tab back to style elements so hiding never stops
+                sheetId = null;
+                TestLog.Add("css sheet: " + ex.Message);
+                if (++cssErrors >= 3) cssBroken = true;
+            }
+            finally { cssFlushing = false; }
+        }
+        int cssErrors;
 #if AUTOMATION
         public static readonly List<string> TestLog = new List<string>();
         public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
@@ -68,6 +137,8 @@ namespace GBrowser
 
         public void Attach(CoreWebView2 core)
         {
+            this.core = core;
+            ui = System.Threading.SynchronizationContext.Current;
             core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += OnRequest;
             core.NavigationStarting += OnNavigationStarting;
@@ -379,7 +450,7 @@ namespace GBrowser
                 const string shim = "(function(){try{var w=window.chrome&&window.chrome.webview;var h=w&&w.hostObjects&&w.hostObjects.sync&&w.hostObjects.sync.gb;" +
                     "if(!h)return;var c=function(n){return function(){try{return h[n].apply(h,arguments);}catch(e){return '';}};};" +
                     "Object.defineProperty(window,'__gbAdblock',{value:{init:c('init'),js:c('js'),extra:c('extra'),rr:c('rr'),dbg:c('dbg')," +
-                    "dnt:c('dnt'),p:c('p'),keys:c('keys'),blocked:c('blocked')},configurable:true,writable:true});}catch(e){}})();\n";
+                    "dnt:c('dnt'),p:c('p'),keys:c('keys'),blocked:c('blocked'),css:c('css')},configurable:true,writable:true});}catch(e){}})();\n";
                 script = shim + gbab + "\n" + HideWebView;
             }
             catch { script = HideWebView; }
@@ -437,6 +508,7 @@ namespace GBrowser
         }
 
         public string dbg() => Blocking.TestDbg;
+        public bool css(string doc, string css) => b.QueueCss(doc, css);
         public bool dnt() => S.DoNotTrack;
         public string p(string href) => "";   // privacy masking: WebView2 already is Edge, its values are genuine
 

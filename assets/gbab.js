@@ -1148,12 +1148,23 @@
   var keyed = init.charAt(0) === '1';
   var styles = [];
   var sels = [], combined = null, inlineHidden = [];
+  // the top document's hiding CSS goes to GBrowser's invisible sheet (Blocking.QueueCss); frames, or when that
+  // is not available, use style elements as before
+  var DOC = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  var useSheet = false;
+  try { useSheet = window === window.top && DBG.indexOf('y') < 0 && B.css(DOC, '') === true; } catch (e) {}
+  var CSSS = window.CSSStyleSheet, replaceSync = CSSS && CSSS.prototype.replaceSync,
+    adopt = gOPD(Document.prototype, 'adoptedStyleSheets'), arrSlice = Array.prototype.slice;
   function addStyle(css) {
     if (!css) return;
-    var s = document.createElement('style');
-    s.textContent = css;
-    styles.push(s);
-    attach(s);
+    var sent = false;
+    if (useSheet) { try { sent = B.css(DOC, css) === true; } catch (e) {} }
+    if (!sent) {
+      var s = document.createElement('style');
+      s.textContent = css;
+      styles.push(s);
+      attach(s);
+    }
     var parts = css.split('{display:none!important}');
     for (var i = 0; i < parts.length; i++) if (parts[i] && parts[i].indexOf('}') < 0) sels.push(parts[i]);
     combined = null;
@@ -1209,24 +1220,63 @@
     if (!combined) return false;
     try { return !!bApply(cap.closest, el, [combined]) || (small && !!bApply(cap.qs, el, [combined])); } catch (e) { return false; }
   }
+  var okSels = [];
   function buildCombined() {
     var ok = [], root = document.documentElement;
     for (var j = 0; j < sels.length; j++) {
       try { bApply(cap.matches, root, [sels[j]]); ok[ok.length] = sels[j]; } catch (e) {}
     }
+    okSels = ok;
     combined = ok.join(',');
   }
   // run fn with our hiding switched off (no paint happens in between, so nothing flickers)
-  function unhidden(fn) {
+  var overMemo = new WeakMap(), qsa = EPs.querySelectorAll, nlLen = gOPD(NodeList.prototype, 'length').get;
+  function overrideSheet(el) {
+    if (combined === null) buildCombined();
+    if (!combined || !CSSS || !replaceSync || !el || el.nodeType !== 1) return null;
+    var m = bApply(cap.mget, overMemo, [el]);
+    if (m && m.g === memoGen) return m.s;
+    var sheet = null;
+    try {
+      var nodes = [], hit = bApply(cap.closest, el, [combined]);
+      if (hit) nodes[nodes.length] = hit;
+      if (bApply(cap.len, bApply(cap.gbtn, el, ['*']), []) <= 50) {
+        var inner = bApply(qsa, el, [combined]), n = bApply(nlLen, inner, []);
+        for (var i = 0; i < n; i++) nodes[nodes.length] = inner[i];
+      }
+      var use = [];
+      for (var j = 0; j < okSels.length && nodes.length; j++)
+        for (var k = 0; k < nodes.length; k++)
+          if (bApply(cap.matches, nodes[k], [okSels[j]])) { use[use.length] = okSels[j]; break; }
+      if (use.length) {
+        sheet = new CSSS();
+        // same layer as the hiding rules, far higher specificity: the page's own display value comes back
+        bApply(replaceSync, sheet, ['@layer gbh{:is(' + use.join(',') + '):not(#gb#gb#gb#gb#gb){display:revert-layer!important}}']);
+      }
+    } catch (e) { sheet = null; }
+    bApply(cap.mset, overMemo, [el, {g: memoGen, s: sheet}]);
+    return sheet;
+  }
+  function unhidden(fn, el) {
     inStealth = true;
-    var off = [], saved = [];
+    var off = [], saved = [], before = null;
     for (var i = 0; i < styles.length; i++) if (!styles[i].disabled) { styles[i].disabled = true; off.push(styles[i]); }
+    if (useSheet && adopt && adopt.get && adopt.set) {
+      var o = overrideSheet(el);
+      if (o) try {
+        before = bApply(arrSlice, bApply(adopt.get, document, []), []);
+        var withO = bApply(arrSlice, before, []);
+        withO[withO.length] = o;
+        bApply(adopt.set, document, [withO]);
+      } catch (e) { before = null; }
+    }
     for (var k = 0; k < inlineHidden.length; k++) {
       var st = inlineHidden[k].style;
       saved.push([st.getPropertyValue('display'), st.getPropertyPriority('display')]);
       st.removeProperty('display');
     }
     try { return fn(); } finally {
+      if (before) try { bApply(adopt.set, document, [before]); } catch (e) {}
       for (var j = 0; j < off.length; j++) off[j].disabled = false;
       for (var m = 0; m < inlineHidden.length; m++)
         inlineHidden[m].style.setProperty('display', saved[m][0] || 'none', saved[m][1] || 'important');
@@ -1247,7 +1297,7 @@
       var v = nat(g, this, [], 1);
       if (!isEmpty(v) || !hiddenByUs(this)) return v;
       var self = this;
-      return unhidden(function () { return g.call(self); });
+      return unhidden(function () { return g.call(self); }, self);
     }}.__lookupGetter__(name), g);
     try { Object.defineProperty(proto, name, {get: w, set: d.set, enumerable: d.enumerable, configurable: true}); } catch (e) {}
   }
@@ -1258,7 +1308,7 @@
       var v = nat(f, this, arguments, 1);
       if (!isEmpty(v) || !hiddenByUs(this)) return v;
       var self = this, args = arguments;
-      return unhidden(function () { return f.apply(self, args); });
+      return unhidden(function () { return f.apply(self, args); }, self);
     }}[name], f);
     try { Object.defineProperty(proto, name, {value: w, writable: true, enumerable: false, configurable: true}); } catch (e) {}
   }
@@ -1285,9 +1335,9 @@
       // live view that reads every value with our hiding switched off
       return new Proxy(cs, {
         get: function (t, p) {
-          var v = unhidden(function () { return t[p]; });
+          var v = unhidden(function () { return t[p]; }, el);
           if (typeof v !== 'function') return v;
-          return function () { var a = arguments; return unhidden(function () { return v.apply(t, a); }); };
+          return function () { var a = arguments; return unhidden(function () { return v.apply(t, a); }, el); };
         }
       });
     }}.getComputedStyle, gcs);
@@ -1297,6 +1347,13 @@
   addStyle(init.substring(1));
 
   function hide(el) {
+    if (useSheet) {
+      var a = el.getAttribute('src') ? 'src' : el.getAttribute('data') ? 'data' : null;
+      if (a && window.CSS && CSS.escape) {
+        addStyle(el.tagName.toLowerCase() + '[' + a + '="' + CSS.escape(el.getAttribute(a)) + '"]{display:none!important}');
+        return;
+      }
+    }
     if (inlineHidden.indexOf(el) < 0) {
       inlineHidden = inlineHidden.filter(function (x) { return x.isConnected; });
       inlineHidden.push(el);
