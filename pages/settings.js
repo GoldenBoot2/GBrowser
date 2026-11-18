@@ -133,6 +133,35 @@
   drawKeep();
   main.append(keepCard);
 
+  // Secure DNS (DNS over HTTPS): provider list, custom address, restart notice
+  const dns = await gb.send('dns.info');
+  const isCustom = dns.setting.startsWith('custom:');
+  const dnsSel = el('select', { 'aria-label': 'Secure DNS' },
+    [['off', 'Automatic']].concat(dns.providers.map(p => [p.id, p.name])).concat([['custom', 'Custom']])
+      .map(([v, t]) => el('option', { value: v, text: t, selected: v === (isCustom ? 'custom' : dns.setting) })));
+  const dnsCustom = el('input', { class: 'field grow', placeholder: 'https://dns.example/dns-query', spellcheck: 'false',
+    'aria-label': 'Custom DNS over HTTPS address', value: isCustom ? dns.setting.slice(7) : '' });
+  const restartRow = el('div', { class: 'row' }, icon('Restore'), el('div', { class: 'text' },
+    el('div', { class: 'title', text: 'Restart GBrowser to use the new DNS setting' })),
+    el('button', { class: 'btn', onclick: () => gb.send('app.restart') }, icon('Refresh'), 'Restart'));
+  const customRow = el('div', { class: 'row' }, el('div', { class: 'grow' }), dnsCustom,
+    el('button', { class: 'btn tonal', onclick: () => saveDns('custom:' + dnsCustom.value.trim()) }, 'Save'));
+  let current = dns.setting;
+  function dnsUi() {
+    customRow.style.display = dnsSel.value === 'custom' ? '' : 'none';
+    restartRow.style.display = current !== dns.active ? '' : 'none';
+  }
+  async function saveDns(value) {
+    try { await gb.send('settings.set', { key: 'SecureDns', value }); current = value; dnsUi(); }
+    catch (e) { snack(e.message); }
+  }
+  dnsSel.addEventListener('change', () => { if (dnsSel.value === 'custom') { dnsUi(); dnsCustom.focus(); } else saveDns(dnsSel.value); });
+  dnsCustom.addEventListener('keydown', e => { if (e.key === 'Enter') saveDns('custom:' + dnsCustom.value.trim()); });
+  const dnsRow = el('div', { class: 'rows' },
+    row('Language', 'Secure DNS', 'Looks up site addresses over an encrypted connection (DNS over HTTPS)', dnsSel),
+    customRow, restartRow);
+  dnsUi();
+
   // Privacy and security
   const tp = el('select', { 'aria-label': 'Tracking prevention' }, [['basic', 'Basic'], ['balanced', 'Balanced'], ['strict', 'Strict']]
     .map(([v, t]) => el('option', { value: v, text: t, selected: v === (s.TrackingPrevention || 'balanced') })));
@@ -141,6 +170,7 @@
     row('Lock', 'Always use secure connections', 'Opens sites over HTTPS; warns before an insecure site', sw('HttpsFirst')),
     row('ShieldLock', 'Dangerous site and download protection', 'Microsoft Defender SmartScreen', sw('SmartScreen')),
     row('Policy', 'Tracking prevention', 'Microsoft Edge tracking prevention, on top of ad blocking', tp),
+    dnsRow,
     row('Delete', 'Clear data when GBrowser closes', 'Cookies, site data, cache and history (passwords kept)', sw('ClearOnExit')),
     row('Verified', 'Your data is encrypted', 'History, bookmarks, tabs and settings: only your Windows account can read them', null)));
 

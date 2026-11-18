@@ -192,6 +192,12 @@ namespace GBrowser
         {
             try
             {
+                // Secure DNS: the engine's own DoH preference, read when the engine starts (see Security.ApplySecureDnsPref)
+                // after a restart, the previous engine may still be shutting down: it would save its old settings over ours
+                // and the new window would join it, so wait until it is gone (max 15 s)
+                if (Environment.GetCommandLineArgs().Contains("--restarted")) await Task.Run(() => WaitForEngineExit(15000));
+                Security.ActiveSecureDns = Store.Settings.SecureDns ?? "off";
+                Security.ApplySecureDnsPref(Path.Combine(Store.WebDataDir, "EBWebView", "Local State"), Security.ActiveSecureDns);
                 var opts = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
                 env = await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
             }
@@ -207,7 +213,8 @@ namespace GBrowser
             _ = Downloads.All.Count;   // loads (and if needed encrypts) the downloads list
             var st = Store.Settings;
             var args = Environment.GetCommandLineArgs().Skip(1).Where(a => !a.StartsWith("--")).ToList();
-            if (st.RestoreTabs && st.Session != null && st.Session.Count > 0)
+            bool restarted = Environment.GetCommandLineArgs().Contains("--restarted");
+            if ((st.RestoreTabs || restarted) && st.Session != null && st.Session.Count > 0)
             {
                 foreach (var u in st.Session) Tabs.Add(new BrowserTab(u, TitleFor(u)));
                 int sel = Math.Max(0, Math.Min(st.SessionIndex, Tabs.Count - 1));
@@ -218,6 +225,29 @@ namespace GBrowser
             strip.RefreshTabs();
             // load extensions once at start so their background scripts run (profile is shared by all tabs)
             await LoadExtensionsOnce();
+        }
+
+        /// <summary>Waits until no WebView2 process uses GBrowser's data folder.</summary>
+        static void WaitForEngineExit(int maxMs)
+        {
+            var sw = Stopwatch.StartNew();
+            string marker = Store.WebDataDir;
+            while (sw.ElapsedMilliseconds < maxMs)
+            {
+                bool running = false;
+                try
+                {
+                    using (var q = new System.Management.ManagementObjectSearcher("SELECT CommandLine FROM Win32_Process WHERE Name='msedgewebview2.exe'"))
+                        foreach (var o in q.Get())
+                        {
+                            var cl = o["CommandLine"] as string;
+                            if (cl != null && cl.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0) { running = true; break; }
+                        }
+                }
+                catch { return; }
+                if (!running) return;
+                System.Threading.Thread.Sleep(250);
+            }
         }
 
         static string TitleFor(string url)
@@ -837,6 +867,13 @@ namespace GBrowser
                         case "DoNotTrack": st.DoNotTrack = v is bool a7 && a7; break;
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
+                        case "SecureDns":
+                        {
+                            string d = (v as string ?? "").Trim();
+                            if (d != "off" && Security.DnsTemplate(d) == null) throw new Exception(d.StartsWith("custom:") ? "Enter an https:// address" : "Unknown provider");
+                            st.SecureDns = d;
+                            break;
+                        }
                         case "SmartScreen":
                             st.SmartScreen = v is bool s3 && s3;
                             foreach (var x in Tabs.Where(x => x.Created)) ApplySecurity(x.View.CoreWebView2);
@@ -876,6 +913,15 @@ namespace GBrowser
                     Process.Start("explorer.exe", "\"" + Store.DataDir + "\""); return null;
                 case "memory": return MemoryReport();
                 case "theme.vars": return Theme.CssVars();
+                case "dns.info":
+                    return new Dictionary<string, object>
+                    {
+                        { "setting", st.SecureDns ?? "off" }, { "active", Security.ActiveSecureDns ?? "off" },
+                        { "providers", Security.DnsProviders.Select(p => new Dictionary<string, object> { { "id", p[0] }, { "name", p[1] } }).ToList() },
+                    };
+                case "app.restart":
+                    BeginInvoke((Action)(() => { restarting = true; Close(); }));
+                    return null;
                 case "theme.info":
                 {
                     var acc = Palette.WindowsAccent();
@@ -1161,7 +1207,14 @@ namespace GBrowser
 
         // ---------- closing ----------
 
-        bool exitCleared;
+        bool exitCleared, restarting;
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            base.OnFormClosed(e);
+            // restart for settings that apply only at engine start (Secure DNS); tabs come back via the saved session
+            if (restarting) try { Process.Start(Application.ExecutablePath, "--restarted"); } catch { }
+        }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {

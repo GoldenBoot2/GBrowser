@@ -56,7 +56,7 @@ main { max-width: 900px; margin: 0 auto; padding: 24px 32px 64px; }
 .card { background: var(--surface-container); border-radius: var(--radius); overflow: hidden; margin-bottom: 20px; }
 .card h2 { font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--primary); margin: 0; padding: 16px 20px 6px; }
 .row { display: flex; align-items: center; gap: 16px; padding: 12px 20px; min-height: 56px; }
-.row + .row { border-top: 1px solid var(--outline-variant); }
+.row + .row, .row + .rows > .row:first-child, .rows + .row { border-top: 1px solid var(--outline-variant); }
 .row.link { cursor: pointer; }
 .row.link:hover { background: var(--hover); }
 .row .icon { color: var(--on-surface-variant); }

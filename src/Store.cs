@@ -145,7 +145,8 @@ namespace GBrowser
         public bool HttpsFirst { get; set; } = true;              // always use secure connections
         public bool SmartScreen { get; set; } = true;             // Microsoft Defender SmartScreen (sites + downloads)
         public string TrackingPrevention { get; set; } = "balanced";   // basic | balanced | strict (Edge tracking prevention)
-        public bool ClearOnExit { get; set; } = false;            // cookies, site data, cache, history when GBrowser closes
+        public string SecureDns { get; set; } = "cloudflare";     // off | cloudflare | google | quad9 | adguard | custom:<https template>
+        public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }
         public List<string> Session { get; set; } = new List<string>();
