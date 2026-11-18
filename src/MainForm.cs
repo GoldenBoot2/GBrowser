@@ -169,6 +169,12 @@ namespace GBrowser
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
+        /// <summary>The colour painted under a page where the page itself paints nothing. Browsers use white for web
+        /// pages (pages that support dark mode paint their own dark background); a dark base here made light-only
+        /// sites with a transparent background (bbc.com: dark text, no background) unreadable in dark mode.
+        /// GBrowser's own pages are themed, so they keep the theme colour (no white flash while they load).</summary>
+        static Color PageBase(string url) => url == null || Pages.IsInternal(url) || url.StartsWith("about:") ? Theme.Surface : Color.White;
+
         /// <summary>Applies the current theme to the window, title bar, toolbars and all web content.</summary>
         void ApplyTheme(bool force)
         {
@@ -181,7 +187,7 @@ namespace GBrowser
             string themeMsg = Store.ToJson(new Dictionary<string, object> { { "type", "theme" }, { "vars", Theme.CssVars() } });
             foreach (var t in Tabs.Where(x => x.Created))
             {
-                t.View.DefaultBackgroundColor = Theme.Surface;
+                t.View.DefaultBackgroundColor = PageBase(t.View.CoreWebView2.Source);
                 ApplyColorScheme(t.View.CoreWebView2);
                 if (Pages.IsInternal(t.View.CoreWebView2.Source)) try { t.View.CoreWebView2.PostWebMessageAsJson(themeMsg); } catch { }
             }
@@ -392,7 +398,13 @@ namespace GBrowser
                 strip.RefreshTabs();
                 if (t == Current) UpdateUi();
             };
-            core.NavigationStarting += (o, e) => { t.Loading = true; strip.RefreshTabs(); if (t == Current) UpdateUi(); };
+            core.NavigationStarting += (o, e) =>
+            {
+                t.Loading = true; strip.RefreshTabs(); if (t == Current) UpdateUi();
+                // the colour under the page: white for websites (as in Chrome), the theme colour for GBrowser's pages
+                var bg = PageBase(e.Uri);
+                if (t.View.DefaultBackgroundColor != bg) t.View.DefaultBackgroundColor = bg;
+            };
             string navTarget = null, lastErrUrl = null;
             bool errorShown = false;
             var lastErrStatus = CoreWebView2WebErrorStatus.Unknown;
