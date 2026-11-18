@@ -156,7 +156,8 @@ namespace GBrowser
             string extra = Environment.GetEnvironmentVariable("GB_UPDATE_TEST_ARGS");
             if (!string.IsNullOrEmpty(extra)) args += " " + extra;
 #endif
-            try { Process.Start(new ProcessStartInfo(SetupPath, args) { UseShellExecute = false }); return true; }
+            // setup's working directory must not be the install folder it replaces
+            try { Process.Start(new ProcessStartInfo(SetupPath, args) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(SetupPath) }); return true; }
             catch (Exception ex) { Error = ex.Message; Set("error"); return false; }
         }
     }

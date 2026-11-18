@@ -111,8 +111,24 @@ namespace GBrowserSetup
 
         // ------------------------------------------------------------ install
 
+        /// <summary>Folders an interrupted earlier install or update left next to the install folder
+        /// (GBrowser.new-xxxxxx = unpacked but not swapped in, GBrowser.old-xxxxxx = previous version not deleted).</summary>
+        static void RemoveLeftovers(string full)
+        {
+            try
+            {
+                string parent = Path.GetDirectoryName(full), name = Path.GetFileName(full);
+                if (!Directory.Exists(parent)) return;
+                var pattern = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(name) + @"\.(new|old)-[0-9a-f]{6}$");
+                foreach (var d in Directory.GetDirectories(parent))
+                    if (pattern.IsMatch(Path.GetFileName(d))) try { Directory.Delete(d, true); } catch { }
+            }
+            catch { }
+        }
+
         public void Install()
         {
+            string stage = null;
             try
             {
                 Progress = 0.02f;
@@ -125,7 +141,8 @@ namespace GBrowserSetup
                 Directory.CreateDirectory(parent);
                 if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any() && !File.Exists(Path.Combine(full, Marker)))
                     throw new Exception("The folder is not empty: choose another one");
-                string stage = full + ".new-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                RemoveLeftovers(full);
+                stage = full + ".new-" + Guid.NewGuid().ToString("N").Substring(0, 6);
                 Extract(stage, 0.06f, 0.86f);
                 File.WriteAllText(Path.Combine(stage, Marker), Product + " " + Version);
                 // this setup stays in the folder: Windows' "Uninstall" runs it
@@ -139,6 +156,7 @@ namespace GBrowserSetup
                     Directory.Move(full, old);
                 }
                 Directory.Move(stage, full);
+                stage = null;
                 if (old != null) try { Directory.Delete(old, true); } catch { }
                 Progress = 0.9f;
 
@@ -170,7 +188,12 @@ namespace GBrowserSetup
                 Step = "Done";
                 Progress = 1f;
             }
-            catch (Exception ex) { Error = ex.Message; }
+            catch (Exception ex)
+            {
+                Error = ex.Message;
+                // never leave a half-finished copy behind (each "Try again" made a new one: 11 x 43 MB on 19-11-2026)
+                if (stage != null) try { if (Directory.Exists(stage)) Directory.Delete(stage, true); } catch { }
+            }
         }
 
         void Extract(string target, float from, float to)

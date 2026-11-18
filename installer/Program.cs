@@ -15,6 +15,11 @@ namespace GBrowserSetup
         [STAThread]
         static int Main(string[] args)
         {
+            // Never work from inside the install folder: a process's working directory blocks renaming that folder
+            // ("The process cannot access the file because it is being used by another process", measured
+            // 19-11-2026). GBrowser's updater up to 0.1.1 started setup with GBrowser's working directory (the
+            // install folder, from the shortcut), so every in-app update failed while swapping the folders.
+            try { System.Environment.CurrentDirectory = System.IO.Path.GetTempPath(); } catch { }
             bool Has(string a) => args.Any(x => string.Equals(x, a, StringComparison.OrdinalIgnoreCase));
             string Arg(string a) { int i = Array.FindIndex(args, x => string.Equals(x, a, StringComparison.OrdinalIgnoreCase)); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
 
