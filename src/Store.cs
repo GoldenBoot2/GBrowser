@@ -155,6 +155,7 @@ namespace GBrowser
         public int DownloadConnections { get; set; } = 8;         // multi-part downloads: most connections (1 = off)
         public int DownloadSpeedLimit { get; set; } = 0;          // KB/s for GBrowser's own downloads, 0 = no limit
         public string DownloadConflict { get; set; } = "ask";      // a file with that name exists: ask | keep (both) | replace
+        public Dictionary<string, double> SiteZoom { get; set; } = new Dictionary<string, double>();   // host -> zoom, like Chrome
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }

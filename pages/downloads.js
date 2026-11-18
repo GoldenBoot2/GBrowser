@@ -41,20 +41,20 @@
       (d.connections > 1 ? '  ·  ' + d.connections + ' connections' : '') + (d.limited ? '  ·  limited' : '') +
       (d.openWhenDone ? '  ·  opens when done' : '') + (d.replaces ? '  ·  replaces ' + d.replaces : '');
     else if (d.state === 'paused') status = 'Paused - ' + size(d.received) + (d.total ? ' of ' + size(d.total) : '');
-    else if (d.state === 'review') status = 'Needs your review: Microsoft Defender SmartScreen flagged this file';
+    else if (d.state === 'blocked') status = 'Blocked: Microsoft Defender SmartScreen says this file may be harmful';
     else status = /cancel/i.test(d.reason || '') ? 'Cancelled' : 'Failed';
     const actions = el('div', { class: 'actions' });
-    if (d.state === 'review') actions.append(el('button', { class: 'btn tonal', onclick: e => { e.stopPropagation(); act(d.id, 'review'); } }, icon('Warning'), 'Review'));
+    if (d.state === 'blocked') actions.append(el('button', { class: 'btn text', onclick: e => { e.stopPropagation(); act(d.id, 'anyway'); } }, 'Download anyway'));
     actions.append(iconButton('Link', 'Download link', e => { e.stopPropagation(); linkMenu(e.currentTarget, d); }));
     if (done && d.exists) actions.append(iconButton('Folder', 'Show in folder', e => { e.stopPropagation(); act(d.id, 'folder'); }));
     if (d.state === 'in_progress' && d.live) actions.append(iconButton('Pause', 'Pause', e => { e.stopPropagation(); act(d.id, 'pause'); }));
     if (d.state === 'paused' && d.live) actions.append(iconButton('Play', 'Resume', e => { e.stopPropagation(); act(d.id, 'resume'); }));
-    if (!done && !d.live) actions.append(iconButton('Refresh', 'Retry', e => { e.stopPropagation(); act(d.id, 'retry'); }));
-    if ((d.state === 'in_progress' || d.state === 'paused' || d.state === 'review') && d.live) actions.append(iconButton('Close', 'Cancel', e => { e.stopPropagation(); act(d.id, 'cancel'); }));
+    if (!done && !d.live && d.state !== 'blocked') actions.append(iconButton('Refresh', 'Retry', e => { e.stopPropagation(); act(d.id, 'retry'); }));
+    if ((d.state === 'in_progress' || d.state === 'paused') && d.live) actions.append(iconButton('Close', 'Cancel', e => { e.stopPropagation(); act(d.id, 'cancel'); }));
     else actions.append(iconButton('Delete', 'Remove from list', e => { e.stopPropagation(); act(d.id, 'remove'); }));
     const text = el('div', { class: 'text' },
       el('div', { class: 'title', text: d.name || d.url }),
-      el('div', { class: 'sub' + (status === 'Failed' || d.state === 'review' ? ' state-err' : ''), text: status }));
+      el('div', { class: 'sub' + (status === 'Failed' || d.state === 'blocked' ? ' state-err' : ''), text: status }));
     if (status === 'Failed' && d.reason) text.lastChild.title = d.reason;
     if (d.state === 'in_progress' || d.state === 'paused') {
       if (d.segments && d.segments.length) {

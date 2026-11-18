@@ -32,6 +32,7 @@ namespace GBrowser
             public string ReplaceTarget { get; set; } // "Replace": downloaded beside it, then moved over this file when done
             [System.Web.Script.Serialization.ScriptIgnore] public DateTime FullAt;   // all bytes in, engine still not done
             [System.Web.Script.Serialization.ScriptIgnore] public CoreWebView2 Core; // the tab that started it
+            [System.Web.Script.Serialization.ScriptIgnore] public bool Blocking;     // GBrowser is cancelling it because SmartScreen held it
             [System.Web.Script.Serialization.ScriptIgnore] public DateTime? RunningSince;
             // speed of the engine's own downloads (multi-part ones report theirs): bytes per second, smoothed
             [System.Web.Script.Serialization.ScriptIgnore] public double EngineSpeed;
@@ -155,11 +156,12 @@ namespace GBrowser
                         it.State = "completed"; it.Received = op.BytesReceived; it.Op = null; it.Path = op.ResultFilePath;
                         CompleteReplace(it); Finished(it); break;
                     case CoreWebView2DownloadState.Interrupted:
+                        if (it.Blocking) { it.State = "blocked"; it.Reason = "SmartScreen"; it.Op = null; break; }
                         it.State = op.CanResume ? "paused" : "interrupted";
                         it.Reason = op.InterruptReason.ToString();
                         if (!op.CanResume) it.Op = null;
                         break;
-                    default: if (it.State != "review") it.State = "in_progress"; break;
+                    default: if (it.State != "blocked") it.State = "in_progress"; break;
                 }
                 Save();
                 Changed?.Invoke();

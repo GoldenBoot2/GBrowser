@@ -377,6 +377,10 @@ namespace GBrowser
             var s = core.Settings;
             s.AreDevToolsEnabled = true;
             s.IsStatusBarEnabled = false;   // GBrowser's own, smaller bubble (StatusBubble)
+            if (!t.Private) SessionCookies.Restore(core.CookieManager);   // session logins from last time, before any page loads
+            // zoom is remembered per site (like Chrome): each site opens at its own zoom, others at 100%
+            t.View.ZoomFactorChanged += (o, e) => { if (!t.ApplyingZoom) SaveSiteZoom(t); };   // Ctrl + wheel, Ctrl +/-, pinch
+            core.SourceChanged += (o, e) => ApplySiteZoom(t);
             devDock.Attach((uint)core.BrowserProcessId);   // DevTools windows of the engine get docked
             core.StatusBarTextChanged += (o, e) => { if (t == Current) bubble.SetText(core.StatusBarText); };
             s.AreDefaultContextMenusEnabled = true;
@@ -742,10 +746,9 @@ namespace GBrowser
                     }
                 }
                 e.ResultFilePath = path;
-                // GBrowser's download button replaces the engine's download bubble, except for programs and scripts:
-                // Microsoft Defender SmartScreen shows its warnings (and Keep / Delete) only in that bubble, and WebView2
-                // has no API to show or answer them elsewhere (measured: a flagged file waits forever when it is hidden)
-                e.Handled = !FastDownload.Risky(path);
+                // GBrowser's own download button and page replace the engine's (Microsoft Edge) download bubble for
+                // every download; a file SmartScreen holds is handled in GBrowser too (CheckBlocked)
+                e.Handled = true;
                 // the page as referrer, only a real web address (not about:blank / GBrowser pages) and never from private tabs
                 string referer = t.Private || core.Source == null || !(core.Source.StartsWith("https://") || core.Source.StartsWith("http://")) || Pages.IsInternal(core.Source) ? null : core.Source;
                 // read once: every read of e.DownloadOperation returns a new wrapper object
@@ -769,12 +772,12 @@ namespace GBrowser
         readonly Timer reviewWatch = new Timer { Interval = 1000 };
 
         /// <summary>Microsoft Defender SmartScreen holds a flagged download (all bytes in, never completes) until someone
-        /// decides in the engine's download panel; WebView2 offers no API to read or answer that warning. GBrowser hides
-        /// that panel for normal downloads, so for such a download it shows the row as "Needs your review" and opens
-        /// the panel, where SmartScreen's own Keep / Delete choices are.</summary>
+        /// answers in the engine's own (Microsoft Edge) panel; WebView2 has no API to read or answer that warning
+        /// (measured 19-11-2026). GBrowser keeps everything in its own UI: such a download is cancelled (the engine
+        /// deletes the held file) and shown as "Blocked" with "Download anyway" (after a warning), like Chrome.</summary>
         void CheckReviews()
         {
-            foreach (var d in Downloads.All.Where(x => x.Op != null && (x.State == "in_progress" || x.State == "review")).ToList())
+            foreach (var d in Downloads.All.Where(x => x.Op != null && x.State == "in_progress").ToList())
             {
                 // read from the engine itself: a small file can be complete before any progress event reaches GBrowser
                 long got = d.Op.BytesReceived, total = (long)(d.Op.TotalBytesToReceive ?? 0);
@@ -782,27 +785,26 @@ namespace GBrowser
                 if (!full) { d.FullAt = default(DateTime); continue; }
                 if (d.FullAt == default(DateTime)) { d.FullAt = DateTime.UtcNow; d.Received = got; d.Total = total; continue; }
                 bool held = (DateTime.UtcNow - d.FullAt).TotalSeconds > 4;   // beyond a normal antivirus scan of a finished file
-                if (held && d.State != "review")
+                if (held)
                 {
-                    d.State = "review";
+                    d.Blocking = true;
                     Downloads.MarkStopped(d);
+                    try { d.Op.Cancel(); } catch { }
                     OnDownloadsChanged();
-                    OpenReview(d);
                 }
             }
         }
 
-        void OpenReview(Downloads.Item d)
+        /// <summary>"Download anyway" for a file SmartScreen blocked: a clear warning first, then GBrowser downloads it.</summary>
+        void DownloadAnyway(Downloads.Item d)
         {
-            var core = d.Core != null && Tabs.Any(t => t.Created && t.View.CoreWebView2 == d.Core) ? d.Core : Current?.View?.CoreWebView2;
+            string name = Path.GetFileName(d.Path ?? "file"), host = Blocking.HostOf(d.Url) ?? "this site";
+            if (!MaterialDialog.Ask(this, "Download anyway?", null, new[] {
+                    Tuple.Create(IconData.Warning, "Microsoft Defender SmartScreen says " + name + " may be harmful."),
+                    Tuple.Create(IconData.Info, "Only keep it if you trust " + host + ".") }, "Download anyway")) return;
+            var core = AnyCore;
             if (core == null) return;
-            if (Current?.View?.CoreWebView2 != core) { int i = Tabs.FindIndex(t => t.Created && t.View.CoreWebView2 == core); if (i >= 0) Select(i); }
-            try
-            {
-                core.DefaultDownloadDialogCornerAlignment = CoreWebView2DefaultDownloadDialogCornerAlignment.TopRight;
-                core.OpenDefaultDownloadDialog();
-            }
-            catch { }
+            FastDownload.Plain(d, core.CookieManager);
         }
         string lastDownloadStates;
 
@@ -847,7 +849,7 @@ namespace GBrowser
             switch (action)
             {
                 case "cancel": d.Op?.Cancel(); break;
-                case "review": OpenReview(d); break;
+                case "anyway": DownloadAnyway(d); break;
                 case "pause": d.Op?.Pause(); d.State = "paused"; Downloads.MarkStopped(d); break;
                 case "resume": if (d.Op != null && d.Op.CanResume) { d.Op.Resume(); d.State = "in_progress"; Downloads.MarkRunning(d); } break;
                 case "retry": NewTab(d.Url, false); break;
@@ -879,6 +881,36 @@ namespace GBrowser
             { "checked", Updater.LastCheck == DateTime.MinValue ? "" : Updater.LastCheck.ToString("dd MMM yyyy, HH:mm") },
         };
 
+        /// <summary>Zoom is kept per host (www.bbc.com, news.bbc.co.uk...), as Chrome does; GBrowser's pages are not zoomed.</summary>
+        static string ZoomKey(string url) => string.IsNullOrEmpty(url) || Pages.IsInternal(url) ? null : Blocking.HostOf(url);
+
+        /// <summary>Remembers the tab's current zoom for its site (100% = forgotten). Called on every zoom change: the
+        /// engine raises no event when GBrowser itself sets the zoom (menu, Ctrl+0), only for zooming in the page.</summary>
+        void SaveSiteZoom(BrowserTab t)
+        {
+            if (!t.Created || t.Private) return;
+            string key = ZoomKey(t.View.CoreWebView2.Source);
+            if (key == null) return;
+            double z = Math.Round(t.View.ZoomFactor, 3);
+            var sz = Store.Settings.SiteZoom;
+            bool changed;
+            if (Math.Abs(z - 1) < 0.005) changed = sz.Remove(key);
+            else { changed = !sz.TryGetValue(key, out var old) || Math.Abs(old - z) > 0.001; sz[key] = z; }
+            if (changed) Store.SaveSettings();
+            UpdateUi();
+        }
+
+        void ApplySiteZoom(BrowserTab t)
+        {
+            if (!t.Created) return;
+            string key = ZoomKey(t.View.CoreWebView2.Source);
+            if (key == null) return;
+            double want = Store.Settings.SiteZoom.TryGetValue(key, out var z) ? z : 1.0;
+            if (Math.Abs(t.View.ZoomFactor - want) < 0.001) return;
+            t.ApplyingZoom = true;
+            try { t.View.ZoomFactor = want; } finally { BeginInvoke((Action)(() => t.ApplyingZoom = false)); }
+        }
+
         void SendKeysToPage(string keys)
         {
             if (Current?.Created != true) return;
@@ -890,6 +922,7 @@ namespace GBrowser
         {
             if (Current?.Created != true) return;
             Current.View.ZoomFactor = Math.Max(0.25, Math.Min(5, Current.View.ZoomFactor * f));
+            SaveSiteZoom(Current);
         }
 
         void OpenDownloads() => OpenPage("downloads");
@@ -1368,7 +1401,7 @@ namespace GBrowser
                     {
                         case "open": if (File.Exists(d.Path)) Process.Start(new ProcessStartInfo(d.Path) { UseShellExecute = true }); break;
                         case "folder": if (File.Exists(d.Path)) Process.Start("explorer.exe", "/select,\"" + d.Path + "\""); break;
-                        case "cancel": case "pause": case "resume": case "retry": case "review": DownloadAction(d, Str(m, "action")); break;
+                        case "cancel": case "pause": case "resume": case "retry": case "anyway": DownloadAction(d, Str(m, "action")); break;
                         case "openwhendone": d.OpenWhenDone = !d.OpenWhenDone; Downloads.Save(); break;
                         case "remove": Downloads.All.Remove(d); Downloads.Save(); break;
                     }
@@ -1549,6 +1582,12 @@ namespace GBrowser
                     else if (arg == "undock") devDock.Undock();
                     return "docked=" + devDock.Docked(Current) + " count=" + devDock.DockedCount + " frame=" + devDock.FrameInfo() + " page=" + content.Bounds + " splitter=" + devDock.SplitterOnScreen;
                 case "bubble": bubble.SetText(arg); return bubble.Visible ? bubble.Bounds.ToString() : "hidden";
+                case "persistinfo":
+                {
+                    string sc = Store.ReadText("session-cookies.json") ?? "(none)";
+                    return "zoomFactor=" + (Current?.View?.ZoomFactor.ToString() ?? "-") + " siteZoom=" + Store.ToJson(Store.Settings.SiteZoom) +
+                        " sessionFile=" + (sc.Length > 300 ? sc.Substring(0, 300) + "..." : sc);
+                }
                 case "dlinfo":
                 {
                     var d = Downloads.All.FirstOrDefault();
@@ -1673,9 +1712,24 @@ namespace GBrowser
             if (restarting) try { Process.Start(Application.ExecutablePath, "--restarted"); } catch { }
         }
 
+        bool sessionSaved;
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             devDock?.Shutdown();   // docked DevTools windows go back to the engine before the window closes
+            // session logins (cookies without an expiry date) are kept for next time, like Chrome's session restore
+            if (!sessionSaved && !Store.Settings.ClearOnExit)
+            {
+                var normal = Tabs.FirstOrDefault(t => t.Created && !t.Private)?.View.CoreWebView2;
+                if (normal != null)
+                {
+                    e.Cancel = true;
+                    sessionSaved = true;
+                    SessionCookies.Save(normal.CookieManager).ContinueWith(_ => BeginInvoke((Action)Close));
+                    return;
+                }
+            }
+            if (Store.Settings.ClearOnExit) SessionCookies.Forget();
             // "Clear browsing data when GBrowser closes": cookies, site data, cache, history (passwords kept)
             if (Store.Settings.ClearOnExit && !exitCleared && Profile != null)
             {

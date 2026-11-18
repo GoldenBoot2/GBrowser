@@ -190,6 +190,61 @@ namespace GBrowser
             return d;
         }
 
+        /// <summary>"Download anyway" after a SmartScreen block (the user confirmed): one plain request by GBrowser,
+        /// whatever the file type or server; the file still gets the internet mark + antivirus scan, so Windows
+        /// SmartScreen checks it again when it is opened.</summary>
+        public static void Plain(Downloads.Item item, CoreWebView2CookieManager cm)
+        {
+            item.State = "in_progress"; item.Reason = null; item.Received = 0;
+            Downloads.MarkRunning(item);
+            Downloads.Notify(item);
+            Task.Run(async () =>
+            {
+                string part = item.Path + ".gbdownload";
+                try
+                {
+                    string u = item.Url;
+                    HttpResponseMessage res = null;
+                    for (int hop = 0; hop < 10; hop++)
+                    {
+                        var req = new HttpRequestMessage(HttpMethod.Get, u);
+                        req.Headers.TryAddWithoutValidation("User-Agent", Agent);
+                        if (!string.IsNullOrEmpty(item.Referer)) try { req.Headers.Referrer = new Uri(item.Referer); } catch { }
+                        try { var list = await cm.GetCookiesAsync(u); if (list.Count > 0) req.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", list.Select(c => c.Name + "=" + c.Value))); } catch { }
+                        res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+                        int code = (int)res.StatusCode;
+                        if (code >= 300 && code < 400 && res.Headers.Location != null) { u = new Uri(new Uri(u), res.Headers.Location).AbsoluteUri; res.Dispose(); res = null; continue; }
+                        break;
+                    }
+                    if (res == null || !res.IsSuccessStatusCode) throw new Exception("Server error");
+                    using (res)
+                    {
+                        item.Total = res.Content.Headers.ContentLength ?? item.Total;
+                        using (var s = await res.Content.ReadAsStreamAsync())
+                        using (var o = File.Create(part))
+                        {
+                            var buf = new byte[1 << 16];
+                            int n;
+                            while ((n = await s.ReadAsync(buf, 0, buf.Length)) > 0)
+                            {
+                                await o.WriteAsync(buf, 0, n);
+                                item.Received += n;
+                                Downloads.Notify(item);
+                            }
+                        }
+                    }
+                    if (File.Exists(item.Path)) File.Delete(item.Path);
+                    File.Move(part, item.Path);
+                    Attachment.Mark(item.Path, item.Url, item.Referer);
+                    item.State = "completed";
+                    Downloads.CompleteReplace(item);
+                    Downloads.Finished(item);
+                }
+                catch (Exception ex) { try { File.Delete(part); } catch { } item.State = "interrupted"; item.Reason = ex.Message; }
+                finally { Downloads.MarkStopped(item); Downloads.Save(); Downloads.Notify(item); }
+            });
+        }
+
         /// <summary>A multi-part download saved in an earlier session (paused or interrupted).</summary>
         public static FastDownload Restore(Downloads.Item item, CoreWebView2CookieManager cm)
         {

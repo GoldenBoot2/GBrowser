@@ -16,6 +16,7 @@ namespace GBrowser
         public string Url;            // real URL (internal pages: https://gbrowser.local/...)
         public string Title = "New tab";
         public Image Favicon;
+        public bool ApplyingZoom;   // GBrowser is setting the site's saved zoom (not the user zooming)
         public bool Loading, Sleeping, PlayingAudio;
         public bool OpenedByPage;     // created for NewWindowRequested: the page fills it, don't navigate
         public int Blocked;           // ads / trackers blocked on the current page
