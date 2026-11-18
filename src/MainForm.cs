@@ -26,6 +26,7 @@ namespace GBrowser
         static readonly string AppVersion = typeof(MainForm).Assembly.GetName().Version.ToString(3);
 
         readonly Timer uiTimer = new Timer { Interval = 300 };
+        WindowFrame frame;
         bool uiDirty;
         long savedTotal;
 
@@ -59,6 +60,8 @@ namespace GBrowser
             strip.TabSelected += i => Select(i);
             strip.TabClosed += i => CloseTab(i);
             strip.NewTabClicked += () => NewTab(null);
+            strip.TabSearchClicked += ShowTabSearch;
+            frame = new WindowFrame(this, strip);
             strip.TabMoved += (from, to) =>
             {
                 var t = Tabs[from]; Tabs.RemoveAt(from); Tabs.Insert(to, t);
@@ -114,6 +117,40 @@ namespace GBrowser
             // Windows light/dark and accent colour changes arrive as General / Color preference changes
             if ((e.Category == Microsoft.Win32.UserPreferenceCategory.General || e.Category == Microsoft.Win32.UserPreferenceCategory.Color) && IsHandleCreated)
                 BeginInvoke((Action)(() => ApplyTheme(false)));
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (frame != null && frame.Handle(ref m, BaseWndProc)) return;
+            base.WndProc(ref m);
+        }
+
+        void BaseWndProc(ref Message m) => base.WndProc(ref m);
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            bool max = WindowState == FormWindowState.Maximized;
+            if (strip.WindowMaximized != max) { strip.WindowMaximized = max; strip.Invalidate(); }
+        }
+
+        /// <summary>Tab search (the down-arrow at the left of the tab row, Ctrl+Shift+A): all open tabs.</summary>
+        void ShowTabSearch()
+        {
+            var m = NewMenu();
+            for (int i = 0; i < Tabs.Count; i++)
+            {
+                var t = Tabs[i];
+                Image img = t.Private ? Icons.Bitmap(IconData.Private, 16, Theme.Primary) : t.Favicon != null ? new Bitmap(t.Favicon, 16, 16) : Icons.Bitmap(IconData.Public, 16, Theme.OnSurfaceVariant);
+                string title = t.Title ?? "New tab";
+                if (title.Length > 60) title = title.Substring(0, 59) + "...";
+                var it = new ToolStripMenuItem(title, img) { Checked = i == strip.Selected, Padding = new Padding(0, 3, 0, 3) };
+                int idx = i;
+                it.Click += (s, e) => Select(idx);
+                m.Items.Add(it);
+            }
+            var r = strip.SearchRect;
+            m.Show(strip, new Point(r.X, r.Bottom + 2));
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -406,23 +443,42 @@ namespace GBrowser
             toolbar.CanForward = core?.CanGoForward ?? false;
             toolbar.Loading = t.Loading;
             toolbar.Secure = url.StartsWith("https://") || Pages.IsInternal(url);
+            toolbar.PageKind = Pages.IsInternal(url) ? "internal" : url.StartsWith("https://") ? "secure"
+                : url.StartsWith("http://") && !Security.IsLocal(Blocking.HostOf(url)) ? "insecure" : "";
+            if (toolbar.ShowHome != Store.Settings.ShowHomeButton) { toolbar.ShowHome = Store.Settings.ShowHomeButton; toolbar.LayoutNow(); }
             toolbar.Bookmarked = Store.IsBookmarked(url);
             toolbar.BlockedCount = t.Blocked;
             string pageHost = Blocking.HostOf(url);
             toolbar.ShieldOn = pageHost == null ? Store.Settings.AdblockEnabled : Blocking.OnFor(pageHost);
-            string shown = Pages.ToDisplay(url);
+            string full = Pages.ToDisplay(url);
             if (Pages.PageName(url) == "insecure")
             {
-                try { shown = Uri.UnescapeDataString(url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3)); } catch { }
+                try { full = Uri.UnescapeDataString(url.Substring(url.IndexOf("?u=", StringComparison.Ordinal) + 3)); } catch { }
                 toolbar.Secure = false;
+                toolbar.PageKind = "insecure";
             }
-            toolbar.SetUrl(shown);
+            toolbar.SetUrl(full, ShortUrl(full));
             var storeId = Extensions.StorePageId(url);
             bool chip = storeId != null;
             toolbar.StoreChipText = chip && Extensions.Index.ContainsKey(storeId) ? "Installed" : "Add to GBrowser";
             if (chip != toolbar.StoreChip) { toolbar.StoreChip = chip; toolbar.LayoutNow(); }
             toolbar.Invalidate();
             Text = (string.IsNullOrEmpty(t.Title) ? "GBrowser" : t.Title + " - GBrowser");
+        }
+
+        /// <summary>Address as Chrome shows it when not editing: without "https://" / "http://" and "www.", and without
+        /// a lone trailing "/" (one.one.one.one/help/ stays as it is).</summary>
+        static string ShortUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url) || url.StartsWith("gbrowser://")) return url;
+            string s = url;
+            if (s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) s = s.Substring(8);
+            else if (s.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) s = s.Substring(7);
+            else return url;
+            if (s.StartsWith("www.", StringComparison.OrdinalIgnoreCase) && s.IndexOf('.', 4) > 0) s = s.Substring(4);
+            int slash = s.IndexOf('/');
+            if (slash >= 0 && slash == s.Length - 1) s = s.Substring(0, slash);
+            return s;
         }
 
         void SetFullscreen(bool on)
@@ -709,6 +765,7 @@ namespace GBrowser
                 case Keys.Control | Keys.F4: CloseTab(strip.Selected); return true;
                 case Keys.Control | Keys.Shift | Keys.T: ReopenClosed(); return true;
                 case Keys.Control | Keys.Shift | Keys.N: NewPrivateTab(null); return true;
+                case Keys.Control | Keys.Shift | Keys.A: ShowTabSearch(); return true;
                 case Keys.Control | Keys.Tab:
                 case Keys.Control | Keys.PageDown: if (Tabs.Count > 1) Select((strip.Selected + 1) % Tabs.Count); return true;
                 case Keys.Control | Keys.Shift | Keys.Tab:
@@ -857,6 +914,7 @@ namespace GBrowser
                         case "RestoreTabs": st.RestoreTabs = v is bool rb && rb; break;
                         case "SleepMinutes": st.SleepMinutes = Math.Max(0, Math.Min(240, Convert.ToInt32(v))); break;
                         case "LowMemoryHiddenTabs": st.LowMemoryHiddenTabs = v is bool lb && lb; break;
+                        case "ShowHomeButton": st.ShowHomeButton = v is bool hb && hb; UpdateUi(); break;
                         case "ShowBookmarksBar": st.ShowBookmarksBar = v is bool sb && sb; bookmarksBar.Visible = st.ShowBookmarksBar && !fullscreen; break;
                         case "AdblockEnabled": st.AdblockEnabled = v is bool a1 && a1; break;
                         case "BlockAnnoyances": st.BlockAnnoyances = v is bool a2 && a2; break;
@@ -1140,6 +1198,17 @@ namespace GBrowser
                     return await Current.View.CoreWebView2.CallDevToolsProtocolMethodAsync(arg.Substring(0, sp2), arg.Substring(sp2 + 1));
                 }
                 case "testlog": return string.Join(" | ", Blocking.TestLog);
+                case "ctrls":
+                {
+                    var sb = new System.Text.StringBuilder();
+                    void Walk(Control c, string ind)
+                    {
+                        sb.Append(ind + c.GetType().Name + " " + c.Bounds + (c.Visible ? "" : " hidden") + " | ");
+                        foreach (Control k in c.Controls) if (!(k is Microsoft.Web.WebView2.WinForms.WebView2)) Walk(k, ind + ">");
+                    }
+                    Walk(this, "");
+                    return sb.ToString();
+                }
                 case "addrtype":
                 {
                     // WM_CHAR straight to the field: the same path real typing takes, no keys on the desktop

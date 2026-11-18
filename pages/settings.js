@@ -59,7 +59,8 @@
     row('Search', 'Search engine', null, engine),
     row('Home', 'Home page', null, home),
     row('Restore', 'Reopen tabs on start', null, sw('RestoreTabs')),
-    row('Star', 'Bookmarks bar', null, sw('ShowBookmarksBar'))));
+    row('Star', 'Bookmarks bar', null, sw('ShowBookmarksBar')),
+    row('Home', 'Show home button', null, sw('ShowHomeButton'))));
 
   // Ad blocking
   const ab = await gb.send('adblock.info').catch(() => null);

@@ -12,6 +12,11 @@ namespace GBrowser
     {
         public readonly MaterialTextBox Address = new MaterialTextBox { Placeholder = "Search or type a URL", AccessibleName = "Address and search bar" };
         public bool CanBack, CanForward, Loading, Bookmarked, Secure, StoreChip, ShieldOn = true;
+        /// <summary>Page kind for the site-info icon: "secure" (https), "internal" (GBrowser page), "insecure" (http), "" (other).</summary>
+        public string PageKind = "";
+        public bool ShowHome;
+        /// <summary>Full address (shown while editing) and the Chrome-style short form (shown otherwise).</summary>
+        public string FullUrl = "";
         public int BlockedCount;
         public string StoreChipText = "Add to GBrowser";
 
@@ -41,11 +46,12 @@ namespace GBrowser
             Address.GotFocus += (s, e) =>
             {
                 Address.BackColor = Theme.Field;
-                Invalidate();
+                if (Address.Text == ShownUrl && FullUrl.Length > 0) Address.Text = FullUrl;   // edit the full address
+                LayoutNow();
                 // keyboard focus (Ctrl+L, F6, new tab) selects the address; a click is handled by the field itself
                 if (MouseButtons == MouseButtons.None) BeginInvoke((Action)(() => Address.SelectAll()));
             };
-            Address.LostFocus += (s, e) => { Address.BackColor = Theme.SurfaceContainerHigh; Address.Text = ShownUrl; Address.ResetView(); Invalidate(); };
+            Address.LostFocus += (s, e) => { Address.BackColor = Theme.SurfaceContainerHigh; Address.Text = ShownUrl; Address.ResetView(); LayoutNow(); };
             Address.TextChanged += (s, e) => Invalidate();
             Address.PasteAndGo += t => Go?.Invoke(t);
             Controls.Add(Address);
@@ -70,7 +76,7 @@ namespace GBrowser
         int S(float v) => (int)Math.Round(v * Sc);
         public int PreferredHeight => S(46);
 
-        Rectangle pill, clearRect, chipRect;
+        Rectangle pill, clearRect, chipRect, notSecureRect;
 
         protected override void OnLayout(LayoutEventArgs e)
         {
@@ -79,6 +85,7 @@ namespace GBrowser
             int bs = S(34), y = (Height - bs) / 2, x = S(6);
             foreach (var n in new[] { "back", "forward", "reload", "home" })
             {
+                if (n == "home" && !ShowHome) { buttons.Find(b => b.Name == n).Rect = Rectangle.Empty; continue; }
                 buttons.Find(b => b.Name == n).Rect = new Rectangle(x, y, bs, bs);
                 x += bs + S(2);
             }
@@ -104,7 +111,18 @@ namespace GBrowser
             buttons.Find(b => b.Name == "star").Rect = new Rectangle(pill.Right - S(34), pill.Y + S(2), S(32), S(32));
             clearRect = new Rectangle(pill.Right - S(34) - S(30), pill.Y + S(5), S(26), S(26));
             int th = Address.PreferredHeight;
-            Address.SetBounds(pill.X + S(40), pill.Y + (pill.Height - th) / 2, clearRect.X - S(6) - (pill.X + S(40)), th);
+            int ax = pill.X + S(40);
+            notSecureRect = Rectangle.Empty;
+            if (PageKind == "insecure" && !Address.Focused)
+            {
+                using (var f = new Font("Segoe UI", 9f, FontStyle.Bold))
+                {
+                    int w = TextRenderer.MeasureText("Not secure", f).Width + S(8);
+                    notSecureRect = new Rectangle(pill.X + S(36), pill.Y + (pill.Height - S(24)) / 2, w, S(24));
+                }
+                ax = notSecureRect.Right + S(10);
+            }
+            Address.SetBounds(ax, pill.Y + (pill.Height - th) / 2, clearRect.X - S(6) - ax, th);
         }
 
         public void LayoutNow() { PerformLayout(); Invalidate(); }
@@ -130,8 +148,15 @@ namespace GBrowser
                 using (var b = new SolidBrush(Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh)) g.FillPath(b, p);
                 if (Address.Focused) using (var pen = new Pen(Theme.Primary, S(2))) g.DrawPath(pen, p);
             }
-            string leftIcon = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? IconData.Search : Secure ? IconData.Lock : IconData.Warning;
-            Icons.Draw(g, leftIcon, pill.X + S(12), pill.Y + (pill.Height - S(18)) / 2, S(18), Theme.OnSurfaceVariant);
+            // site-info icon like Chrome: "tune" for secure sites, the GBrowser logo for its own pages, a warning for http
+            string leftIcon = Address.Focused || string.IsNullOrEmpty(ShownUrl) ? IconData.Search
+                : PageKind == "secure" ? IconData.Tune : PageKind == "internal" ? IconData.Language
+                : PageKind == "insecure" ? IconData.Warning : IconData.Info;
+            var iconColor = PageKind == "insecure" && !Address.Focused ? Color.FromArgb(Theme.Dark ? 0xFF : 0xBA, Theme.Dark ? 0xB4 : 0x1A, Theme.Dark ? 0xAB : 0x1A) : Theme.OnSurfaceVariant;
+            Icons.Draw(g, leftIcon, pill.X + S(12), pill.Y + (pill.Height - S(18)) / 2, S(18), iconColor);
+            if (!notSecureRect.IsEmpty)
+                using (var f = new Font("Segoe UI", 9f, FontStyle.Bold))
+                    TextRenderer.DrawText(g, "Not secure", f, notSecureRect, iconColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
             if (ClearVisible)
             {
                 if (hoverClear) using (var b = new SolidBrush(Theme.Hover)) g.FillEllipse(b, clearRect);
@@ -149,6 +174,7 @@ namespace GBrowser
             }
             foreach (var b in buttons)
             {
+                if (b.Rect.IsEmpty) continue;   // hidden (e.g. the home button when it is switched off)
                 bool en = b.Enabled();
                 if (en && (b == hover || b == press))
                     using (var br = new SolidBrush(b == press ? Theme.Pressed : Theme.Hover)) g.FillEllipse(br, b.Rect);
@@ -220,16 +246,18 @@ namespace GBrowser
             else if (e.KeyCode == Keys.Escape)
             {
                 e.SuppressKeyPress = true;
-                Address.Text = ShownUrl;
+                Address.Text = FullUrl.Length > 0 ? FullUrl : ShownUrl;
                 Address.SelectAll();
             }
         }
 
-        public void SetUrl(string shown)
+        /// <summary>full = the address, shown = Chrome-style short form (no https://, no www., no lone "/").</summary>
+        public void SetUrl(string full, string shown)
         {
+            FullUrl = full ?? "";
             ShownUrl = shown ?? "";
             if (!Address.Focused) Address.Text = ShownUrl;
-            Invalidate();
+            LayoutNow();
         }
 
         protected override void Dispose(bool disposing)

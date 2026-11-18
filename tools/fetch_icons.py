@@ -25,6 +25,10 @@ ICONS = [
     ('Check', 'check', ''), ('Pause', 'pause', ''), ('Play', 'play_arrow', ''), ('File', 'draft', ''),
     ('ArrowDrop', 'arrow_drop_down', ''), ('Palette', 'palette', ''), ('Colorize', 'colorize', ''),
     ('Desktop', 'desktop_windows', ''), ('Edit', 'edit', ''),
+    # window buttons drawn in the tab row (thin weight, 20 px optical size, like Chrome's 1 px lines)
+    ('WinMin', 'remove', 'wght300', 20), ('WinMax', 'crop_square', 'wght300', 20),
+    ('WinRestore', 'filter_none', 'wght300', 20), ('WinClose', 'close', 'wght300', 20),
+    ('ExpandMore', 'expand_more', ''),
     ('Private', 'domino_mask', ''), ('ShieldLock', 'shield_lock', ''), ('Warning', 'warning', ''), ('Policy', 'policy', ''),
 ]
 
@@ -45,8 +49,10 @@ def fetch(url):
 
 def main():
     paths = {}
-    for key, name, var in ICONS:
-        f = name + ('_' + var if var else '') + '_24px.svg'
+    for entry in ICONS:
+        key, name, var = entry[:3]
+        size = entry[3] if len(entry) > 3 else 24   # optical size (20 px files for small window buttons)
+        f = name + ('_' + var if var else '') + '_%dpx.svg' % size
         try:
             svg = fetch(BASE.format(n=name, f=f))
         except Exception as e:

@@ -133,6 +133,7 @@ namespace GBrowser
         public bool LowMemoryHiddenTabs { get; set; } = true;
         public List<string> KeepActiveSites { get; set; } = new List<string>();   // never unloaded (site = registrable domain)
         public bool ShowBookmarksBar { get; set; } = false;
+        public bool ShowHomeButton { get; set; } = false;   // like Chrome: off by default
         // ad blocking (same switches as the WebView Adblocker Android app)
         public bool AdblockEnabled { get; set; } = true;
         public bool BlockAnnoyances { get; set; } = true;      // cookie notices, popups, app banners

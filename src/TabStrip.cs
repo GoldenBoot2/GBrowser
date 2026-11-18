@@ -6,7 +6,10 @@ using System.Windows.Forms;
 
 namespace GBrowser
 {
-    /// <summary>Owner-drawn tab row: select, close (button or middle click), drag to reorder, new tab button.</summary>
+    /// <summary>Owner-drawn tab row in the window's title bar (like Chrome): tab search button, tabs (select, close,
+    /// middle-click, drag to reorder), new tab button, and the window's minimise / maximise / close buttons. Empty
+    /// space and the window buttons are handed to the window (HTTRANSPARENT) so Windows moves the window, shows
+    /// Snap Layouts on the maximise button and handles double-click to maximise.</summary>
     internal sealed class TabStrip : Control
     {
         public List<BrowserTab> Tabs = new List<BrowserTab>();
@@ -16,6 +19,13 @@ namespace GBrowser
         public event Action<int> TabClosed;
         public event Action NewTabClicked;
         public event Action<int, int> TabMoved;
+        public event Action TabSearchClicked;
+
+        /// <summary>Window state for the caption buttons (set by the window).</summary>
+        public bool WindowMaximized;
+        /// <summary>Window button under the mouse / pressed: 0 minimise, 1 maximise, 2 close, -1 none (set by the window).</summary>
+        public int CaptionHover = -1, CaptionPressed = -1;
+        bool hoverSearch;
 
         int hover = -1; bool hoverClose, hoverPlus, pressPlus;
         int dragIndex = -1; Point dragStart; bool dragging;
@@ -36,13 +46,41 @@ namespace GBrowser
 
         public int PreferredHeight => S(40);
 
+        int TopPad => WindowMaximized ? S(2) : S(6);
+        public Rectangle SearchRect => new Rectangle(S(8), TopPad + (Height - TopPad - S(30)) / 2, S(30), S(30));
+        int CaptionWidth => S(46);
+        public Rectangle CaptionRect(int i) => new Rectangle(Width - (3 - i) * CaptionWidth, 0, CaptionWidth, Height);
+
         Rectangle TabRect(int i)
         {
-            int left = S(8), plus = S(44);
-            int avail = Width - left - plus - S(8);
+            int left = SearchRect.Right + S(6), plus = S(44);
+            int avail = Width - left - plus - 3 * CaptionWidth - S(8);
             int n = Math.Max(1, Tabs.Count);
             int w = Math.Min(S(240), Math.Max(S(56), avail / n));
-            return new Rectangle(left + i * w, S(6), w, Height - S(6));
+            return new Rectangle(left + i * w, TopPad, w, Height - TopPad);
+        }
+
+        /// <summary>0..2 = window button at p, -1 = none.</summary>
+        public int CaptionAt(Point p)
+        {
+            for (int i = 0; i < 3; i++) if (CaptionRect(i).Contains(p)) return i;
+            return -1;
+        }
+
+        /// <summary>Empty tab-row space (drags the window).</summary>
+        public bool IsDragArea(Point p) =>
+            CaptionAt(p) < 0 && HitTab(p) < 0 && !PlusRect().Contains(p) && !SearchRect.Contains(p);
+
+        protected override void WndProc(ref Message m)
+        {
+            // WM_NCHITTEST: window buttons and empty space belong to the window, not to this control
+            if (m.Msg == 0x0084)
+            {
+                long lp = m.LParam.ToInt64();
+                var p = PointToClient(new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF)));
+                if (CaptionAt(p) >= 0 || IsDragArea(p)) { m.Result = (IntPtr)(-1); return; }   // HTTRANSPARENT
+            }
+            base.WndProc(ref m);
         }
 
         Rectangle CloseRect(Rectangle tr) => new Rectangle(tr.Right - S(30), tr.Y + (tr.Height - S(20)) / 2, S(20), S(20));
@@ -137,6 +175,28 @@ namespace GBrowser
                     }
                 }
             }
+            // tab search (left)
+            var sr = SearchRect;
+            using (var p = Theme.Round(sr, S(8)))
+            using (var b = new SolidBrush(hoverSearch ? Theme.SurfaceContainerHighest : Theme.SurfaceContainer)) g.FillPath(b, p);
+            Icons.Draw(g, IconData.ExpandMore, sr.X + S(5), sr.Y + S(5), S(20), Theme.OnSurfaceVariant);
+            // window buttons (right): minimise, maximise / restore, close
+            string[] cap = { IconData.WinMin, WindowMaximized ? IconData.WinRestore : IconData.WinMax, IconData.WinClose };
+            for (int i = 0; i < 3; i++)
+            {
+                var cr = CaptionRect(i);
+                bool hot = CaptionHover == i, down = CaptionPressed == i;
+                Color fg = Theme.OnSurface;
+                if (i == 2 && (hot || down))
+                {
+                    using (var b = new SolidBrush(down ? Color.FromArgb(0x94, 0x1F, 0x14) : Color.FromArgb(0xC4, 0x2B, 0x1C))) g.FillRectangle(b, cr);
+                    fg = Color.White;
+                }
+                else if (hot || down)
+                    using (var b = new SolidBrush(down ? Theme.Pressed : Theme.Hover)) g.FillRectangle(b, cr);
+                int isz = S(16);
+                Icons.Draw(g, cap[i], cr.X + (cr.Width - isz) / 2f, cr.Y + (cr.Height - isz) / 2f, isz, fg);
+            }
             var pr = PlusRect();
             if (hoverPlus || pressPlus)
                 using (var b = new SolidBrush(pressPlus ? Theme.Pressed : Theme.Hover)) g.FillEllipse(b, pr);
@@ -168,18 +228,19 @@ namespace GBrowser
             int h = HitTab(e.Location);
             bool hc = h >= 0 && CloseRect(TabRect(h)).Contains(e.Location);
             bool hp = PlusRect().Contains(e.Location);
-            if (h != hover || hc != hoverClose || hp != hoverPlus)
+            bool hs = SearchRect.Contains(e.Location);
+            if (h != hover || hc != hoverClose || hp != hoverPlus || hs != hoverSearch)
             {
-                hover = h; hoverClose = hc; hoverPlus = hp;
+                hover = h; hoverClose = hc; hoverPlus = hp; hoverSearch = hs;
                 Invalidate();
-                string text = hp ? "New tab (Ctrl+T)" : hc ? "Close tab (Ctrl+W)" : h >= 0 ? Tabs[h].TooltipText : null;
+                string text = hs ? "Search tabs (Ctrl+Shift+A)" : hp ? "New tab (Ctrl+T)" : hc ? "Close tab (Ctrl+W)" : h >= 0 ? Tabs[h].TooltipText : null;
                 if (text != tipText) { tipText = text; tip.SetToolTip(this, text); }
             }
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
-            hover = -1; hoverClose = hoverPlus = false; Invalidate();
+            hover = -1; hoverClose = hoverPlus = hoverSearch = false; Invalidate();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -188,6 +249,7 @@ namespace GBrowser
             if (e.Button == MouseButtons.Left)
             {
                 if (PlusRect().Contains(e.Location)) { pressPlus = true; Invalidate(); return; }
+                if (SearchRect.Contains(e.Location)) { TabSearchClicked?.Invoke(); return; }
                 if (h >= 0 && !CloseRect(TabRect(h)).Contains(e.Location))
                 {
                     TabSelected?.Invoke(h);
@@ -210,7 +272,7 @@ namespace GBrowser
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left && HitTab(e.Location) < 0 && !PlusRect().Contains(e.Location)) NewTabClicked?.Invoke();
+            // (double-click on empty space maximises the window: Windows handles it, the area is HTCAPTION)
         }
 
         protected override void Dispose(bool disposing)
