@@ -21,7 +21,9 @@ namespace GBrowser
         public bool UpdateDot;
         public bool ShowDownloads;          // a download happened in this session: the download button is shown
         public float DownloadProgress = -1; // 0..1 while downloads run (ring around the icon), -1 = none running
-        public event Action DownloadsClicked;   // an update is downloaded: a dot on the menu button (like Chrome's update badge)
+        public event Action DownloadsClicked;
+        public Omnibox Omni;                // address bar suggestions (Enter / Esc go to it first while it is open)
+        public Rectangle PillRect => pill;   // an update is downloaded: a dot on the menu button (like Chrome's update badge)
         public string StoreChipText = "Add to GBrowser";
 
         public event Action Back, Forward, Reload, Stop, Home, Star, ExtensionsClicked, MenuClicked, StoreChipClicked, ShieldClicked;
@@ -260,11 +262,13 @@ namespace GBrowser
             if (e.KeyCode == Keys.Enter)
             {
                 e.SuppressKeyPress = true;
+                if (Omni != null && Omni.Enter(e.Alt)) return;
                 Go?.Invoke(Address.Text);
             }
             else if (e.KeyCode == Keys.Escape)
             {
                 e.SuppressKeyPress = true;
+                if (Omni != null && Omni.Escape()) return;
                 Address.Text = FullUrl.Length > 0 ? FullUrl : ShownUrl;
                 Address.SelectAll();
             }

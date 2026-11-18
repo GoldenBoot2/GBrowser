@@ -57,6 +57,7 @@
   home.addEventListener('change', () => set('HomePage', home.value));
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Start and search' }),
     row('Search', 'Search engine', null, engine),
+    row('Search', 'Search suggestions', 'What you type in the address bar is sent to the search engine', sw('SearchSuggestions')),
     row('Home', 'Home page', null, home),
     row('Restore', 'Reopen tabs on start', null, sw('RestoreTabs')),
     row('Star', 'Bookmarks bar', null, sw('ShowBookmarksBar')),

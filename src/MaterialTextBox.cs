@@ -24,6 +24,9 @@ namespace GBrowser
 
         public string Placeholder = "";
         public event Action<string> PasteAndGo;
+        /// <summary>The user changed the text (typing, deleting, paste). The flag: text was added at the end (the
+        /// address bar then completes it inline, like Chrome; not after a deletion).</summary>
+        public event Action<bool> UserEdited;
 
         public MaterialTextBox()
         {
@@ -54,6 +57,12 @@ namespace GBrowser
         }
 
         public int TextLength => text.Length;
+
+#if AUTOMATION
+        /// <summary>Test builds: types like the keyboard (one character at a time, same code path).</summary>
+        public void TypeForTest(string s) { foreach (char c in s) Insert(c.ToString()); }
+        public void KeyForTest(Keys k) => OnKeyDown(new KeyEventArgs(k));
+#endif
         public int SelectionStart => Math.Min(caret, anchor);
         public int SelectionLength => Math.Abs(caret - anchor);
         public string SelectedText => text.Substring(SelectionStart, SelectionLength);
@@ -155,6 +164,7 @@ namespace GBrowser
             text = text.Substring(0, start) + insert + text.Substring(start + length);
             caret = anchor = Clamp(caretAfter);
             Changed(true);
+            UserEdited?.Invoke(insert.Length > 0 && start + insert.Length == text.Length);
         }
 
         void Insert(string s)

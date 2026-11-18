@@ -127,6 +127,7 @@ namespace GBrowser
         public string HomePage { get; set; } = "gbrowser://newtab";
         public string SearchEngine { get; set; } = "google";
         public string ThemeMode { get; set; } = "system";   // system | light | dark
+        public bool SearchSuggestions { get; set; } = true;  // address bar: ask the search engine for suggestions
         public string DevToolsDock { get; set; } = "right";  // right | bottom (docked DevTools, DevToolsDock.cs)
         public double DevToolsWidth { get; set; } = 0.38;    // share of the page area
         public double DevToolsHeight { get; set; } = 0.4;
@@ -191,6 +192,11 @@ namespace GBrowser
             { "duckduckgo", new[] { "DuckDuckGo", "https://duckduckgo.com/?q=" } },
             { "brave", new[] { "Brave Search", "https://search.brave.com/search?q=" } },
         };
+
+        public static string EngineName() => Engines.TryGetValue(Store.Settings.SearchEngine ?? "google", out var e) ? e[0] : "Google";
+
+        /// <summary>True for an address that is a search on one of the search engines.</summary>
+        public static bool IsSearchUrl(string url) => url != null && Engines.Values.Any(e => url.StartsWith(e[1], StringComparison.OrdinalIgnoreCase));
 
         /// <summary>Turns what the user typed in the address box into a URL (address or search).</summary>
         public static string ToUrl(string text)

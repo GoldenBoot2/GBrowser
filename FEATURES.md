@@ -25,7 +25,7 @@ Last full audit: 19-11-2026.
 |---|---|
 | Type URL or search, Enter, Alt+Enter new tab | Done (Alt+Enter: to verify) |
 | Short URL when not focused, full when focused | Done |
-| Suggestions while typing (history, bookmarks, open tabs, search suggestions), inline autocomplete | Missing |
+| Suggestions while typing (history, bookmarks, open tabs, search suggestions), inline autocomplete, Shift+Delete removes | Done (19-11-2026; setting to turn search suggestions off) |
 | Search engines: choose default | Done; custom engines / keywords: Missing |
 | Site info panel (padlock: connection, certificate, permissions, cookies, site settings) | Missing |
 | Zoom indicator in the address bar (click to reset) | Missing |

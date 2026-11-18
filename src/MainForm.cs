@@ -18,6 +18,7 @@ namespace GBrowser
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
         readonly StatusBubble bubble = new StatusBubble();
         readonly Panel outer = new Panel { Dock = DockStyle.Fill };   // page area + docked DevTools
+        Omnibox omni;
         DevToolsDock devDock;
         readonly Timer sleepTimer = new Timer { Interval = 30000 };
         readonly Stack<string> closedTabs = new Stack<string>();
@@ -90,6 +91,17 @@ namespace GBrowser
             };
             toolbar.Star += ToggleBookmark;
             toolbar.MenuClicked += ShowMenu;
+            // address bar suggestions (history, bookmarks, open tabs, search suggestions)
+            omni = new Omnibox(toolbar.Address, toolbar, () => toolbar.RectangleToScreen(toolbar.PillRect), () => Tabs, () => Current);
+            omni.Go += (text, newTab) =>
+            {
+                var url = Search.ToUrl(text);
+                if (url == null) return;
+                if (newTab || Current == null) NewTab(url);
+                else { Current.Navigate(url); Current.View?.Focus(); }
+            };
+            omni.SwitchTab += tab => { int i = Tabs.IndexOf(tab); if (i >= 0) Select(i); };
+            toolbar.Omni = omni;
             toolbar.DownloadsClicked += OpenDownloads;
             toolbar.ExtensionsClicked += ShowExtensionsMenu;
             toolbar.StoreChipClicked += InstallFromStorePage;
@@ -340,6 +352,7 @@ namespace GBrowser
         void Select(int i)
         {
             if (i < 0 || i >= Tabs.Count) return;
+            omni?.Close();
             var old = Current;
             var t = Tabs[i];
             strip.Selected = i;
@@ -1299,6 +1312,7 @@ namespace GBrowser
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
                         case "AskWhereToSave": st.AskWhereToSave = v is bool aw && aw; break;
+                        case "SearchSuggestions": st.SearchSuggestions = v is bool ss && ss; break;
                         case "DownloadConnections": st.DownloadConnections = Math.Max(1, Math.Min(16, Convert.ToInt32(v))); break;
                         case "DownloadSpeedLimit": st.DownloadSpeedLimit = Math.Max(0, Math.Min(1024 * 1024, Convert.ToInt32(v))); break;
                         case "DownloadConflict": if (v is string dc && (dc == "ask" || dc == "keep" || dc == "replace")) st.DownloadConflict = dc; break;
@@ -1582,6 +1596,16 @@ namespace GBrowser
                     else if (arg == "undock") devDock.Undock();
                     return "docked=" + devDock.Docked(Current) + " count=" + devDock.DockedCount + " frame=" + devDock.FrameInfo() + " page=" + content.Bounds + " splitter=" + devDock.SplitterOnScreen;
                 case "bubble": bubble.SetText(arg); return bubble.Visible ? bubble.Bounds.ToString() : "hidden";
+                case "omnitype":
+                    toolbar.Address.Focus();
+                    await Task.Delay(150);   // focusing selects the address (queued); real typing comes after that
+                    toolbar.Address.Text = ""; toolbar.Address.TypeForTest(arg);
+                    await Task.Delay(arg.EndsWith(" ") ? 0 : 900);   // search suggestions arrive after a short pause
+                    return "text=" + toolbar.Address.Text + " sel=" + toolbar.Address.SelectionStart + "+" + toolbar.Address.SelectionLength + " | " + omni.Describe();
+                case "omnikey":
+                    toolbar.Address.KeyForTest(arg == "ShiftDelete" ? Keys.Delete | Keys.Shift : (Keys)Enum.Parse(typeof(Keys), arg));
+                    await Task.Delay(300);
+                    return "text=" + toolbar.Address.Text + " | " + omni.Describe();
                 case "persistinfo":
                 {
                     string sc = Store.ReadText("session-cookies.json") ?? "(none)";
