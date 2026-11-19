@@ -716,15 +716,17 @@ namespace GBrowser
         public string rr(string href)
         {
             string host = Host(href); var e = FilterEngine.Instance;
-            if (host == null || e == null || !Blocking.OnFor(host)) return "";
-            var rules = e.ResponseRules(href, host, host, 0xFFF, Blocking.Groups());
-            if (rules.Count == 0) return "";
+            if (host == null || e == null) return "";
+            // the lists' $cookie / $csp rules only where ad blocking is on; your cookie rules always
+            var rules = Blocking.OnFor(host) ? e.ResponseRules(href, host, host, 0xFFF, Blocking.Groups()) : new List<FilterEngine.RespRule>();
             var c = new StringBuilder(); var p = new StringBuilder();
             foreach (var r in rules)
             {
                 if (r.Kind == "cookie") { if (c.Length > 0) c.Append(','); FilterEngine.JsonString(c, r.Value); }
                 else if (r.Kind == "csp" && r.Value.Length > 0) { if (p.Length > 0) p.Append(','); FilterEngine.JsonString(p, r.Value); }
             }
+            // cookies you blocked for this site (Settings / the cookie manager): the page script hides and refuses them
+            foreach (var n in Cookies.BlockedNames(host)) { if (c.Length > 0) c.Append(','); FilterEngine.JsonString(c, n); }
             if (c.Length == 0 && p.Length == 0) return "";
             return "{\"c\":[" + c + "],\"p\":[" + p + "]}";
         }

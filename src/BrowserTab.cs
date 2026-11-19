@@ -52,6 +52,7 @@ namespace GBrowser
                 case "settings": return "Settings";
                 case "about": return "About GBrowser";
                 case "downloads": return "Downloads";
+                case "cookies": return "Cookies and site data";
                 case "insecure": return "Not secure";
                 case "certerror": return "Privacy error";
                 default: return "New tab";

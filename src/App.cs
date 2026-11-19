@@ -58,6 +58,8 @@ namespace GBrowser
             // Secure DNS: the engine's own DoH preference, read when the engine starts (see Security.ApplySecureDnsPref)
             Security.ActiveSecureDns = Store.Settings.SecureDns ?? "off";
             Security.ApplySecureDnsPref(Path.Combine(Store.WebDataDir, "EBWebView", "Local State"), Security.ActiveSecureDns);
+            Cookies.ThirdPartyActive = Store.Settings.BlockThirdPartyCookies;
+            Cookies.ApplyThirdPartyPref(Path.Combine(Store.WebDataDir, "EBWebView", "Default", "Preferences"), Cookies.ThirdPartyActive);
             var opts = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
             return await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
         }

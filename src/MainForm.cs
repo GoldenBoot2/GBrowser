@@ -893,9 +893,41 @@ namespace GBrowser
             target.BringToFront2();
         }
 
+        // ---------- cookies of sites no tab shows any more ----------
+
+        static Timer cookieCleanTimer;
+        /// <summary>15 s after a tab closes or leaves a site (like Cookie AutoDelete), "Clear when closed" sites and, with
+        /// auto-delete on, other sites without an open tab lose their cookies.</summary>
+        void ScheduleCookieClean()
+        {
+            if (!Store.Settings.CookieAutoDelete && !Store.Settings.CookieRules.Any(r => r.Mode == "clear")) return;
+            if (cookieCleanTimer == null)
+            {
+                cookieCleanTimer = new Timer { Interval = 15000 };
+                cookieCleanTimer.Tick += async (s, e) =>
+                {
+                    cookieCleanTimer.Stop();
+                    var open = new HashSet<string>();
+                    CoreWebView2 core = null;
+                    foreach (var w in App.Windows)
+                        foreach (var x in w.Tabs.Where(x => !x.Private))
+                        {
+                            string u = x.Created ? x.View.CoreWebView2.Source : x.Url;
+                            string site = Blocking.SiteOf(u);
+                            if (site != null) open.Add(site);
+                            if (core == null && x.Created) core = x.View.CoreWebView2;
+                        }
+                    await Cookies.CleanClosed(core, open);
+                };
+            }
+            cookieCleanTimer.Stop();
+            cookieCleanTimer.Start();
+        }
+
         void CloseTab(int i)
         {
             if (i < 0 || i >= Tabs.Count) return;
+            ScheduleCookieClean();
             var t = Tabs[i];
             if (!t.Private && !string.IsNullOrEmpty(t.Url) && Pages.PageName(t.Url) != "newtab") closedTabs.Push(t.Url);
             bool wasSel = i == strip.Selected;
@@ -1014,6 +1046,17 @@ namespace GBrowser
                 string target = e.RequestUri;
                 F().BeginInvoke((Action)(() => core.Navigate(Pages.Url("certerror") + "?u=" + Uri.EscapeDataString(target) + "&c=" + code)));
             };
+            // cookie rules (blocked / protected / capped cookies): checked when a page or a response sets cookies
+            if (!t.Private)
+            {
+                core.NavigationCompleted += (o, e) => Cookies.Guard(core);
+                core.WebResourceResponseReceived += (o, e) =>
+                {
+                    if (!Cookies.AnyRules) return;
+                    try { if (e.Response.Headers.Contains("Set-Cookie")) Cookies.Guard(core); } catch { }
+                };
+                core.SourceChanged += (o, e) => F().ScheduleCookieClean();
+            }
             core.NavigationCompleted += (o, e) =>
             {
                 t.Loading = false;
@@ -1665,7 +1708,9 @@ namespace GBrowser
             int cookies = 0;
             try { if (t.Created) cookies = (await t.View.CoreWebView2.CookieManager.GetCookiesAsync(page)).Count; } catch { }
             m.AddSeparator();
-            m.Add("Cookies and site data", IconData.Cookie, cookies + " in use", () => DeleteSiteData(t, u, host));
+            string ckSite = Blocking.SiteOf(u.AbsoluteUri) ?? host;
+            m.Add("Cookies and site data", IconData.Cookie, cookies + " in use", () => NewTab(Pages.Url("cookies") + "?site=" + Uri.EscapeDataString(ckSite)));
+            m.Add("Delete site data", IconData.Delete, null, () => DeleteSiteData(t, u, host));
             var st = Store.Settings;
             string site = Blocking.SiteOf(page);
             if (site != null)
@@ -2298,6 +2343,142 @@ namespace GBrowser
                     if (cmd == "lists.trust") l.Trusted = v; else l.Enabled = v;
                     Store.SaveSettings();
                     CustomLists.Rebuild();
+                    return null;
+                }
+                case "cookies.list":
+                {
+                    var core = tab.View.CoreWebView2;
+                    var all = await Cookies.All(core);
+                    var rows = new List<object>();
+                    foreach (var c in all)
+                    {
+                        string what = Cookies.Label(c, out bool trk);
+                        var d = new Dictionary<string, object>(c) { ["site"] = Cookies.SiteOf(c), ["key"] = Cookies.KeyOf(c), ["tracker"] = trk, ["what"] = what,
+                            ["protected"] = st.CookieProtected.Any(p => p.Key == Cookies.KeyOf(c)),
+                            ["blocked"] = st.CookieBlocks.Any(b => b.Name == (string)c["name"] && (b.Site == "*" || b.Site == Cookies.SiteOf(c))) };
+                        rows.Add(d);
+                    }
+                    return new Dictionary<string, object>
+                    {
+                        { "cookies", rows }, { "rules", st.CookieRules }, { "blocks", st.CookieBlocks },
+                        { "autoDelete", st.CookieAutoDelete }, { "keep", st.CookieKeep }, { "maxDays", st.CookieMaxDays },
+                        { "thirdParty", st.BlockThirdPartyCookies }, { "thirdPartyActive", Cookies.ThirdPartyActive },
+                    };
+                }
+                case "cookies.set":
+                {
+                    var c = m["cookie"] as Dictionary<string, object>;
+                    if (c == null) throw new Exception("No cookie");
+                    if (m.TryGetValue("old", out var oldo) && oldo is Dictionary<string, object> old && Cookies.KeyOf(old) != Cookies.KeyOf(c))
+                        await Cookies.Delete(tab.View.CoreWebView2, old);
+                    string err = await Cookies.Set(tab.View.CoreWebView2, c);
+                    if (err != null) throw new Exception(err);
+                    return null;
+                }
+                case "cookies.delete":
+                {
+                    if (m.TryGetValue("list", out var lo) && lo is System.Collections.IEnumerable le)
+                        foreach (var x in le) if (x is Dictionary<string, object> c) await Cookies.Delete(tab.View.CoreWebView2, c);
+                    return null;
+                }
+                case "cookies.rule":
+                {
+                    string site = Str(m, "site"), mode = Str(m, "mode") ?? "";
+                    st.CookieRules.RemoveAll(r => r.Site == site);
+                    if (mode == "allow" || mode == "block" || mode == "clear") st.CookieRules.Add(new CookieRule { Site = site, Mode = mode });
+                    Store.SaveSettings();
+                    if (mode == "block") Cookies.Guard(tab.View.CoreWebView2);
+                    return null;
+                }
+                case "cookies.block":
+                {
+                    string name = Str(m, "name"), site = Str(m, "site") ?? "*";
+                    bool on = m.TryGetValue("on", out var ov3) && ov3 is bool b3 && b3;
+                    st.CookieBlocks.RemoveAll(b => b.Name == name && b.Site == site);
+                    if (on) st.CookieBlocks.Add(new CookieBlock { Name = name, Site = site });
+                    Store.SaveSettings();
+                    if (on) Cookies.Guard(tab.View.CoreWebView2);
+                    return null;
+                }
+                case "cookies.protect":
+                {
+                    var c = m["cookie"] as Dictionary<string, object>;
+                    bool on = m.TryGetValue("on", out var ov4) && ov4 is bool b4 && b4;
+                    string key = Cookies.KeyOf(c);
+                    st.CookieProtected.RemoveAll(p => p.Key == key);
+                    if (on) st.CookieProtected.Add(new ProtectedCookie { Key = key, Json = Store.ToJson(c) });
+                    Store.SaveSettings();
+                    return null;
+                }
+                case "cookies.options":
+                {
+                    if (m.TryGetValue("autoDelete", out var ad) && ad is bool adb) st.CookieAutoDelete = adb;
+                    if (m.TryGetValue("maxDays", out var md)) st.CookieMaxDays = (int)Lng(m, "maxDays", 0);
+                    if (m.TryGetValue("thirdParty", out var tp) && tp is bool tpb) st.BlockThirdPartyCookies = tpb;
+                    if (m.TryGetValue("keep", out var kp) && kp is System.Collections.IEnumerable ke && !(kp is string))
+                        st.CookieKeep = ke.Cast<object>().Select(x => Convert.ToString(x)).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+                    Store.SaveSettings();
+                    return new Dictionary<string, object> { { "restart", st.BlockThirdPartyCookies != Cookies.ThirdPartyActive } };
+                }
+                case "cookies.export":
+                {
+                    var list = new List<Dictionary<string, object>>();
+                    if (m.TryGetValue("list", out var lo2) && lo2 is System.Collections.IEnumerable le2)
+                        foreach (var x in le2) if (x is Dictionary<string, object> c) list.Add(c);
+                    string text = Cookies.Export(list, Str(m, "format") ?? "json");
+                    if (Str(m, "to") == "clipboard") { Clipboard.SetText(text.Length == 0 ? " " : text); return true; }
+                    string ext = Str(m, "format") == "netscape" ? "txt" : Str(m, "format") == "header" ? "txt" : "json";
+                    using (var d = new SaveFileDialog { Filter = "Cookies (*." + ext + ")|*." + ext, FileName = "cookies_" + DateTime.Now.ToString("dd_MM_yyyy") + "." + ext })
+                    {
+                        if (d.ShowDialog(this) != DialogResult.OK) return false;
+                        File.WriteAllText(d.FileName, text, new System.Text.UTF8Encoding(false));
+                        return true;
+                    }
+                }
+                case "cookies.parse":
+                {
+                    string text = Str(m, "text");
+                    if (text == null)
+                        using (var d = new OpenFileDialog { Filter = "Cookies (*.json;*.txt)|*.json;*.txt|All files|*.*" })
+                        {
+                            if (d.ShowDialog(this) != DialogResult.OK) return null;
+                            text = File.ReadAllText(d.FileName);
+                        }
+                    return Cookies.Parse(text, Str(m, "host"));
+                }
+                case "cookies.snapshots": return Cookies.Snapshots().Select(x => new Dictionary<string, object> { { "name", x.Name }, { "site", x.Site }, { "time", x.Time } }).ToList();
+                case "cookies.snapshot":
+                {
+                    string action = Str(m, "action"), name = Str(m, "name"), site = Str(m, "site");
+                    var snaps = Cookies.Snapshots();
+                    var core = tab.View.CoreWebView2;
+                    if (action == "save")
+                    {
+                        var mine = (await Cookies.All(core)).Where(c => Cookies.SiteOf(c) == site).ToList();
+                        snaps.RemoveAll(x => x.Name == name && x.Site == site);
+                        snaps.Add(new Cookies.Snapshot { Name = name, Site = site, Time = Store.Now(), Json = Store.ToJson(mine) });
+                        Cookies.SaveSnapshots(snaps);
+                        return mine.Count;
+                    }
+                    var snap = snaps.FirstOrDefault(x => x.Name == name && x.Site == site);
+                    if (snap == null) throw new Exception("Not found");
+                    if (action == "delete") { snaps.Remove(snap); Cookies.SaveSnapshots(snaps); return null; }
+                    // restore: the site's cookies become exactly the saved ones
+                    foreach (var c in (await Cookies.All(core)).Where(c => Cookies.SiteOf(c) == site).ToList()) await Cookies.Delete(core, c);
+                    int n = 0;
+                    foreach (var c in Store.FromJson<List<Dictionary<string, object>>>(snap.Json)) if (await Cookies.Set(core, c) == null) n++;
+                    return n;
+                }
+                case "sitedata.usage":
+                {
+                    string origin = Str(m, "origin");
+                    var r = await tab.View.CoreWebView2.CallDevToolsProtocolMethodAsync("Storage.getUsageAndQuota", Store.ToJson(new Dictionary<string, object> { { "origin", origin } }));
+                    return Store.FromJson<Dictionary<string, object>>(r);
+                }
+                case "sitedata.clear":
+                {
+                    string origin = Str(m, "origin"), types = Str(m, "types") ?? "local_storage,indexeddb,cache_storage,service_workers,file_systems,websql,shader_cache";
+                    await tab.View.CoreWebView2.CallDevToolsProtocolMethodAsync("Storage.clearDataForOrigin", Store.ToJson(new Dictionary<string, object> { { "origin", origin }, { "storageTypes", types } }));
                     return null;
                 }
                 case "lists.set":

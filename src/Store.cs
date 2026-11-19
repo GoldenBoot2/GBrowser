@@ -74,6 +74,9 @@ namespace GBrowser
         }
 
         static void Write(string name, object o) => WriteText(name, Json.Serialize(o));
+        /// <summary>Other encrypted data files (cookie snapshots ...).</summary>
+        public static T ReadData<T>(string name) where T : class => Read<T>(name);
+        public static void WriteData(string name, object o) => Write(name, o);
 
         /// <summary>Re-saves files that were still plain text (older versions), now encrypted.</summary>
         public static void EncryptLeftovers()
@@ -165,7 +168,14 @@ namespace GBrowser
         public long LastBookmarkFolder { get; set; } = 1;
         public List<string> DisabledLists { get; set; } = new List<string>();   // filter list files turned off one by one
         public string UserRules { get; set; } = "";                             // your own filter rules (one per line)
-        public List<CustomList> CustomLists { get; set; } = new List<CustomList>();   // where the star puts new bookmarks (the last folder chosen)
+        public List<CustomList> CustomLists { get; set; } = new List<CustomList>();
+        public List<CookieRule> CookieRules { get; set; } = new List<CookieRule>();           // per site: allow / block / clear
+        public List<CookieBlock> CookieBlocks { get; set; } = new List<CookieBlock>();        // cookie names blocked (site or "*")
+        public List<ProtectedCookie> CookieProtected { get; set; } = new List<ProtectedCookie>();
+        public bool CookieAutoDelete { get; set; } = false;                                  // a site's cookies go after its last tab closes
+        public List<string> CookieKeep { get; set; } = new List<string>();                   // sites auto-delete keeps
+        public int CookieMaxDays { get; set; } = 0;                                         // cap cookie lifetime (0 = off)
+        public bool BlockThirdPartyCookies { get; set; } = false;   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
         public List<WindowSession> Windows { get; set; } = new List<WindowSession>();
     }

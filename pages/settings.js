@@ -309,6 +309,7 @@
     row('Policy', 'Tracking prevention', 'Microsoft Edge tracking prevention, on top of ad blocking', tp),
     dnsRow,
     row('Delete', 'Clear data when GBrowser closes', 'Cookies, site data, cache and history (passwords kept)', sw('ClearOnExit')),
+    (() => { const r = row('Cookie', 'Cookies and site data', 'See, edit, block and export cookies; third-party cookies; auto-delete', icon('OpenNew')); r.classList.add('link'); r.addEventListener('click', () => openUrl('https://gbrowser.local/cookies.html')); return r; })(),
     row('Verified', 'Your data is encrypted', 'History, bookmarks, tabs and settings: only your Windows account can read them', null)));
 
   // Clear browsing data

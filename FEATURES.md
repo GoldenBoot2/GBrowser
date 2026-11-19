@@ -10,7 +10,7 @@ Last full audit: 19-11-2026.
 2. #8 Import from Chrome / Edge (bookmarks done 19-11-2026), cookies and site data (with the cookie manager, 5), passwords page, bookmark folders (done 19-11-2026).
 3. Bookmarks (user, 19-11-2026; done 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
 4. Ad blocking (user, 19-11-2026): done 19-11-2026 (lists on / off, custom lists with trust check, your rules, element picker).
-5. Cookie manager, 19 features (user, 19-11-2026): see "Cookie manager" below.
+5. Cookie manager, 19 features (user, 19-11-2026; done 19-11-2026): see "Cookie manager" below.
 6. Android app features missing here (user, 19-11-2026): see "From the Android app" below.
 7. Remaining Missing rows in the tables below.
 
@@ -98,7 +98,7 @@ Last full audit: 19-11-2026.
 | Site permission prompts (camera, mic, location, notifications, clipboard, downloads, MIDI, sensors...) in GBrowser's own prompt, remembered choices, Site settings page with reset | Done (19-11-2026) |
 | Per-site toggles not tied to a request (JavaScript, images, pop-ups, sound) and a camera / mic "in use" indicator | Missing |
 | Web notifications shown by GBrowser (instead of the engine's toast) | To verify |
-| Cookies and site data page (see / delete per site) | Site delete Done in site info (19-11-2026); full page: see Cookie manager |
+| Cookies and site data page (see / delete per site) | Done 19-11-2026 (gbrowser://cookies, see Cookie manager) |
 | Password manager (save prompt, list, edit, delete, export) | Engine UI (save prompt) / list Missing |
 | Autofill addresses / payment | Engine UI |
 | Certificate viewer | Missing |
@@ -135,25 +135,25 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 
 | # | Feature | Status |
 |---|---|---|
-| 1 | Site cookies page from site info; "All cookies" manager in Settings (every site, counts, size) | Planned |
-| 2 | Fields: name, value, domain, path, expiry / session, size, HttpOnly, Secure, SameSite, partitioned (CHIPS), priority, first / third party | Planned |
-| 3 | Search name / value / domain; filters: third-party, session, trackers, expiring soon | Planned |
-| 4 | Readable values: URL-decoded, Base64, JSON, JWT (payload + expiry), timestamps as dd-mm-yyyy | Planned |
-| 5 | Tracker label (cookie domain on tracker lists; known names like _ga, _fbp explained) | Planned |
-| 6 | Edit every field (date picker for expiry); checks: SameSite=None needs Secure, __Host- / __Secure- rules | Planned |
-| 7 | Add a new cookie; duplicate a cookie | Planned |
-| 8 | Delete one / selected / all of the site / third-party only; Undo after delete or edit | Planned |
-| 9 | Block a cookie (this site / everywhere): page-script layer + Set-Cookie removed from responses | Planned |
-| 10 | Per-site cookie rule: Allow / Block all / Clear when closed (Chrome site settings) | Planned |
-| 11 | Block third-party cookies setting | Planned (engine support to verify) |
-| 12 | Protect (lock) a cookie: site changes are undone, never removed by clean-ups | Planned |
-| 13 | Auto-delete (Cookie AutoDelete style): site cookies removed after its last tab closes; keep list + keep-until-restart list | Planned |
-| 14 | Lifetime cap: long-lived cookies shortened (e.g. 7 days) except kept sites | Planned |
-| 15 | Export / import: JSON (Cookie-Editor format), Netscape cookies.txt, Cookie header; import shows a preview first | Planned |
-| 16 | Copy value / copy as Cookie header | Planned |
-| 17 | Live log: cookies set / changed / blocked on this page, by server or script | Planned |
-| 18 | Snapshots: save a site's cookies under a name, restore later (switch accounts) | Planned |
-| 19 | Other site data: local / session storage, IndexedDB, caches: view sizes, delete | Planned |
+| 1 | Site cookies page from site info; "All cookies" manager in Settings (every site, counts, size) | Done 19-11-2026: gbrowser://cookies (Settings > Privacy, site info > Cookies and site data opens the site) |
+| 2 | Fields: name, value, domain, path, expiry / session, size, HttpOnly, Secure, SameSite, partitioned (CHIPS), priority, first / third party | Done (all fields from the engine's DevTools cookie store, incl. partition and priority) |
+| 3 | Search name / value / domain; filters: third-party, session, trackers, expiring soon | Done (search; filters: trackers, session, expiring within 7 days, partitioned; third-party count per site) |
+| 4 | Readable values: URL-decoded, Base64, JSON, JWT (payload + expiry), timestamps as dd-mm-yyyy | Done (URL-decoded, Base64, JSON, JWT payload + expiry, 10/13-digit times as dd-mm-yyyy) |
+| 5 | Tracker label (cookie domain on tracker lists; known names like _ga, _fbp explained) | Done (cookie domain on GBrowser's ad / tracker lists, or a known tracking name; ~25 well-known names explained) |
+| 6 | Edit every field (date picker for expiry); checks: SameSite=None needs Secure, __Host- / __Secure- rules | Done (date and time picker; SameSite=None needs Secure, __Host- / __Secure- checked on the page and in GBrowser) |
+| 7 | Add a new cookie; duplicate a cookie | Done |
+| 8 | Delete one / selected / all of the site / third-party only; Undo after delete or edit | Done (Undo after delete and edit; delete the shown cookies of a site / filter) |
+| 9 | Block a cookie (this site / everywhere): page-script layer + Set-Cookie removed from responses | Done: page scripts can neither set nor read a blocked cookie (tested), server-set ones are removed right after the response (tested) |
+| 10 | Per-site cookie rule: Allow / Block all / Clear when closed (Chrome site settings) | Done (Allow / Block all / Clear when closed, tested) |
+| 11 | Block third-party cookies setting | Done: the engine's own setting (profile.cookie_controls_mode, applied at start; tested on whatismybrowser.com: Yes off / No on) |
+| 12 | Protect (lock) a cookie: site changes are undone, never removed by clean-ups | Done (restored when changed or removed, tested) |
+| 13 | Auto-delete (Cookie AutoDelete style): site cookies removed after its last tab closes; keep list + keep-until-restart list | Done (15 s after a site's last tab closes or leaves the site; keep list; tested with Clear when closed) |
+| 14 | Lifetime cap: long-lived cookies shortened (e.g. 7 days) except kept sites | Done (1 day ... 1 year; allowed and protected cookies exempt; tested) |
+| 15 | Export / import: JSON (Cookie-Editor format), Netscape cookies.txt, Cookie header; import shows a preview first | Done (JSON Cookie-Editor format, Netscape cookies.txt, Cookie header; import shows a preview; parsers tested) |
+| 16 | Copy value / copy as Cookie header | Done |
+| 17 | Live log: cookies set / changed / blocked on this page, by server or script | Done in part: added / changed / removed cookies of the open site while the page is open (from the cookie store every 3 s); whether a server or a script set it is not shown |
+| 18 | Snapshots: save a site's cookies under a name, restore later (switch accounts) | Done (save / restore / delete per site, encrypted file; tested) |
+| 19 | Other site data: local / session storage, IndexedDB, caches: view sizes, delete | Done (sizes per storage type from the engine, delete per origin) |
 
 ## From the Android app (WebView Adblocker 2.9.4; user 19-11-2026: "we added some stuffs in the android browser are missing in this pc browser")
 | Feature | Status |
