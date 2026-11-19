@@ -1482,42 +1482,59 @@ namespace GBrowser
             m.Add("New private tab", IconData.Private, "Ctrl+Shift+N", () => NewPrivateTab(null));
             m.Add("Reopen closed tab", IconData.Restore, "Ctrl+Shift+T", ReopenClosed).Enabled = closedTabs.Count > 0;
             m.AddSeparator();
-            m.Add("Bookmarks", IconData.Bookmarks, "Ctrl+Shift+O", () => OpenPage("bookmarks"));
-            m.Add(Store.Settings.ShowBookmarksBar ? "Hide bookmarks bar" : "Show bookmarks bar", IconData.Star, "Ctrl+Shift+B", ToggleBookmarksBar);
+            // grouped like Chrome's menu (it had grown taller than the screen: 26 rows)
             m.Add("History", IconData.History, "Ctrl+H", () => OpenPage("history"));
             m.Add("Downloads", IconData.Download, "Ctrl+J", OpenDownloads);
+            m.AddSub("Bookmarks", IconData.Bookmarks, sm =>
+            {
+                sm.Add("Bookmark manager", IconData.Bookmarks, "Ctrl+Shift+O", () => OpenPage("bookmarks"));
+                sm.Add(Store.Settings.ShowBookmarksBar ? "Hide bookmarks bar" : "Show bookmarks bar", IconData.Star, "Ctrl+Shift+B", ToggleBookmarksBar);
+                sm.Add("Bookmark this tab", IconData.Star, "Ctrl+D", ToggleBookmark);
+            });
             m.Add("Extensions", IconData.Extension, null, () => OpenPage("extensions"));
-            string curUrl = Current?.Created == true ? Current.View.CoreWebView2.Source : Current?.Url;
-            string keepSite = Pages.IsInternal(curUrl) ? null : Blocking.SiteOf(curUrl);   // GBrowser's own pages never unload
-            if (keepSite != null)
-            {
-                bool kept = Store.Settings.KeepActiveSites.Contains(keepSite);
-                var keep = m.AddToggle("Keep " + keepSite + " active", kept, true, () =>
-                {
-                    Store.Settings.KeepActiveSites.Remove(keepSite);
-                    if (!kept) Store.Settings.KeepActiveSites.Add(keepSite);
-                    Store.SaveSettings();
-                });
-                keep.Icon = IconData.Memory;
-            }
             m.AddSeparator();
-            m.Add("Zoom in", IconData.ZoomIn, "Ctrl++", () => Zoom(1.1));
-            m.Add("Zoom out", IconData.ZoomOut, "Ctrl+-", () => Zoom(1 / 1.1));
-            m.Add("Find on page", IconData.Find, "Ctrl+F", ShowFind);
-            m.Add("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); });
+            string curUrl = Current?.Created == true ? Current.View.CoreWebView2.Source : Current?.Url;
             bool web = curUrl != null && (curUrl.StartsWith("http://") || curUrl.StartsWith("https://"));
-            m.Add("Save page as...", IconData.Download, "Ctrl+S", SavePageAs).Enabled = web;
-            m.Add("Copy link", IconData.Link, null, CopyLink).Enabled = web;
-            m.Add("Share...", IconData.Share, null, () => { if (WebUrl != null && !WinShare.Share(Handle, Current.Title, WebUrl)) Notice("Sharing is not available"); }).Enabled = web;
-            m.Add("Create QR code", IconData.QrCode, null, () => NewTab(Pages.Url("qr") + "?u=" + Uri.EscapeDataString(WebUrl ?? ""))).Enabled = web;
-            m.Add("View page source", IconData.Code, "Ctrl+U", ViewSource).Enabled = web;
-            m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
-            m.Add("Task manager", IconData.Memory, "Shift+Esc", () => OpenPage("tasks"));
-            m.Add("Developer tools", IconData.Code, "F12", () =>
+            // Chrome's zoom row: - 100% + and full screen in one line (stays open while zooming)
+            MaterialMenu.RowButton pct = null;
+            Func<string> zoomText = () => (Current?.Created == true ? (int)Math.Round(Current.View.ZoomFactor * 100) : 100) + "%";
+            pct = new MaterialMenu.RowButton { Text = zoomText(), Tip = "Reset", KeepOpen = true, Click = () => { if (Current?.Created == true) { Current.View.ZoomFactor = Store.Settings.DefaultZoom; SaveSiteZoom(Current); } pct.Text = zoomText(); } };
+            m.AddButtons("Zoom", IconData.ZoomIn,
+                new MaterialMenu.RowButton { Icon = IconData.Minus, Tip = "Zoom out", KeepOpen = true, Click = () => { Zoom(1 / 1.1); pct.Text = zoomText(); } },
+                pct,
+                new MaterialMenu.RowButton { Icon = IconData.Add, Tip = "Zoom in", KeepOpen = true, Click = () => { Zoom(1.1); pct.Text = zoomText(); } },
+                new MaterialMenu.RowButton { Icon = IconData.Fullscreen, Tip = "Full screen", Click = () => SetFullscreen(!fullscreen) });
+            m.Add("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); });
+            m.Add("Find on page", IconData.Find, "Ctrl+F", ShowFind);
+            m.AddSub("Save and share", IconData.SaveShare, sm =>
             {
-                // like Chrome: toggles this tab's DevTools (it docks itself when it opens)
-                if (devDock.Docked(Current)) devDock.CloseCurrent();
-                else if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow();
+                sm.Add("Save page as...", IconData.Download, "Ctrl+S", SavePageAs).Enabled = web;
+                sm.Add("Copy link", IconData.Link, null, CopyLink).Enabled = web;
+                sm.Add("Share...", IconData.Share, null, () => { if (WebUrl != null && !WinShare.Share(Handle, Current.Title, WebUrl)) Notice("Sharing is not available"); }).Enabled = web;
+                sm.Add("Create QR code", IconData.QrCode, null, () => NewTab(Pages.Url("qr") + "?u=" + Uri.EscapeDataString(WebUrl ?? ""))).Enabled = web;
+            });
+            m.AddSub("More tools", IconData.Build, sm =>
+            {
+                sm.Add("Task manager", IconData.Memory, "Shift+Esc", () => OpenPage("tasks"));
+                sm.Add("Developer tools", IconData.Code, "F12", () =>
+                {
+                    // like Chrome: toggles this tab's DevTools (it docks itself when it opens)
+                    if (devDock.Docked(Current)) devDock.CloseCurrent();
+                    else if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow();
+                });
+                sm.Add("View page source", IconData.Code, "Ctrl+U", ViewSource).Enabled = web;
+                string keepSite = Pages.IsInternal(curUrl) ? null : Blocking.SiteOf(curUrl);   // GBrowser's own pages never unload
+                if (keepSite != null)
+                {
+                    bool kept = Store.Settings.KeepActiveSites.Contains(keepSite);
+                    var keep = sm.AddToggle("Keep " + keepSite + " active", kept, true, () =>
+                    {
+                        Store.Settings.KeepActiveSites.Remove(keepSite);
+                        if (!kept) Store.Settings.KeepActiveSites.Add(keepSite);
+                        Store.SaveSettings();
+                    });
+                    keep.Icon = IconData.Memory;
+                }
             });
             m.AddSeparator();
             m.Add("Settings", IconData.Settings, null, () => OpenPage("settings"));
@@ -3163,10 +3180,12 @@ namespace GBrowser
                 case "menuclick":
                 {
                     var m = MaterialMenu.Current;
-                    var it = m?.Items.FirstOrDefault(i => i.Text == arg);
+                    if (m == null) return "no menu";
+                    while (m.OpenChild != null) m = m.OpenChild;   // the innermost open submenu first
+                    var it = m.Items.FirstOrDefault(i => i.Text == arg);
                     if (it == null) return "no item";
-                    m.Close();
-                    it.Click?.Invoke();
+                    if (it.Sub != null) { var c = m.TestOpenSub(arg); await Task.Delay(300); return c == null ? "no submenu" : c.Handle + " sub=" + c.Bounds + " parent=" + m.Bounds + " row=" + m.RectangleToScreen(it.Bounds); }
+                    m.TestClick(arg);
                     return "ok";
                 }
                 case "menuclose": MaterialMenu.Current?.Close(); return "ok";
@@ -3263,6 +3282,15 @@ namespace GBrowser
                     await Task.Delay(300);
                     return "text=" + toolbar.Address.Text + " | " + omni.Describe();
                 case "lastmenu": return PageMenu.LastEngineItems;
+                case "longmenu":
+                {
+                    // test: a menu taller than the screen, to check scrolling
+                    var lm = NewMenu();
+                    for (int k = 1; k <= 40; k++) { int kk = k; lm.Add("Item " + k, k % 2 == 0 ? IconData.Tab : IconData.Star, "Key " + k, () => Notice("Item " + kk)); }
+                    lm.ShowAt(toolbar, toolbar.ButtonRect("menu"), true, "longmenu");
+                    await Task.Delay(300);
+                    return lm.Handle.ToString();
+                }
                 case "groups":
                     return string.Join(" | ", Tabs.Select(x => (x.Title ?? "?").Split(' ')[0] + (x.Group != null ? "[" + (strip.Groups.TryGetValue(x.Group, out var gg) ? gg.Name + "/" + TabStrip.GroupColorNames[gg.Color] + (gg.Collapsed ? "/collapsed" : "") : "?") + "]" : "")))
                         + " || selected=" + strip.Selected;

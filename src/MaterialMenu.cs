@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Linq;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -24,8 +25,85 @@ namespace GBrowser
             public bool Enabled = true;
             public Action Click;
             public object Tag;                    // the caller's own data (e.g. the download a row shows)
+            public Action<MaterialMenu> Sub;      // a submenu (filled when it opens), like Chrome's "More tools"
+            public List<RowButton> Buttons;       // small buttons at the right of the row (Chrome's zoom row)
             internal Rectangle Bounds;
             internal bool Selectable => !Separator && !Header && !Note && Enabled;
+        }
+
+        /// <summary>A button inside a row: an icon or a short text (e.g. "100%"); stays open after a click when KeepOpen.</summary>
+        public sealed class RowButton
+        {
+            public string Icon, Text, Tip;
+            public Action Click;
+            public bool KeepOpen;
+            internal Rectangle Bounds;
+        }
+
+        public Entry AddSub(string text, string icon, Action<MaterialMenu> fill)
+        {
+            var e = new Entry { Text = text, Icon = icon, Sub = fill };
+            Items.Add(e);
+            return e;
+        }
+
+        public Entry AddButtons(string text, string icon, params RowButton[] buttons)
+        {
+            var e = new Entry { Text = text, Icon = icon, Buttons = new List<RowButton>(buttons) };
+            Items.Add(e);
+            return e;
+        }
+
+        MaterialMenu parentMenu, childMenu;
+        int childOf = -1;
+        readonly Timer subTimer = new Timer { Interval = 280 };
+        MaterialMenu Root { get { var m = this; while (m.parentMenu != null) m = m.parentMenu; return m; } }
+        bool ChainContains(Point screen) { for (var m = this; m != null; m = m.parentMenu) if (m.Bounds.Contains(screen)) return true; return false; }
+
+        void OpenSub(int i)
+        {
+            if (i < 0 || i >= Items.Count || Items[i].Sub == null || !Items[i].Enabled) return;
+            if (childMenu != null && childOf == i) return;
+            CloseSub();
+            var c = new MaterialMenu { parentMenu = this };
+            Items[i].Sub(c);
+            if (c.Items.Count == 0) return;
+            childMenu = c; childOf = i;
+            var row = Items[i].Bounds; row.Offset(0, -scroll);
+            var rs = RectangleToScreen(row);
+            c.Owner = owner; c.owner = owner; c.anchorScreen = rs;
+            c.LayoutSub(rs);
+            Hooks.Focus(c);
+            c.Show(owner);
+            Invalidate();
+        }
+
+#if AUTOMATION
+        public MaterialMenu TestOpenSub(string text) { int i = Items.FindIndex(x => x.Text == text); OpenSub(i); return childMenu; }
+        public MaterialMenu OpenChild => childMenu;
+        public bool TestClick(string text) { int i = Items.FindIndex(x => x.Text == text); if (i < 0) return false; Activate_(i); return true; }
+#endif
+        void CloseSub()
+        {
+            subTimer.Stop();
+            if (childMenu == null) return;
+            var c = childMenu; childMenu = null; childOf = -1;
+            Hooks.Focus(this);   // first: the child's closing must not take the hooks with it
+            c.parentMenu = null;
+            c.Close();
+            Invalidate();
+        }
+
+        /// <summary>A submenu: to the right of its row (left when there is no room), top aligned with the row.</summary>
+        void LayoutSub(Rectangle row)
+        {
+            Layout_(false);
+            var wa = Screen.FromRectangle(row).WorkingArea;
+            int w = Width, h = Height;
+            int x = row.Right - S(4);
+            if (x + w > wa.Right) x = Math.Max(wa.Left, row.Left - w + S(4));
+            int y = Math.Max(wa.Top, Math.Min(row.Top - S(8), wa.Bottom - h));
+            Bounds = new Rectangle(x, y, w, Math.Min(h, wa.Height));
         }
 
         public static MaterialMenu Current { get; private set; }
@@ -50,6 +128,12 @@ namespace GBrowser
             BackColor = Theme.SurfaceContainer;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             AccessibleRole = AccessibleRole.MenuPopup;
+            subTimer.Tick += (o, e) =>
+            {
+                subTimer.Stop();
+                if (hover >= 0 && Items[hover].Sub != null) OpenSub(hover);
+                else if (childMenu != null && hover >= 0 && hover != childOf) CloseSub();
+            };
         }
 
         // ------------------------------------------------------------ building
@@ -109,7 +193,7 @@ namespace GBrowser
                     if (it.Separator) continue;
                     int tw = TextRenderer.MeasureText(g, it.Text ?? "", it.Header ? bold : it.Note ? small : font).Width;
                     int sw = string.IsNullOrEmpty(it.Shortcut) ? 0 : S(32) + TextRenderer.MeasureText(g, it.Shortcut, small).Width;
-                    int trail = it.Toggle ? S(12 + 20) : 0;
+                    int trail = it.Toggle ? S(12 + 20) : it.Sub != null ? S(12 + 20) : it.Buttons != null ? it.Buttons.Count * S(40) + S(8) : 0;
                     w = Math.Max(w, lead + tw + sw + trail + S(16));
                 }
             w = Math.Min(w, S(420));
@@ -122,10 +206,12 @@ namespace GBrowser
             }
             contentHeight = y + S(8);
             var wa = Screen.FromRectangle(anchorScreen).WorkingArea;
-            int height = Math.Min(contentHeight, wa.Height - S(16));
             int x = alignRight ? anchorScreen.Right - w : anchorScreen.Left;
-            int top = anchorScreen.Bottom + S(4);
-            if (top + height > wa.Bottom) top = Math.Max(wa.Top, anchorScreen.Top - S(4) - height);
+            int below = wa.Bottom - S(8) - (anchorScreen.Bottom + S(4)), above = anchorScreen.Top - S(4) - (wa.Top + S(8));
+            int top, height;
+            if (contentHeight <= below || below >= above) { top = anchorScreen.Bottom + S(4); height = Math.Min(contentHeight, below); }
+            else { height = Math.Min(contentHeight, above); top = anchorScreen.Top - S(4) - height; }
+            height = Math.Max(Math.Min(contentHeight, S(120)), height);
             x = Math.Max(wa.Left, Math.Min(x, wa.Right - w));
             Bounds = new Rectangle(x, top, w, height);
         }
@@ -164,8 +250,10 @@ namespace GBrowser
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            subTimer.Stop();
+            if (childMenu != null) { var c = childMenu; childMenu = null; c.parentMenu = null; c.Close(); }
             if (Current == this) Current = null;
-            Hooks.Stop(this);
+            if (parentMenu == null) Hooks.Stop(this);
             if (owner != null) { owner.Deactivate -= OwnerChanged; owner.Move -= OwnerChanged; owner.Resize -= OwnerChanged; }
             base.OnFormClosed(e);
             BeginInvoke((Action)Dispose);
@@ -178,18 +266,21 @@ namespace GBrowser
             var g = e.Graphics;
             g.Clear(Theme.SurfaceContainer);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TranslateTransform(0, -scroll);
+            // no Graphics.TranslateTransform for scrolling: TextRenderer (GDI text) ignores it, so labels stayed in place
+            // while icons and lines moved (seen 19-11-2026); every row is drawn at its scrolled position instead
             int lead = HasLeading ? S(16 + 20 + 12) : S(16);
             for (int i = 0; i < Items.Count; i++)
             {
                 var it = Items[i];
                 var r = it.Bounds;
+                r.Offset(0, -scroll);
+                if (r.Bottom < 0 || r.Top > ClientSize.Height) continue;
                 if (it.Separator)
                 {
                     using (var p = new Pen(Theme.OutlineVariant, 1)) g.DrawLine(p, 0, r.Y + r.Height / 2, r.Width, r.Y + r.Height / 2);
                     continue;
                 }
-                if (i == hover && it.Selectable)
+                if ((i == hover || (i == childOf && childMenu != null)) && it.Selectable && it.Buttons == null)
                 {
                     var hr = new Rectangle(r.X + S(4), r.Y + S(1), r.Width - S(8), r.Height - S(2));
                     using (var p = Theme.Round(hr, S(8))) using (var b = new SolidBrush(Theme.SurfaceContainerHighest)) g.FillPath(b, p);
@@ -213,7 +304,46 @@ namespace GBrowser
                     TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
                 if (it.Toggle && it.Checked)
                     Icons.Draw(g, IconData.Check, r.Right - S(16) - S(20), iy, S(20), it.Enabled ? Theme.Primary : Theme.Outline);
+                if (it.Sub != null)
+                    Icons.Draw(g, IconData.ChevronRight, r.Right - S(16) - S(20), iy, S(20), it.Enabled ? Theme.OnSurfaceVariant : Theme.Outline);
+                if (it.Buttons != null)
+                {
+                    int bx = r.Right - S(12);
+                    for (int b = it.Buttons.Count - 1; b >= 0; b--)
+                    {
+                        var rb = it.Buttons[b];
+                        int bw = rb.Text != null ? Math.Max(S(48), TextRenderer.MeasureText(g, rb.Text, small).Width + S(12)) : S(32);
+                        bx -= bw;
+                        rb.Bounds = new Rectangle(bx, r.Y + (r.Height - S(32)) / 2 + scroll, bw, S(32));   // in content coordinates
+                        var drawn = new Rectangle(bx, r.Y + (r.Height - S(32)) / 2, bw, S(32));
+                        if (rb == hoverButton) using (var p = Theme.Round(drawn, S(16))) using (var hb = new SolidBrush(Theme.Pressed)) g.FillPath(hb, p);
+                        if (rb.Text != null) TextRenderer.DrawText(g, rb.Text, small, drawn, Theme.OnSurface, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                        else Icons.Draw(g, rb.Icon, drawn.X + (drawn.Width - S(20)) / 2, drawn.Y + S(6), S(20), Theme.OnSurfaceVariant);
+                        bx -= S(4);
+                    }
+                }
             }
+            // more above / below: a soft fade and a Material arrow at that edge
+            int max = Math.Max(0, contentHeight - ClientSize.Height);
+            if (max > 0)
+            {
+                int fh = S(28);
+                if (scroll > 0) EdgeHint(g, new Rectangle(0, 0, Width, fh), true);
+                if (scroll < max) EdgeHint(g, new Rectangle(0, ClientSize.Height - fh, Width, fh), false);
+            }
+        }
+
+        void EdgeHint(Graphics g, Rectangle r, bool top)
+        {
+            var c = Theme.SurfaceContainer;
+            using (var b = new LinearGradientBrush(new Rectangle(r.X, r.Y - 1, r.Width, r.Height + 2),
+                       top ? c : Color.FromArgb(0, c), top ? Color.FromArgb(0, c) : c, LinearGradientMode.Vertical))
+                g.FillRectangle(b, r);
+            var st = g.Save();
+            float cx = r.X + r.Width / 2f, cy = top ? r.Y + S(10) : r.Bottom - S(10);
+            if (top) { g.TranslateTransform(cx, cy); g.RotateTransform(180); g.TranslateTransform(-cx, -cy); }
+            Icons.Draw(g, IconData.ExpandMore, (int)(cx - S(10)), (int)(cy - S(10)), S(20), Theme.OnSurfaceVariant);
+            g.Restore(st);
         }
 
         // ------------------------------------------------------------ mouse
@@ -225,11 +355,28 @@ namespace GBrowser
             return -1;
         }
 
+        RowButton hoverButton;
+
+        RowButton ButtonAt(int i, Point client)
+        {
+            if (i < 0 || Items[i].Buttons == null) return null;
+            var p = new Point(client.X, client.Y + scroll);
+            return Items[i].Buttons.FirstOrDefault(b => b.Bounds.Contains(p));
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             int h = HitIndex(e.Location);
-            if (h != hover || keyboard) { hover = h; keyboard = false; Invalidate(); }
-            Cursor = h >= 0 && Items[h].Selectable ? Cursors.Hand : Cursors.Default;
+            var hb = ButtonAt(h, e.Location);
+            if (h != hover || keyboard || hb != hoverButton)
+            {
+                hover = h; keyboard = false; hoverButton = hb; Invalidate();
+                // Chrome: resting on a submenu row opens it; another row closes the open one
+                subTimer.Stop();
+                if (h >= 0 && Items[h].Sub != null) subTimer.Start();
+                else if (childMenu != null && h >= 0 && h != childOf) subTimer.Start();
+            }
+            Cursor = h >= 0 && Items[h].Selectable && (Items[h].Buttons == null || hb != null) ? Cursors.Hand : Cursors.Default;
         }
 
         protected override void OnMouseLeave(EventArgs e) { if (!keyboard) { hover = -1; Invalidate(); } }
@@ -238,7 +385,17 @@ namespace GBrowser
         {
             if (e.Button != MouseButtons.Left) return;
             int h = HitIndex(e.Location);
-            if (h >= 0) Activate_(h);
+            if (h < 0) return;
+            if (Items[h].Buttons != null)
+            {
+                var b = ButtonAt(h, e.Location);
+                if (b == null) return;
+                if (b.KeepOpen) { b.Click?.Invoke(); Invalidate(); }
+                else { Root.Close(); b.Click?.Invoke(); }
+                return;
+            }
+            if (Items[h].Sub != null) { OpenSub(h); return; }
+            Activate_(h);
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -252,7 +409,9 @@ namespace GBrowser
         {
             var it = Items[i];
             if (!it.Selectable) return;
-            Close();
+            if (it.Sub != null) { OpenSub(i); childMenu?.MoveSel(1); return; }
+            if (it.Buttons != null) return;
+            Root.Close();
             it.Click?.Invoke();
         }
 
@@ -262,7 +421,9 @@ namespace GBrowser
         {
             switch (k)
             {
-                case Keys.Escape: Close(); return true;
+                case Keys.Escape: if (parentMenu != null) parentMenu.CloseSub(); else Close(); return true;
+                case Keys.Right: if (hover >= 0 && Items[hover].Sub != null) { OpenSub(hover); childMenu?.MoveSel(1); } return true;
+                case Keys.Left: if (parentMenu != null) parentMenu.CloseSub(); return true;
                 case Keys.Down: MoveSel(1); return true;
                 case Keys.Up: MoveSel(-1); return true;
                 case Keys.Home: hover = -1; MoveSel(1); return true;
@@ -319,9 +480,12 @@ namespace GBrowser
                 if (keyHook == IntPtr.Zero) keyHook = SetWindowsHookEx(13, keyProc, mod, 0);         // WH_KEYBOARD_LL
             }
 
+            /// <summary>The menu that gets the keys (an open submenu, else its parent); hooks stay installed.</summary>
+            public static void Focus(MaterialMenu m) { if (menu != null) menu = m; }
+
             public static void Stop(MaterialMenu m)
             {
-                if (menu != m) return;
+                if (menu != m && (menu == null || menu.Root != m)) return;
                 menu = null;
                 if (mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
                 if (keyHook != IntPtr.Zero) { UnhookWindowsHookEx(keyHook); keyHook = IntPtr.Zero; }
@@ -336,11 +500,11 @@ namespace GBrowser
                     var p = Marshal.PtrToStructure<MouseLL>(l);
                     var m = menu;
                     var pt = new Point(p.X, p.Y);
-                    if (!m.Bounds.Contains(pt))
+                    if (!m.ChainContains(pt))
                     {
-                        Rectangle anchor = m.anchorScreen;
-                        if (anchor.Contains(pt)) { closedKey = m.key; closedAt = DateTime.UtcNow; }
-                        m.BeginInvoke((Action)m.Close);
+                        var root = m.Root;
+                        if (root.anchorScreen.Contains(pt)) { closedKey = root.key; closedAt = DateTime.UtcNow; }
+                        root.BeginInvoke((Action)root.Close);
                     }
                 }
                 return CallNextHookEx(IntPtr.Zero, code, w, l);
@@ -357,10 +521,10 @@ namespace GBrowser
                     {
                         var k = (Keys)Marshal.PtrToStructure<KeyLL>(l).Vk;
                         if (k == Keys.Escape || k == Keys.Up || k == Keys.Down || k == Keys.Home || k == Keys.End ||
-                            k == Keys.Enter || k == Keys.Space || k == Keys.Tab)
+                            k == Keys.Enter || k == Keys.Space || k == Keys.Tab || k == Keys.Left || k == Keys.Right)
                         {
                             var m = menu;
-                            if (k == Keys.Tab) { m.BeginInvoke((Action)m.Close); return CallNextHookEx(IntPtr.Zero, code, w, l); }
+                            if (k == Keys.Tab) { m.BeginInvoke((Action)m.Root.Close); return CallNextHookEx(IntPtr.Zero, code, w, l); }
                             m.BeginInvoke((Action)(() => m.Key(k)));
                             return (IntPtr)1;   // the menu handles it
                         }
