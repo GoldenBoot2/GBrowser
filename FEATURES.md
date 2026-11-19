@@ -203,3 +203,53 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 | Repeatable check: tools/local/stealthprobe.js (on vs off diff), cftest.ps1 (Cloudflare), public detectors | In use |
 
 VPN test (19-11-2026, VeePN free extension, United Kingdom / London): the extension works in GBrowser (pages saw 51.195.242.237, OVH, AS16276), but TLScontact answers Cloudflare Error 1005: the site owner has banned that whole network (ASN) by IP, before any browser check. Not fixable in the browser: needs a VPN / proxy on a residential or non-banned network.
+
+## Settings compared with Chrome 157 (read from chrome://settings of Chrome 157.0.8103.79 on this PC, 19-11-2026)
+
+| Chrome setting | GBrowser |
+|---|---|
+| You and Google: sign in / sync | Not possible (no account service of our own) |
+| You and Google: Customize profile, profiles | Missing (profiles pending) |
+| You and Google: Import bookmarks and settings | Partly (bookmarks import on the Bookmarks page; not in Settings; history import missing) |
+| Autofill and passwords: Passwords, passkeys | Missing (no WebView2 API to list them); "Offer to save passwords" switch Missing (WebView2 IsPasswordAutosaveEnabled exists) |
+| Autofill and passwords: payments, addresses, autofill settings | Missing switch (WebView2 IsGeneralAutofillEnabled exists) |
+| Privacy: Delete browsing data | Done |
+| Privacy: Third-party cookies (allow / block, exceptions) | Done (switch); exception list Missing |
+| Privacy: Privacy Guide, Safety Check | Missing |
+| Security: Safe Browsing levels | Done as Microsoft Defender SmartScreen on / off (the engine's protection) |
+| Security: Always use secure connections (public / public and private sites) | Partly (on / off, no public-vs-private choice) |
+| Security: compromised password warnings | Not possible (no password API) |
+| Security: Use secure DNS (providers, custom) | Done |
+| Security: JavaScript optimization (V8) | Missing (needs an engine argument) |
+| Security: Manage certificates | Missing (Windows certificate manager link) |
+| Site settings: location, camera, microphone, notifications | Done |
+| Site settings: JavaScript, images, pop-ups defaults + exception lists | Partly (per site in site info; no global default / list in Settings) |
+| Site settings: automatically remove permissions from unused sites | Missing |
+| Do Not Track | Done |
+| Performance: Memory Saver, always keep sites active | Done |
+| Performance: Energy Saver | Missing |
+| Performance: Preload pages | Missing (engine setting not exposed) |
+| Performance: inactive tabs appearance, hover card memory usage / images | Missing |
+| Appearance: theme, colour, light / dark / device | Done |
+| Appearance: home button, font size, custom fonts, page zoom | Done |
+| Appearance: bookmarks bar always / only on New Tab page / hide | Partly (show / hide only) |
+| Appearance: tab search button, Ctrl+Tab most recently used order | Missing |
+| Appearance: vertical tabs, side panel, split view | Missing |
+| Search engine: choose | Done |
+| Search engine: manage search engines and site search (keywords) | Missing |
+| Default browser | Done |
+| On startup: New Tab / continue where you left off / specific pages | Partly (reopen tabs on / off, home page; no "specific pages") |
+| Languages: preferred languages | Done |
+| Languages: spell check on / off, enhanced | Not possible (engine ignores it, measured) |
+| Languages: translate | Missing |
+| Downloads: location, ask where to save | Done |
+| Downloads: show downloads when they're done | Partly (bubble opens on start; no switch) |
+| Accessibility: Live Caption / Translate | Missing |
+| Accessibility: focus highlight, caret browsing (F7) | Missing |
+| Accessibility: copied-to-clipboard confirmations | Partly ("Link copied" only) |
+| System: graphics acceleration | Missing (engine argument, restart) |
+| System: open the computer's proxy settings | Missing (Windows link) |
+| System: run in background | Not applicable |
+| Reset settings | Missing |
+| Extensions, About | Done |
+| AI innovations (Gemini) | Not applicable (Google's own AI service) |
