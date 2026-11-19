@@ -175,6 +175,14 @@ namespace GBrowser
                             using (var b = new SolidBrush(t.Muted ? Theme.Outline : Theme.Primary)) g.FillEllipse(b, r.Right - S(12), r.Y + S(8), S(6), S(6));
                         continue;
                     }
+                    // camera / microphone in use (like Chrome's recording indicator), left of the speaker
+                    if (t.Blocking != null && (t.Blocking.Camera > 0 || t.Blocking.Microphone > 0))
+                    {
+                        var ar0 = AudioRect(i);
+                        int cx = (ar0.IsEmpty ? textRight : ar0.X - S(2)) - S(18);
+                        Icons.Draw(g, t.Blocking.Camera > 0 ? IconData.Videocam : IconData.Mic, cx + S(1), r.Y + (r.Height - S(16)) / 2 - (sel ? 0 : S(2)), S(16), Theme.Error);
+                        if (ar0.IsEmpty) textRight = cx - S(4);
+                    }
                     if (t.PlayingAudio || t.Muted)
                     {
                         var ar = AudioRect(i);

@@ -17,6 +17,25 @@ namespace GBrowser
         readonly CoreWebView2Environment env;
         public string PageUrl, PageHost;
         public bool PopupBlocked;   // the last NewWindowRequested was stopped by the pop-up blocker (not as an ad)
+
+        // camera / microphone tracks the page's frames have live (reported by the page script, per frame)
+        readonly Dictionary<string, int[]> media = new Dictionary<string, int[]>();
+        public int Camera, Microphone;
+        public event Action MediaChanged;
+        internal void Media(string token, int cam, int mic)
+        {
+            lock (media)
+            {
+                if (cam <= 0 && mic <= 0) media.Remove(token); else media[token] = new[] { cam, mic };
+                Camera = media.Values.Sum(v => v[0]); Microphone = media.Values.Sum(v => v[1]);
+            }
+            ui?.Post(_ => MediaChanged?.Invoke(), null);
+        }
+        void ClearMedia()
+        {
+            lock (media) { if (media.Count == 0) return; media.Clear(); Camera = Microphone = 0; }
+            ui?.Post(_ => MediaChanged?.Invoke(), null);
+        }
         string pendingMainUrl, sessionAllowedHost;
         public event Action Changed;
 
@@ -380,6 +399,7 @@ namespace GBrowser
         {
             var core = (CoreWebView2)sender;
             string uri = e.Uri ?? "";
+            ClearMedia();   // the old page's camera / microphone stop with it
 #if AUTOMATION
             TestLog.Add("nav " + uri + " user=" + e.IsUserInitiated + " redirect=" + e.IsRedirected + " kind=" + e.NavigationKind);
 #endif
@@ -781,6 +801,7 @@ namespace GBrowser
         public bool cssok(string doc) => b.CssOk(doc);
         public bool dnt() => S.DoNotTrack;
         public string p(string href) => Identity.PageConfig(href);   // Hide my identity (Identity.cs)
+        public void media(string token, int cam, int mic) => b.Media(token, cam, mic);   // camera / microphone in use
 
         public string keys(string href, string keys)
         {

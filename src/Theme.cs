@@ -32,6 +32,8 @@ namespace GBrowser
         public static Color OnSurfaceVariant => R("on-surface-variant");
         public static Color Outline => R("outline");
         public static Color OutlineVariant => R("outline-variant");
+        // Material 3 error role (recording indicator): the baseline red, not tinted by the theme colour
+        public static Color Error => Dark ? Color.FromArgb(0xF2, 0xB8, 0xB5) : Color.FromArgb(0xB3, 0x26, 0x1E);
         public static Color Hover => Color.FromArgb(0x14, OnSurface);
         public static Color Pressed => Color.FromArgb(0x24, OnSurface);
         public static Color Disabled => Color.FromArgb(0x61, OnSurface);

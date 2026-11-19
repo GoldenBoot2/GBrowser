@@ -1127,6 +1127,7 @@ namespace GBrowser
                 if (core.Settings.IsScriptEnabled != on) core.Settings.IsScriptEnabled = on;
             };
             core.SourceChanged += (o, e) => F().ApplySiteSound(t);
+            if (t.Blocking != null) t.Blocking.MediaChanged += () => { F().strip.RefreshTabs(); if (t == F().Current) F().UpdateUi(); };
             core.WindowCloseRequested += (o, e) => { int i = F().Tabs.IndexOf(t); if (i >= 0) F().CloseTab(i); };
             core.ContainsFullScreenElementChanged += (o, e) => F().SetFullscreen(core.ContainsFullScreenElement);
             core.NewWindowRequested += async (o, e) =>
@@ -1835,6 +1836,9 @@ namespace GBrowser
             bool secure = u.Scheme == "https" && Pages.PageName(url) != "insecure" && Pages.PageName(url) != "certerror";
             m.AddHeader(host, secure ? IconData.Lock : IconData.Warning);
             m.AddNote(secure ? "Connection is secure" : "Connection is not secure");
+            if (t?.Blocking != null && (t.Blocking.Camera > 0 || t.Blocking.Microphone > 0))
+                m.AddNote(t.Blocking.Camera > 0 && t.Blocking.Microphone > 0 ? "Using your camera and microphone"
+                    : t.Blocking.Camera > 0 ? "Using your camera" : "Using your microphone");
 
             // permissions this site has a remembered choice for
             var perms = new List<CoreWebView2PermissionSetting>();
@@ -3006,6 +3010,14 @@ namespace GBrowser
                     toolbar.Address.KeyForTest(arg == "ShiftDelete" ? Keys.Delete | Keys.Shift : (Keys)Enum.Parse(typeof(Keys), arg));
                     await Task.Delay(300);
                     return "text=" + toolbar.Address.Text + " | " + omni.Describe();
+                case "mediatest":
+                {
+                    // test: "<camera> <microphone>" live tracks reported for the current tab, as the page script does
+                    var mp = arg.Split(' ');
+                    Current?.Blocking?.Media("test", int.Parse(mp[0]), int.Parse(mp[1]));
+                    await Task.Delay(300);
+                    return "ok";
+                }
                 case "toolbarbtn":
                 {
                     // test: "<name>" = its bounds (empty = hidden); "<name> click" = press it

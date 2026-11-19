@@ -237,9 +237,51 @@
       var f = proto && proto[name];
       if (typeof f !== 'function') return;
       var w = asNative(make(f), f);
-      Object.defineProperty(proto, name, {value: w, writable: true, enumerable: false, configurable: true});
+      var od = Object.getOwnPropertyDescriptor(proto, name);
+      // the same attributes as the browser's own (web API methods on prototypes are enumerable; a changed attribute shows)
+      Object.defineProperty(proto, name, {value: w, writable: od ? od.writable : true, enumerable: od ? od.enumerable : false,
+        configurable: od ? od.configurable : true});
     } catch (e) {}
   }
+  // ---- camera / microphone in use: GBrowser shows it on the tab like Chrome (WebView2 has no capture-state API) ----
+  if (DBG.indexOf('q') < 0) try {
+    var MDP = window.MediaDevices && MediaDevices.prototype, MTP = window.MediaStreamTrack && MediaStreamTrack.prototype;
+    var kindGet = MTP && gOPD(MTP, 'kind'), stateGet = MTP && gOPD(MTP, 'readyState');
+    var pThen = Promise.prototype.then, sTracks = window.MediaStream && MediaStream.prototype.getTracks;
+    var addEv = EventTarget.prototype.addEventListener;
+    if (MDP && MTP && kindGet && stateGet && sTracks && typeof MDP.getUserMedia === 'function') {
+      var liveTracks = new Set(), mediaToken = Math.random().toString(36).slice(2), mediaLast = '0,0';
+      var mediaReport = function () {
+        var cam = 0, mic = 0;
+        liveTracks.forEach(function (tr) {
+          try {
+            if (stateGet.get.call(tr) !== 'live') { liveTracks.delete(tr); return; }
+            var k = kindGet.get.call(tr);
+            if (k === 'video') cam++; else if (k === 'audio') mic++;
+          } catch (e) {}
+        });
+        var key = cam + ',' + mic;
+        if (key === mediaLast) return;
+        mediaLast = key;
+        try { B.media(mediaToken, cam, mic); } catch (e) {}
+      };
+      var mediaWatch = function (stream) {
+        try {
+          var l = bApply(sTracks, stream, []);
+          for (var i = 0; i < l.length; i++) { liveTracks.add(l[i]); bApply(addEv, l[i], ['ended', mediaReport]); }
+        } catch (e) {}
+        mediaReport();
+      };
+      methodOn(MDP, 'getUserMedia', function (f) {
+        return {getUserMedia() { var p = nat(f, this, arguments, 1); try { bApply(pThen, p, [mediaWatch, function () {}]); } catch (e) {} return p; }}.getUserMedia;
+      });
+      methodOn(MTP, 'stop', function (f) {
+        return {stop() { var r = nat(f, this, arguments, 1); try { if (liveTracks.has(this)) mediaReport(); } catch (e) {} return r; }}.stop;
+      });
+      bApply(addEv, window, ['pagehide', function () { liveTracks.clear(); mediaReport(); }]);
+    }
+  } catch (e) {}
+
   // ---- scriptlets leave no trace ----
   // AdGuard's scriptlets put their own functions and Proxies in place of built-ins. Measured 19-11-2026 with
   // tools/local/slaudit (84 calls, every scriptlet the lists use, each in its own frame, compared with a clean

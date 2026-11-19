@@ -61,3 +61,5 @@ _ads_banner.$image,object,media
 ! site's "CLSPlaceholder"); hide the placeholder only when it holds an ad slot
 timesofindia.indiatimes.com##.CLSPlaceholder:has(> .adInv)
 timesofindia.indiatimes.com##.CLSPlaceholder:has(.colombia)
+! 19-11-2026: look-alike "Cloudflare captcha" domain with a revoked certificate; scrapingcourse.com once sent the browser there
+||cloudflarecaptcha.com^
