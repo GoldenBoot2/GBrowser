@@ -444,11 +444,6 @@
   const dnsBox = priv && [...priv.children].find(r => r.classList.contains('rows'));
   const secCard = card('Security', 'security', rowOf(priv, 'Always use secure connections'), rowOf(priv, 'Dangerous site and download protection'),
     rowOf(priv, 'Tracking prevention'), dnsBox, rowOf(priv, 'Your data is encrypted'));
-  const linkCard = (title, iconName, sub, url) => {
-    const r = el('div', { class: 'row link' }, icon(iconName), el('div', { class: 'text' }, el('div', { class: 'title', text: title }), sub ? el('div', { class: 'sub', text: sub }) : null), icon('OpenNew'));
-    r.addEventListener('click', () => openUrl(url));
-    return el('div', { class: 'card' }, r);
-  };
   const SECTIONS = [
     ['privacy', 'Privacy and security', 'Lock', [delCard, cookieCard, secCard, cardOf('Site settings'), cardOf('Hide my identity')]],
     ['adblock', 'Ad blocking', 'Shield', [abc, cardOf('Sites without blocking'), cardOf('Filter lists'), cardOf('Your rules'), cardOf('Custom filter lists')]],
@@ -459,8 +454,9 @@
     ['startup-sec', 'On startup', 'Restore', [startupCard]],
     ['languages-sec', 'Languages', 'Language', [cardOf('Languages')]],
     ['downloads-sec', 'Downloads', 'Download', [cardOf('Downloads')]],
-    ['extensions-sec', 'Extensions', 'Extension', [linkCard('Extensions', 'Extension', 'Manage, install and remove extensions', 'https://gbrowser.local/extensions.html')]],
-    ['about-sec', 'About GBrowser', 'Info', [linkCard('About GBrowser', 'Info', 'Version, updates and developer', 'https://gbrowser.local/about.html')]],
+    // shown here, not in a new tab: their pages' scripts draw into these boxes (loaded when the section is first opened)
+    ['extensions-sec', 'Extensions', 'Extension', [el('div', { class: 'embed', 'data-script': 'extensions.js' })]],
+    ['about-sec', 'About GBrowser', 'Info', [el('div', { class: 'embed', 'data-script': 'about.js' })]],
   ];
   // the old containers are empty now
   for (const c of [start, priv]) if (c && c.querySelectorAll('.row').length === 0) c.remove();
@@ -489,9 +485,20 @@
       if (sec) { secId = sec.id; if (t !== sec) card = t; }
     }
     for (const sec of content.children) sec.hidden = sec.id !== secId;
+    loadEmbed(document.getElementById(secId));
     for (const k in links) links[k].classList.toggle('on', k === secId);
     if (card) setTimeout(() => card.scrollIntoView({ block: 'start' }), 30);
     else window.scrollTo(0, 0);
+  }
+  function loadEmbed(sec) {
+    const box = sec && sec.querySelector('.embed');
+    if (!box || box.dataset.loaded) return;
+    box.dataset.loaded = '1';
+    window.__gbEmbed = box;
+    const sc = document.createElement('script');
+    sc.src = box.dataset.script;
+    sc.onload = sc.onerror = () => { if (window.__gbEmbed === box) window.__gbEmbed = null; };
+    document.body.append(sc);
   }
   window.addEventListener('popstate', () => show(location.hash.slice(1)));
   show(location.hash.slice(1));

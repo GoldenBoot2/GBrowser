@@ -1,9 +1,14 @@
 'use strict';
 (() => {
-  const main = document.getElementById('main');
-  header('Extensions', 'Extension',
-    el('button', { class: 'btn tonal', onclick: () => gb.send('open', { url: 'https://chromewebstore.google.com/category/extensions' }) },
-      icon('OpenNew'), 'Chrome Web Store'));
+  // shown on its own page, or inside Settings > Extensions (window.__gbEmbed = the container)
+  const embed = window.__gbEmbed;
+  const main = embed || document.getElementById('main');
+  const storeBtn = el('button', { class: 'btn tonal', onclick: () => gb.send('open', { url: 'https://chromewebstore.google.com/category/extensions' }) },
+    icon('OpenNew'), 'Chrome Web Store');
+  // inside Settings the store button sits in its own card (the page itself has it in the header)
+  const storeCard = () => el('div', { class: 'card' }, el('div', { class: 'row' }, icon('Extension'), el('div', { class: 'text' },
+    el('div', { class: 'title', text: 'Get extensions' }), el('div', { class: 'sub', text: 'Chrome Web Store' })), storeBtn));
+  if (!embed) header('Extensions', 'Extension', storeBtn);
 
   function addCard() {
     const input = el('input', { class: 'field grow', placeholder: 'Chrome Web Store link or extension ID', spellcheck: 'false', 'aria-label': 'Store link or ID' });
@@ -27,6 +32,7 @@
     let list = [];
     try { list = await gb.send('ext.list'); } catch (e) { }
     main.textContent = '';
+    if (embed) main.append(storeCard());
     main.append(addCard());
     if (!list.length) { main.append(el('div', { class: 'empty' }, icon('Extension'), 'No extensions')); return; }
     const card = el('div', { class: 'card' }, el('h2', { text: 'Installed' }));

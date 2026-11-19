@@ -1,7 +1,8 @@
 'use strict';
 (async () => {
-  const main = document.getElementById('main');
-  header('About', 'Info');
+  // shown on its own page, or inside Settings > About GBrowser (window.__gbEmbed = the container)
+  const main = window.__gbEmbed || document.getElementById('main');
+  if (!window.__gbEmbed) header('About', 'Info');
   const i = await gb.send('info');
   const row = (iconName, title, sub, extra) => el('div', { class: 'row' }, icon(iconName),
     el('div', { class: 'text' }, el('div', { class: 'title', text: title }), sub ? el('div', { class: 'sub mono', text: sub }) : null), extra || null);
