@@ -116,6 +116,23 @@ namespace GBrowser
             strip.GroupMenu += ShowGroupMenu;
             strip.TabMuteClicked += i => SetMuted(Tabs[i], !Tabs[i].Muted);
             strip.TabDraggedOut += (i, pt) => MoveTabToNewWindow(i, pt, true);
+            // links / text / files dropped on the tab row: on a tab = open there, between tabs = a new tab there (Chrome)
+            strip.Dropped += (i, intoTab, text) =>
+            {
+                var url = Search.ToUrl(text);
+                if (url == null) return;
+                if (intoTab && i >= 0 && i < Tabs.Count) { Select(i); Tabs[i].Navigate(url); }
+                else NewTab(url, true, i);
+            };
+            // the page dragged out of the address bar (web pages and files; GBrowser's own pages have no address to share)
+            toolbar.DragPage = () =>
+            {
+                var t = Current;
+                string u = t?.Created == true ? t.View.CoreWebView2.Source : t?.Url;
+                if (string.IsNullOrEmpty(u) || !(u.StartsWith("http://") || u.StartsWith("https://") || u.StartsWith("file:///"))) return null;
+                return Tuple.Create(u, t.Title);
+            };
+            toolbar.DroppedText += text => { var url = Search.ToUrl(text); if (url != null && Current != null) { Current.Navigate(url); Current.View?.Focus(); } };
             ResizeEnd += (s, e) => DropDraggedWindow();
             frame = new WindowFrame(this, strip);
             strip.TabMoved += (from, to) =>
@@ -3254,6 +3271,41 @@ namespace GBrowser
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
                 case "dbg": Blocking.TestDbg = arg; return "ok";
+                case "dropstrip":
+                {
+                    // test: drop <url or text> at tab <i> ("in" = its middle, "before" = its left edge, "end" = after the last)
+                    var a2 = arg.Split(new[] { ' ' }, 3);
+                    int i = int.Parse(a2[0]);
+                    var r = strip.TestTabRect(Math.Min(i, Tabs.Count - 1));
+                    int x = a2[1] == "in" ? r.X + r.Width / 2 : a2[1] == "before" ? r.X + 2 : r.Right + 30;
+                    var d = a2[2].StartsWith("http") ? UrlDrag.Make(a2[2], "Test page") : UrlDrag.MakeText(a2[2]);
+                    return strip.TestDrop(d, x, r.Y + r.Height / 2);
+                }
+                case "dropaddress":
+                {
+                    var d = arg.StartsWith("http") ? UrlDrag.Make(arg, "Test page") : UrlDrag.MakeText(arg);
+                    var data = (IDataObject)d;
+                    string t = UrlDrag.ReadTarget(data);
+                    var url = Search.ToUrl(t);
+                    if (url != null) { Current.Navigate(url); Current.View?.Focus(); }
+                    return t ?? "nothing";
+                }
+                case "dragdata":
+                {
+                    // test: the drag data for the current page, read back the way drop targets read it
+                    var pg = toolbar.DragPage?.Invoke();
+                    if (pg == null) return "not draggable";
+                    var d = UrlDrag.Make(pg.Item1, pg.Item2);
+                    string u = UrlDrag.ReadUrl(d, out var title);
+                    return "formats=" + string.Join(",", d.GetFormats()) + " | url=" + u + " | title=" + title;
+                }
+                case "shelldrop":
+                {
+                    // test: the current page dropped on a folder through Explorer's own drop handler (desktop / folders)
+                    var pg = toolbar.DragPage?.Invoke();
+                    if (pg == null) return "not draggable";
+                    return await ShellDrop.Drop(arg, UrlDrag.Make(pg.Item1, pg.Item2));
+                }
                 case "focusinfo":
                 {
                     // test: why the page does not take the keyboard focus

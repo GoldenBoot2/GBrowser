@@ -305,8 +305,22 @@ namespace GBrowser
             return text.Length;
         }
 
+        /// <summary>Set by the owner (the address bar): text dragged out of the box (the whole text when the box was not
+        /// being edited, else the selection); the owner starts the drag. Null = no dragging out.</summary>
+        public Action<string, bool> DragOut;   // text, whole (not focused)
+        Point? dragFrom; bool dragWhole;
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if (e.Button == MouseButtons.Left && DragOut != null && text.Length > 0)
+            {
+                // not being edited: a press may start a drag of the whole address; a click focuses on release
+                if (!Focused) { dragFrom = e.Location; dragWhole = true; Capture = true; return; }
+                // inside the selection: may drag the selected text; a click places the caret on release
+                int hi = Hit(e.X);
+                if (SelectionLength > 0 && hi >= SelectionStart && hi < SelectionStart + SelectionLength)
+                { dragFrom = e.Location; dragWhole = false; Capture = true; return; }
+            }
             bool wasFocused = Focused;
             if (!wasFocused) { selectAllOnClick = true; Focus(); }
             base.OnMouseDown(e);
@@ -331,6 +345,16 @@ namespace GBrowser
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            if (dragFrom.HasValue)
+            {
+                var ds = SystemInformation.DragSize;
+                if ((e.Button & MouseButtons.Left) != 0 && (Math.Abs(e.X - dragFrom.Value.X) > ds.Width || Math.Abs(e.Y - dragFrom.Value.Y) > ds.Height))
+                {
+                    dragFrom = null; Capture = false;
+                    DragOut?.Invoke(dragWhole ? text : SelectedText, dragWhole);
+                }
+                return;
+            }
             base.OnMouseMove(e);
             if (!mouseSelecting) return;
             if (e.X < 0) scroll = Math.Max(0, scroll - 8);
@@ -342,6 +366,15 @@ namespace GBrowser
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            if (dragFrom.HasValue && e.Button == MouseButtons.Left)
+            {
+                // no drag: the click it was
+                dragFrom = null; Capture = false;
+                if (dragWhole) { selectAllOnClick = true; Focus(); if (SelectionLength == 0) SelectAll(); selectAllOnClick = false; }
+                else MoveTo(Hit(e.X), false);
+                base.OnMouseUp(e);
+                return;
+            }
             base.OnMouseUp(e);
             if (e.Button == MouseButtons.Left)
             {

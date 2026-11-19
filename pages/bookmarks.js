@@ -57,7 +57,13 @@
     r.addEventListener('click', e => { if (b.Folder) { open = b.Id; render(); } else openUrl(b.Url, e); });
     r.addEventListener('auxclick', e => { if (e.button === 1 && !b.Folder) openUrl(b.Url, e); });
     if (!q) {
-      r.addEventListener('dragstart', e => { dragId = b.Id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(b.Id)); r.classList.add('dragging'); });
+      r.addEventListener('dragstart', e => {
+        dragId = b.Id; r.classList.add('dragging');
+        // move inside the page; a page bookmark also carries its address (tab row, other pages, the desktop)
+        e.dataTransfer.effectAllowed = b.Folder ? 'move' : 'copyMove';
+        if (!b.Folder && b.Url) { e.dataTransfer.setData('text/uri-list', b.Url); e.dataTransfer.setData('text/plain', b.Url); }
+        else e.dataTransfer.setData('text/plain', b.Title || '');
+      });
       r.addEventListener('dragend', () => { dragId = 0; r.classList.remove('dragging'); clearMarks(); });
       r.addEventListener('dragover', e => {
         if (!dragId || dragId === b.Id) return;

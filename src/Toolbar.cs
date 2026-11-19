@@ -34,6 +34,11 @@ namespace GBrowser
         public event Action<string> Go;
         public event Action SiteInfoClicked;            // the icon at the left of the address (Chrome's "View site information")
         public Rectangle SiteInfoRect => siteRect;
+        /// <summary>The page to drag out (address, title); null when the shown page cannot be dragged.</summary>
+        public Func<Tuple<string, string>> DragPage;
+        public event Action<string> DroppedText;   // a link / text / file dropped on the address bar
+        Point? siteDown;
+        internal static bool DraggingOut;            // our own drag is running (a drop back on the address bar is ignored)
         Rectangle siteRect;
         bool hoverSite;
 
@@ -68,6 +73,19 @@ namespace GBrowser
             Address.LostFocus += (s, e) => { Address.BackColor = Theme.Omnibox; Address.Text = ShownUrl; Address.ResetView(); LayoutNow(); };
             Address.TextChanged += (s, e) => Invalidate();
             Address.PasteAndGo += t => Go?.Invoke(t);
+            // drag the address out (like Chrome: the whole address when not editing, else the selected text)
+            Address.DragOut = (t, whole) =>
+            {
+                var pg = DragPage?.Invoke();
+                if (whole || (pg != null && (t == FullUrl || t == ShownUrl))) { if (pg != null) StartDrag(UrlDrag.Make(pg.Item1, pg.Item2)); }
+                else StartDrag(UrlDrag.MakeText(t));
+            };
+            // links / text / files dropped on the address bar open in this tab (Chrome)
+            AllowDrop = Address.AllowDrop = true;
+            DragEventHandler over = (s, e) => e.Effect = !DraggingOut && UrlDrag.ReadTarget(e.Data) != null
+                ? ((e.AllowedEffect & DragDropEffects.Link) != 0 ? DragDropEffects.Link : DragDropEffects.Copy) : DragDropEffects.None;
+            DragEventHandler drop = (s, e) => { string t = DraggingOut ? null : UrlDrag.ReadTarget(e.Data); if (t != null) DroppedText?.Invoke(t); };
+            DragOver += over; DragDrop += drop; Address.DragOver += over; Address.DragDrop += drop;
             Controls.Add(Address);
 
             Add("back", "Back (Alt+Left)", () => IconData.Back, () => CanBack, () => Back?.Invoke());
@@ -238,8 +256,28 @@ namespace GBrowser
 
         Btn Hit(Point p) => buttons.Find(b => b.Rect.Contains(p));
 
+        /// <summary>Drag a page out (to the bookmarks bar, the tab row, the desktop, other apps).</summary>
+        void StartDrag(DataObject d)
+        {
+            DraggingOut = true;
+            try { DoDragDrop(d, DragDropEffects.Copy | DragDropEffects.Link); }
+            finally { DraggingOut = false; }
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            // the site icon pulled away: drag the page (Chrome's location icon)
+            if (siteDown.HasValue && (e.Button & MouseButtons.Left) != 0)
+            {
+                var ds = SystemInformation.DragSize;
+                if (Math.Abs(e.X - siteDown.Value.X) > ds.Width || Math.Abs(e.Y - siteDown.Value.Y) > ds.Height)
+                {
+                    siteDown = null;
+                    var pg = DragPage?.Invoke();
+                    if (pg != null) StartDrag(UrlDrag.Make(pg.Item1, pg.Item2));
+                    return;
+                }
+            }
             var h = Hit(e.Location);
             bool hc = ClearVisible && clearRect.Contains(e.Location);
             bool hch = StoreChip && chipRect.Contains(e.Location);
@@ -265,7 +303,7 @@ namespace GBrowser
         {
             if (e.Button != MouseButtons.Left) return;
             if (ClearVisible && clearRect.Contains(e.Location)) { Address.Clear(); Address.Focus(); return; }
-            if (!siteRect.IsEmpty && siteRect.Contains(e.Location)) return;   // opens on mouse up
+            if (!siteRect.IsEmpty && siteRect.Contains(e.Location)) { siteDown = e.Location; return; }   // opens on mouse up, or a drag
             if (pill.Contains(e.Location) && Hit(e.Location) == null) { Address.Focus(); return; }
             press = Hit(e.Location);
             if (press != null && !press.Enabled()) press = null;
@@ -276,7 +314,8 @@ namespace GBrowser
         {
             if (e.Button != MouseButtons.Left) return;
             if (StoreChip && chipRect.Contains(e.Location)) { StoreChipClicked?.Invoke(); return; }
-            if (!siteRect.IsEmpty && siteRect.Contains(e.Location)) { SiteInfoClicked?.Invoke(); return; }
+            bool wasSite = siteDown.HasValue; siteDown = null;
+            if (wasSite && !siteRect.IsEmpty && siteRect.Contains(e.Location)) { SiteInfoClicked?.Invoke(); return; }
             var p = press; press = null; Invalidate();
             if (p != null && p.Rect.Contains(e.Location)) p.Click();
         }

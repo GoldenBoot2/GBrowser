@@ -24,6 +24,7 @@ namespace GBrowser
         public event Action<int, Point> TabMenu;       // right-click on a tab (screen point)
         public event Action<int> TabMuteClicked;       // the speaker icon on a tab
         public event Action<int, Point> TabDraggedOut; // a tab pulled out of the tab row (screen point)
+        public event Action<int, bool, string> Dropped;  // tab index, true = open in that tab (else a new tab there), text
         // tab groups (like Chrome's): a coloured chip with the group's name before its tabs; click = collapse / expand
         public Dictionary<string, TabGroup> Groups = new Dictionary<string, TabGroup>();
         public event Action<string> GroupToggled;
@@ -69,6 +70,7 @@ namespace GBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Frame;
+            AllowDrop = true;   // links / text / files dropped on the tab row
             cardTimer.Tick += (o, e) =>
             {
                 cardTimer.Stop();
@@ -202,6 +204,85 @@ namespace GBrowser
         }
 
         Rectangle CloseRect(Rectangle tr) => new Rectangle(tr.Right - S(30), tr.Y + (tr.Height - S(20)) / 2, S(20), S(20));
+
+        // ---- links / text / files dropped on the tab row (like Chrome): on the middle of a tab = open there, near a
+        // tab's edge or past the last tab = a new tab at that place
+        int dropTab = -1, dropAt = -1;
+
+        void DropPlace(Point p)
+        {
+            dropTab = dropAt = -1;
+            int pinned = Tabs.Count(t => t.Pinned);
+            int h = HitTab(p);
+            if (h >= 0)
+            {
+                var r = TabRect(h);
+                int edge = Math.Max(S(10), r.Width / 4);
+                if (p.X > r.X + edge && p.X < r.Right - edge) dropTab = h;
+                else dropAt = p.X <= r.X + edge ? h : h + 1;
+            }
+            else dropAt = Tabs.Count;
+            if (dropAt >= 0) dropAt = Math.Max(dropAt, pinned);   // new tabs never go inside the pinned block
+        }
+
+        protected override void OnDragOver(DragEventArgs e)
+        {
+            base.OnDragOver(e);
+            if (UrlDrag.ReadTarget(e.Data) == null) { e.Effect = DragDropEffects.None; return; }
+            e.Effect = (e.AllowedEffect & DragDropEffects.Link) != 0 ? DragDropEffects.Link : DragDropEffects.Copy;
+            int ot = dropTab, oa = dropAt;
+            DropPlace(PointToClient(new Point(e.X, e.Y)));
+            if (ot != dropTab || oa != dropAt) Invalidate();
+        }
+
+        protected override void OnDragLeave(EventArgs e) { base.OnDragLeave(e); dropTab = dropAt = -1; Invalidate(); }
+
+        protected override void OnDragDrop(DragEventArgs e)
+        {
+            base.OnDragDrop(e);
+            string text = UrlDrag.ReadTarget(e.Data);
+            DropPlace(PointToClient(new Point(e.X, e.Y)));
+            int tab = dropTab, at = dropAt;
+            dropTab = dropAt = -1; Invalidate();
+            if (text == null) return;
+            if (tab >= 0) Dropped?.Invoke(tab, true, text); else Dropped?.Invoke(at, false, text);
+        }
+
+        /// <summary>The drop marker: the target tab outlined, or a line where the new tab goes.</summary>
+        void PaintDrop(Graphics g)
+        {
+            if (dropTab >= 0)
+            {
+                var r = TabRect(dropTab);
+                if (r.IsEmpty) return;
+                r.Inflate(-S(3), -S(3));
+                using (var pth = Theme.Round(r, S(8))) using (var pen = new Pen(Theme.Primary, S(2))) g.DrawPath(pen, pth);
+            }
+            else if (dropAt >= 0)
+            {
+                int x;
+                if (dropAt < Tabs.Count && !TabRect(dropAt).IsEmpty) x = TabRect(dropAt).X;
+                else { x = SearchRect.Right + S(6); for (int i = 0; i < Tabs.Count; i++) if (!TabRect(i).IsEmpty) x = TabRect(i).Right; }
+                using (var b = new SolidBrush(Theme.Primary))
+                {
+                    g.FillRectangle(b, x - S(1), TopPad + S(4), S(2), Height - TopPad - S(8));
+                    // a small arrow above the line, like Chrome's drop arrow
+                    g.FillPolygon(b, new[] { new Point(x - S(5), TopPad), new Point(x + S(5), TopPad), new Point(x, TopPad + S(5)) });
+                }
+            }
+        }
+
+#if AUTOMATION
+        public string TestDrop(IDataObject d, int x, int y)
+        {
+            var p = PointToScreen(new Point(x, y));
+            OnDragOver(new DragEventArgs(d, 0, p.X, p.Y, DragDropEffects.Copy | DragDropEffects.Link, DragDropEffects.None));
+            string at = "tab=" + dropTab + " at=" + dropAt;
+            OnDragDrop(new DragEventArgs(d, 0, p.X, p.Y, DragDropEffects.Copy | DragDropEffects.Link, DragDropEffects.Link));
+            return at;
+        }
+        public Rectangle TestTabRect(int i) => TabRect(i);
+#endif
 
         Rectangle PlusRect()
         {
@@ -354,6 +435,7 @@ namespace GBrowser
             if (hoverPlus || pressPlus)
                 using (var b = new SolidBrush(pressPlus ? Theme.Pressed : Theme.Hover)) g.FillEllipse(b, pr);
             Icons.Draw(g, IconData.Add, pr.X + S(5), pr.Y + S(5), S(20), Theme.OnSurfaceVariant);
+            PaintDrop(g);
         }
 
         int HitTab(Point p)

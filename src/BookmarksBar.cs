@@ -26,6 +26,7 @@ namespace GBrowser
         sealed class Item { public Rectangle R; public Bookmark B; public bool Overflow, OtherRoot, Import; }
         readonly List<Item> items = new List<Item>();
         int hover = -1, pressed = -1;
+        static long DraggedOut;   // a bar bookmark being dragged outside the bar (a drop back on the bar moves it)
         Point pressAt; bool dragging; int dropIndex = -1; long dropInto;
         readonly ToolTip tip = new ToolTip();
         string tipText;
@@ -157,6 +158,16 @@ namespace GBrowser
             if (pressed >= 0 && e.Button == MouseButtons.Left && items[pressed].B != null)
             {
                 if (!dragging && Math.Abs(e.X - pressAt.X) + Math.Abs(e.Y - pressAt.Y) > S(6)) dragging = true;
+                var pb = items[pressed].B;
+                if (dragging && !pb.Folder && (e.Y < -S(8) || e.Y > Height + S(8)))
+                {
+                    // out of the bar (Chrome: bookmarks drag anywhere): the page as a link; dropped back on the bar it moves
+                    dragging = false; pressed = -1; dropIndex = -1; dropInto = 0; Cursor = Cursors.Default; Capture = false; Invalidate();
+                    DraggedOut = pb.Id;
+                    try { DoDragDrop(UrlDrag.Make(pb.Url, pb.Title), DragDropEffects.Copy | DragDropEffects.Link | DragDropEffects.Move); }
+                    finally { DraggedOut = 0; }
+                    return;
+                }
                 if (dragging) { DropAt(e.Location, items[pressed].B.Id); Cursor = Cursors.SizeWE; Invalidate(); return; }
             }
             int h = Hit(e.Location);
@@ -290,34 +301,7 @@ namespace GBrowser
 
         // ------------------------------------------------------------ links dropped from pages / the address bar
 
-        static string DroppedUrl(IDataObject d, out string title)
-        {
-            title = null;
-            try
-            {
-                if (d.GetDataPresent("text/x-moz-url"))
-                {
-                    var o = d.GetData("text/x-moz-url");
-                    string s = o is System.IO.MemoryStream ms ? System.Text.Encoding.Unicode.GetString(ms.ToArray()).TrimEnd('\0') : o as string;
-                    if (!string.IsNullOrEmpty(s))
-                    {
-                        var parts = s.Split('\n');
-                        if (parts.Length > 1) title = parts[1].Trim();
-                        if (Uri.TryCreate(parts[0].Trim(), UriKind.Absolute, out var u0) && (u0.Scheme == "http" || u0.Scheme == "https")) return u0.AbsoluteUri;
-                    }
-                }
-                foreach (var f in new[] { "UniformResourceLocatorW", "UniformResourceLocator", DataFormats.UnicodeText, DataFormats.Text })
-                {
-                    if (!d.GetDataPresent(f)) continue;
-                    var o = d.GetData(f);
-                    string s = o is System.IO.MemoryStream ms ? (f.EndsWith("W") ? System.Text.Encoding.Unicode : System.Text.Encoding.Default).GetString(ms.ToArray()).TrimEnd('\0') : o as string;
-                    s = s?.Trim();
-                    if (!string.IsNullOrEmpty(s) && Uri.TryCreate(s, UriKind.Absolute, out var u) && (u.Scheme == "http" || u.Scheme == "https")) return u.AbsoluteUri;
-                }
-            }
-            catch { }
-            return null;
-        }
+        static string DroppedUrl(IDataObject d, out string title) => UrlDrag.ReadUrl(d, out title);
 
         protected override void OnDragOver(DragEventArgs e)
         {
@@ -332,7 +316,20 @@ namespace GBrowser
         {
             string url = DroppedUrl(e.Data, out var title);
             DropAt(PointToClient(new Point(e.X, e.Y)), 0);
-            if (url != null)
+            if (DraggedOut != 0)
+            {
+                // our own bookmark came back: move it (no copy)
+                long id = DraggedOut;
+                if (dropInto != 0) { if (dropInto != id) Bm.Move(id, dropInto, -1); }
+                else
+                {
+                    var sibs = Bm.Children(Bm.Bar);
+                    int from = sibs.FindIndex(x => x.Id == id), to = dropIndex;
+                    if (from >= 0 && to > from) to--;
+                    Bm.Move(id, Bm.Bar, to);
+                }
+            }
+            else if (url != null)
             {
                 if (dropInto != 0) Bm.Add(url, title, dropInto);
                 else Bm.Add(url, title, Bm.Bar, dropIndex);
