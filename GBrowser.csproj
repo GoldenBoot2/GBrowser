@@ -14,8 +14,8 @@
     <AssemblyName>GBrowser</AssemblyName>
     <ApplicationIcon>assets\gbrowser.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.5</Version>
-    <FileVersion>0.1.5.0</FileVersion>
+    <Version>0.1.6</Version>
+    <FileVersion>0.1.6.0</FileVersion>
     <Company>GoldenBoot</Company>
     <Product>GBrowser</Product>
     <Authors>GoldenBoot</Authors>
