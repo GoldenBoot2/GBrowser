@@ -43,7 +43,7 @@ Last full audit: 19-11-2026.
 | Site info panel (icon left of the address: connection, permissions with switches + reset, cookies count + delete site data, ad blocking on the site, site settings) | Done (19-11-2026); certificate viewer missing |
 | Zoom indicator in the address bar (click to reset) | Done 19-11-2026 (zoom-in / zoom-out icon left of the star while the page differs from the default zoom, tooltip with the percentage, click = reset; tested) |
 | Bookmark star / Ctrl+D: "Bookmark added" with name, address, folder, Remove (Chrome's bubble) | Done 19-11-2026 |
-| Copy link / QR code / share page | Missing |
+| Copy link / QR code / share page | Partly, 19-11-2026: Copy link in the main menu ("Link copied" bubble; tested). QR code and Windows Share still Missing |
 
 ## Page and content
 | Feature | Status |
@@ -53,7 +53,7 @@ Last full audit: 19-11-2026.
 | Find in page (Ctrl+F, F3, Ctrl+G, Shift+F3, Enter / Shift+Enter, Esc; per-tab, match count) | Done, GBrowser find bar (19-11-2026) |
 | Page right-click menu (page, link, image, media, selection, text field) | Done (19-11-2026: GBrowser Material menu, engine commands behind it) |
 | Print (Ctrl+P) | Engine UI (print preview) |
-| Save page as (Ctrl+S), view source (Ctrl+U) | Missing / to verify |
+| Save page as (Ctrl+S), view source (Ctrl+U) | Done 19-11-2026 (Ctrl+S and main menu: the engine's Save As dialog; Ctrl+U and main menu: view-source in a new tab; tested) |
 | PDF viewer | Engine UI (to verify branding) |
 | JavaScript alert / confirm / prompt dialogs, "Leave site?" | Done, GBrowser dialogs (19-11-2026) |
 | Login dialog (HTTP basic auth), password hidden | Done, GBrowser "Sign in" (19-11-2026) |

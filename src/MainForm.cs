@@ -1356,6 +1356,10 @@ namespace GBrowser
             m.Add("Zoom out", IconData.ZoomOut, "Ctrl+-", () => Zoom(1 / 1.1));
             m.Add("Find on page", IconData.Find, "Ctrl+F", ShowFind);
             m.Add("Print", IconData.Print, "Ctrl+P", () => { if (Current?.Created == true) Current.View.CoreWebView2.ShowPrintUI(); });
+            bool web = curUrl != null && (curUrl.StartsWith("http://") || curUrl.StartsWith("https://"));
+            m.Add("Save page as...", IconData.Download, "Ctrl+S", SavePageAs).Enabled = web;
+            m.Add("Copy link", IconData.Link, null, CopyLink).Enabled = web;
+            m.Add("View page source", IconData.Code, "Ctrl+U", ViewSource).Enabled = web;
             m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
             m.Add("Developer tools", IconData.Code, "F12", () =>
             {
@@ -1610,6 +1614,24 @@ namespace GBrowser
         }
 
         void OpenDownloads() => OpenPage("downloads");
+
+        string WebUrl => Current?.Created == true && (Current.View.CoreWebView2.Source.StartsWith("http://") || Current.View.CoreWebView2.Source.StartsWith("https://"))
+            ? Current.View.CoreWebView2.Source : null;
+
+        /// <summary>Ctrl+S: the engine's own "Save as" dialog (complete page, HTML only, or single file MHTML).</summary>
+        void SavePageAs() { if (WebUrl != null) _ = Current.View.CoreWebView2.ShowSaveAsUIAsync(); }
+
+        void ViewSource() { if (WebUrl != null) NewTab("view-source:" + WebUrl); }
+
+        void CopyLink()
+        {
+            if (WebUrl == null) return;
+            try { Clipboard.SetText(WebUrl); } catch { return; }
+            bubble.SetText("Link copied");
+            var tm = new Timer { Interval = 2000 };
+            tm.Tick += (o, e) => { tm.Dispose(); bubble.SetText(Current?.Created == true ? Current.View.CoreWebView2.StatusBarText : ""); };
+            tm.Start();
+        }
 
         void ToggleBookmarksBar()
         {
@@ -1958,6 +1980,8 @@ namespace GBrowser
                 case Keys.Control | Keys.Shift | Keys.O: OpenPage("bookmarks"); return true;
                 case Keys.Control | Keys.Shift | Keys.B: ToggleBookmarksBar(); return true;
                 case Keys.Control | Keys.J: OpenDownloads(); return true;
+                case Keys.Control | Keys.S: SavePageAs(); return true;
+                case Keys.Control | Keys.U: ViewSource(); return true;
                 case Keys.Alt | Keys.Left: toolbar_Back(); return true;
                 case Keys.Alt | Keys.Right: toolbar_Forward(); return true;
                 case Keys.Alt | Keys.Home: Current?.Navigate(Search.ToUrl(Store.Settings.HomePage) ?? Pages.Url("newtab")); return true;
