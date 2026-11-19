@@ -25,7 +25,7 @@ Last full audit: 19-11-2026.
 | Tab right-click menu (new tab to the right, reload, duplicate, pin, mute, move to new window / to another window, close, close others / to the right) | Done (19-11-2026) |
 | Pinned tabs (icon only, kept at the left, restored after restart) | Done (19-11-2026) |
 | Mute tab, click the speaker icon to mute / unmute | Done (19-11-2026) |
-| Tab groups | Missing |
+| Tab groups | Done 19-11-2026 (tab menu: Add tab to new group / to an existing group / Remove from group; coloured chip with the name before the group and a line under its tabs; chip click collapses / expands (the selected tab never hides); chip menu: Name group, Chrome's nine colours, New tab in group, Collapse, Ungroup, Close group; dragging keeps groups together; saved with the session. Tested: grouping in place, next colour, collapse, restore after restart, removal. Chip dragging of whole groups and Move group to new window: not yet) |
 | New window (Ctrl+N), close window (Ctrl+Shift+W), Exit, multiple windows in one process (one engine) | Done 19-11-2026: new windows open offset from the last one; Exit keeps every window's tabs, closing windows one by one keeps the last one's (like Chrome); restart brings all windows back |
 | Move a tab between windows (it keeps its page and state), drag a tab out of the tab row into its own window (follows the mouse), drop it on another window's tab row | Done 19-11-2026 (move / merge tested with the page state kept; the mouse drag itself not tried by me: needs the real mouse) |
 | One running GBrowser: a second start hands its addresses (links, files) to the running one as tabs; no address = a new window | Done 19-11-2026 |

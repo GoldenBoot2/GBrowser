@@ -18,6 +18,7 @@ namespace GBrowser
         public Image Favicon;
         public bool ApplyingZoom;   // GBrowser is setting the site's saved zoom (not the user zooming)
         public bool Loading, Sleeping, PlayingAudio;
+        public string Group;          // tab group ID (TabStrip.Groups), null = not in a group
         public bool Pinned;           // narrow tab with only its icon, kept at the left (like Chrome)
         public bool Muted;            // the tab's sound is off (engine IsMuted)
         public bool FindOpen;         // this tab's find bar is open (each tab keeps its own, like Chrome)

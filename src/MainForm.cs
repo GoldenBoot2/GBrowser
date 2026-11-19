@@ -112,6 +112,8 @@ namespace GBrowser
             strip.NewTabClicked += () => NewTab(null);
             strip.TabSearchClicked += ShowTabSearch;
             strip.TabMenu += ShowTabMenu;
+            strip.GroupToggled += ToggleGroup;
+            strip.GroupMenu += ShowGroupMenu;
             strip.TabMuteClicked += i => SetMuted(Tabs[i], !Tabs[i].Muted);
             strip.TabDraggedOut += (i, pt) => MoveTabToNewWindow(i, pt, true);
             ResizeEnd += (s, e) => DropDraggedWindow();
@@ -120,6 +122,10 @@ namespace GBrowser
             {
                 if (Tabs[from].Pinned != Tabs[to].Pinned) return;   // pinned and normal tabs keep their own block
                 var t = Tabs[from]; Tabs.RemoveAt(from); Tabs.Insert(to, t);
+                string lg = to > 0 ? Tabs[to - 1].Group : null, rg = to + 1 < Tabs.Count ? Tabs[to + 1].Group : null;
+                if (lg != null && lg == rg) t.Group = lg;
+                else if (t.Group != null && t.Group != lg && t.Group != rg) t.Group = null;
+                strip.RefreshTabs();
                 strip.Selected = Tabs.IndexOf(Current == null ? t : Current);
                 if (strip.Selected < 0) strip.Selected = to;
                 strip.Invalidate();
@@ -201,13 +207,17 @@ namespace GBrowser
         /// <summary>This window's part of the session (none when it has only private tabs).</summary>
         internal WindowSession SessionState()
         {
-            var tabs = Tabs.Where(t => !t.Private).Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
+            var kept = Tabs.Where(t => !t.Private && !string.IsNullOrEmpty(t.Created ? t.View.CoreWebView2.Source : t.Url)).ToList();
+            var tabs = kept.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).ToList();
             if (tabs.Count == 0) return null;
+            var groupIds = kept.Select(t => t.Group != null && strip.Groups.ContainsKey(t.Group) ? t.Group : "").ToList();
             var b = WindowState == FormWindowState.Normal && !fullscreen ? Bounds : RestoreBounds;
             return new WindowSession
             {
                 Tabs = tabs, Index = Math.Max(0, Math.Min(strip.Selected, tabs.Count - 1)), Pinned = Tabs.TakeWhile(t => t.Pinned).Count(t => !t.Private),
-                X = b.X, Y = b.Y, W = b.Width, H = b.Height, Max = WindowState == FormWindowState.Maximized || fullscreen
+                X = b.X, Y = b.Y, W = b.Width, H = b.Height, Max = WindowState == FormWindowState.Maximized || fullscreen,
+                TabGroups = groupIds.Any(x => x.Length > 0) ? groupIds : null,
+                Groups = groupIds.Any(x => x.Length > 0) ? strip.Groups.Where(kv => groupIds.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value) : null,
             };
         }
 
@@ -481,6 +491,16 @@ namespace GBrowser
             m.AddSeparator();
             m.Add("Reload", IconData.Refresh, "Ctrl+R", () => { if (t.Created) t.View.CoreWebView2.Reload(); else Select(Tabs.IndexOf(t)); });
             m.Add("Duplicate", IconData.Duplicate, null, () => DuplicateTab(t)).Enabled = !string.IsNullOrEmpty(t.Created ? t.View.CoreWebView2.Source : t.Url);
+            if (!t.Pinned)
+            {
+                m.Add("Add tab to new group", IconData.Add, null, () => AddToGroup(t, null));
+                foreach (var kv in strip.Groups.Where(kv => kv.Key != t.Group).Take(6).ToList())
+                {
+                    var gid = kv.Key;
+                    m.Add("Add to " + (string.IsNullOrEmpty(kv.Value.Name) ? TabStrip.GroupColorNames[kv.Value.Color].ToLowerInvariant() + " group" : "\u201c" + kv.Value.Name + "\u201d"), IconData.Tab, null, () => AddToGroup(t, gid));
+                }
+                if (t.Group != null) m.Add("Remove from group", IconData.Close, null, () => { t.Group = null; MoveOutOfGroups(t); strip.RefreshTabs(); });
+            }
             m.Add(t.Pinned ? "Unpin" : "Pin", t.Pinned ? IconData.Unpin : IconData.Pin, null, () => SetPinned(t, !t.Pinned));
             m.Add(t.Muted ? "Unmute tab" : "Mute tab", t.Muted ? IconData.Volume : IconData.VolumeOff, null, () => SetMuted(t, !t.Muted));
             m.Add("Move tab to new window", IconData.TabMove, null, () => MoveTabToNewWindow(Tabs.IndexOf(t), null, false)).Enabled = Tabs.Count > 1;
@@ -502,6 +522,92 @@ namespace GBrowser
             m.ShowAt(strip, new Rectangle(p.X, p.Y, 1, 1), false, null);
         }
 
+        // ---------- tab groups (like Chrome's) ----------
+
+        /// <summary>Adds the tab to a group (gid null = a new one with the next colour); the tab moves next to the
+        /// group's other tabs, so a group's tabs always stay together.</summary>
+        void AddToGroup(BrowserTab t, string gid)
+        {
+            var cur = Current;
+            if (gid == null)
+            {
+                // a new group starts where the tab is (out of any group it was in: right after that group)
+                gid = Guid.NewGuid().ToString("N").Substring(0, 8);
+                int color = Enumerable.Range(0, 9).FirstOrDefault(c => !strip.Groups.Values.Any(x => x.Color == c));
+                strip.Groups[gid] = new TabGroup { Color = color };
+                string oldGroup = t.Group;
+                t.Group = null;
+                if (oldGroup != null) MoveOutOfGroups(t);
+                t.Group = gid;
+            }
+            else
+            {
+                Tabs.Remove(t);
+                t.Group = gid;
+                Tabs.Insert(Tabs.FindLastIndex(x => x.Group == gid) + 1, t);
+            }
+            strip.Selected = Tabs.IndexOf(cur);
+            strip.RefreshTabs();
+            if (strip.Groups[gid].Name.Length == 0 && Tabs.Count(x => x.Group == gid) == 1) BeginInvoke((Action)(() => ShowGroupMenu(gid, Cursor.Position)));
+        }
+
+        /// <summary>A tab taken out of its group goes right after the group (the group stays together).</summary>
+        void MoveOutOfGroups(BrowserTab t)
+        {
+            int i = Tabs.IndexOf(t);
+            string lg = i > 0 ? Tabs[i - 1].Group : null;
+            if (lg == null) return;
+            var cur = Current;
+            Tabs.Remove(t);
+            int last = Tabs.FindLastIndex(x => x.Group == lg);
+            Tabs.Insert(last + 1, t);
+            strip.Selected = Tabs.IndexOf(cur);
+        }
+
+        /// <summary>Chip click: collapse / expand. The selected tab never hides: another tab is selected first.</summary>
+        void ToggleGroup(string gid)
+        {
+            if (!strip.Groups.TryGetValue(gid, out var g)) return;
+            if (!g.Collapsed && Current?.Group == gid)
+            {
+                int other = Tabs.FindIndex(x => x.Group != gid && (x.Group == null || !strip.Groups[x.Group].Collapsed));
+                if (other < 0) return;   // nothing else to show
+                g.Collapsed = true;
+                Select(other);
+            }
+            else g.Collapsed = !g.Collapsed;
+            strip.RefreshTabs();
+        }
+
+        void ShowGroupMenu(string gid, Point screen)
+        {
+            if (!strip.Groups.TryGetValue(gid, out var g)) return;
+            var m = NewMenu();
+            m.AddHeader(string.IsNullOrEmpty(g.Name) ? "Tab group" : g.Name, IconData.Tab);
+            m.Add("Name group...", IconData.Edit, null, () =>
+            {
+                if (MaterialDialog.Edit(this, "Name group", new Tuple<string, string>[0], new[] { Tuple.Create("Name", g.Name ?? "", (string[])null) },
+                        out var vals, "Save", null, "Cancel") == 1)
+                { g.Name = (vals[0] ?? "").Trim(); strip.RefreshTabs(); }
+            });
+            for (int c = 0; c < TabStrip.GroupColorNames.Length; c++)
+            {
+                int cc = c;
+                m.AddToggle(TabStrip.GroupColorNames[c], g.Color == c, true, () => { g.Color = cc; strip.RefreshTabs(); });
+            }
+            m.AddSeparator();
+            m.Add("New tab in group", IconData.Add, null, () =>
+            {
+                NewTab(null, true, Tabs.FindLastIndex(x => x.Group == gid) + 1);
+                if (Current != null) { Current.Group = gid; g.Collapsed = false; strip.RefreshTabs(); }
+            });
+            m.Add(g.Collapsed ? "Expand group" : "Collapse group", IconData.ExpandMore, null, () => ToggleGroup(gid));
+            m.Add("Ungroup", IconData.Close, null, () => { foreach (var x in Tabs.Where(x => x.Group == gid)) x.Group = null; strip.RefreshTabs(); });
+            m.Add("Close group", IconData.Delete, null, () => { foreach (var x in Tabs.Where(x => x.Group == gid).ToList()) CloseTab(Tabs.IndexOf(x)); });
+            var p = strip.PointToClient(screen);
+            m.ShowAt(strip, new Rectangle(p.X, p.Y, 1, 1), false, null);
+        }
+
         void DuplicateTab(BrowserTab t)
         {
             string url = t.Created ? t.View.CoreWebView2.Source : t.Url;
@@ -515,6 +621,7 @@ namespace GBrowser
             var cur = Current;
             Tabs.Remove(t);
             t.Pinned = pin;
+            if (pin) t.Group = null;
             int at = Tabs.TakeWhile(x => x.Pinned).Count();
             Tabs.Insert(at, t);
             strip.Selected = Tabs.IndexOf(cur);
@@ -683,6 +790,13 @@ namespace GBrowser
             if (restore)
             {
                 foreach (var u in restoreWs.Tabs) Tabs.Add(new BrowserTab(u, TitleFor(u)) { Pinned = Tabs.Count < restoreWs.Pinned });
+                // tab groups of the session
+                if (restoreWs.Groups != null && restoreWs.TabGroups != null && restoreWs.TabGroups.Count == restoreWs.Tabs.Count)
+                {
+                    foreach (var kv in restoreWs.Groups) if (kv.Value != null) strip.Groups[kv.Key] = kv.Value;
+                    for (int k = 0; k < Tabs.Count; k++)
+                        if (!Tabs[k].Pinned && restoreWs.TabGroups[k].Length > 0 && strip.Groups.ContainsKey(restoreWs.TabGroups[k])) Tabs[k].Group = restoreWs.TabGroups[k];
+                }
                 int sel = Math.Max(0, Math.Min(restoreWs.Index, Tabs.Count - 1));
                 if (args.Count == 0) Select(sel);
             }
@@ -762,6 +876,7 @@ namespace GBrowser
         void Select(int i)
         {
             if (i < 0 || i >= Tabs.Count) return;
+            if (Tabs[i].Group != null && strip.Groups.TryGetValue(Tabs[i].Group, out var tg) && tg.Collapsed) { tg.Collapsed = false; strip.Invalidate(); }
             omni?.Close();
             var old = Current;
             var t = Tabs[i];
@@ -853,6 +968,7 @@ namespace GBrowser
         {
             int i = Tabs.IndexOf(t);
             if (i < 0) return;
+            t.Group = null;   // groups belong to their window
             bool wasSel = i == strip.Selected;
             devDock.CloseFor(t);
             if (t.FindOpen) { try { t.View?.CoreWebView2?.Find.Stop(); } catch { } t.FindOpen = false; findBar.Visible = false; }
@@ -3147,6 +3263,10 @@ namespace GBrowser
                     await Task.Delay(300);
                     return "text=" + toolbar.Address.Text + " | " + omni.Describe();
                 case "lastmenu": return PageMenu.LastEngineItems;
+                case "groups":
+                    return string.Join(" | ", Tabs.Select(x => (x.Title ?? "?").Split(' ')[0] + (x.Group != null ? "[" + (strip.Groups.TryGetValue(x.Group, out var gg) ? gg.Name + "/" + TabStrip.GroupColorNames[gg.Color] + (gg.Collapsed ? "/collapsed" : "") : "?") + "]" : "")))
+                        + " || selected=" + strip.Selected;
+                case "grouptoggle": if (strip.Groups.Count > 0) ToggleGroup(strip.Groups.Keys.First()); await Task.Delay(200); return "ok";
                 case "hovercard":
                     strip.TestCard(int.Parse(arg));
                     await Task.Delay(300);

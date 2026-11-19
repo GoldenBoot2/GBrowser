@@ -216,6 +216,8 @@ namespace GBrowser
         public int W { get; set; } = 1200;
         public int H { get; set; } = 800;
         public bool Max { get; set; }
+        public List<string> TabGroups { get; set; }                     // per saved tab: its group ID or ""
+        public Dictionary<string, TabGroup> Groups { get; set; }        // the window's tab groups
     }
 
     public class Bookmark

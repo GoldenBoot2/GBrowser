@@ -24,6 +24,10 @@ namespace GBrowser
         public event Action<int, Point> TabMenu;       // right-click on a tab (screen point)
         public event Action<int> TabMuteClicked;       // the speaker icon on a tab
         public event Action<int, Point> TabDraggedOut; // a tab pulled out of the tab row (screen point)
+        // tab groups (like Chrome's): a coloured chip with the group's name before its tabs; click = collapse / expand
+        public Dictionary<string, TabGroup> Groups = new Dictionary<string, TabGroup>();
+        public event Action<string> GroupToggled;
+        public event Action<string, Point> GroupMenu;  // right-click on a group's chip (screen point)
 
         /// <summary>Window state for the caption buttons (set by the window).</summary>
         public bool WindowMaximized;
@@ -88,15 +92,77 @@ namespace GBrowser
 
         Rectangle TabRect(int i)
         {
-            // pinned tabs (always first) are narrow; the others share the rest of the row
+            var l = Layout();
+            return i >= 0 && i < l.Item1.Length ? l.Item1[i] : Rectangle.Empty;
+        }
+
+        /// <summary>Tab rectangles (empty = in a collapsed group) and the group chips, left to right. Pinned tabs are
+        /// narrow at the left; the others share the rest of the row with the chips of their groups.</summary>
+        Tuple<Rectangle[], List<Tuple<string, Rectangle>>> Layout()
+        {
+            var rects = new Rectangle[Tabs.Count];
+            var chips = new List<Tuple<string, Rectangle>>();
             int left = SearchRect.Right + S(6), plus = S(44);
             int pinned = Tabs.Count(t => t.Pinned);
-            if (i < pinned) return new Rectangle(left + i * PinnedW, TopPad, PinnedW, Height - TopPad);
+            for (int i = 0; i < pinned; i++) rects[i] = new Rectangle(left + i * PinnedW, TopPad, PinnedW, Height - TopPad);
             left += pinned * PinnedW;
-            int avail = Width - left - plus - 3 * CaptionWidth - S(8);
-            int n = Math.Max(1, Tabs.Count - pinned);
-            int w = Math.Min(S(240), Math.Max(S(56), avail / n));
-            return new Rectangle(left + (i - pinned) * w, TopPad, w, Height - TopPad);
+            // chip widths and the visible tabs
+            var chipW = new Dictionary<string, int>();
+            int chipsTotal = 0, visible = 0;
+            string prev = null;
+            for (int i = pinned; i < Tabs.Count; i++)
+            {
+                string gid = Tabs[i].Group;
+                TabGroup grp = null;
+                if (gid != null && !Groups.TryGetValue(gid, out grp)) gid = null;
+                if (gid != null && gid != prev && !chipW.ContainsKey(gid))
+                {
+                    int w = string.IsNullOrEmpty(grp.Name) ? S(24) : Math.Min(S(160), TextRenderer.MeasureText(grp.Name, ChipFont).Width + S(20));
+                    chipW[gid] = w; chipsTotal += w + S(6);
+                }
+                if (gid == null || !grp.Collapsed) visible++;
+                prev = gid;
+            }
+            int avail = Width - left - plus - 3 * CaptionWidth - S(8) - chipsTotal;
+            int tw = Math.Min(S(240), Math.Max(S(56), avail / Math.Max(1, visible)));
+            int x = left;
+            prev = null;
+            var placed = new HashSet<string>();
+            for (int i = pinned; i < Tabs.Count; i++)
+            {
+                string gid = Tabs[i].Group;
+                TabGroup grp = null;
+                if (gid != null && !Groups.TryGetValue(gid, out grp)) gid = null;
+                if (gid != null && gid != prev && placed.Add(gid))
+                {
+                    int w = chipW[gid];
+                    chips.Add(Tuple.Create(gid, new Rectangle(x + S(3), TopPad + (Height - TopPad - S(24)) / 2 - S(2), w, S(24))));
+                    x += w + S(6);
+                }
+                if (gid != null && grp.Collapsed) rects[i] = Rectangle.Empty;
+                else { rects[i] = new Rectangle(x, TopPad, tw, Height - TopPad); x += tw; }
+                prev = gid;
+            }
+            return Tuple.Create(rects, chips);
+        }
+
+        static readonly Font ChipFont = new Font("Segoe UI Semibold", 9f);
+
+        /// <summary>The group whose chip is at p, or null.</summary>
+        string ChipAt(Point p)
+        {
+            foreach (var c in Layout().Item2) if (c.Item2.Contains(p)) return c.Item1;
+            return null;
+        }
+
+        /// <summary>Chrome's tab group colours (light / dark theme).</summary>
+        public static readonly string[] GroupColorNames = { "Grey", "Blue", "Red", "Yellow", "Green", "Pink", "Purple", "Cyan", "Orange" };
+        static readonly int[] GroupLight = { 0x5F6368, 0x1A73E8, 0xD93025, 0xF9AB00, 0x1E8E3E, 0xD01884, 0xA142F4, 0x007B83, 0xFA903E };
+        static readonly int[] GroupDark = { 0xDADCE0, 0x8AB4F8, 0xF28B82, 0xFDD663, 0x81C995, 0xFF8BCB, 0xC58AF9, 0x78D9EC, 0xFCAD70 };
+        public static Color GroupColor(int c)
+        {
+            int v = (Theme.Dark ? GroupDark : GroupLight)[Math.Max(0, Math.Min(8, c))];
+            return Color.FromArgb((v >> 16) & 255, (v >> 8) & 255, v & 255);
         }
 
         /// <summary>The speaker icon of a tab that plays sound or is muted (click = mute / unmute).</summary>
@@ -121,7 +187,7 @@ namespace GBrowser
 
         /// <summary>Empty tab-row space (drags the window).</summary>
         public bool IsDragArea(Point p) =>
-            CaptionAt(p) < 0 && HitTab(p) < 0 && !PlusRect().Contains(p) && !SearchRect.Contains(p);
+            CaptionAt(p) < 0 && HitTab(p) < 0 && ChipAt(p) == null && !PlusRect().Contains(p) && !SearchRect.Contains(p);
 
         protected override void WndProc(ref Message m)
         {
@@ -139,12 +205,17 @@ namespace GBrowser
 
         Rectangle PlusRect()
         {
-            var last = Tabs.Count > 0 ? TabRect(Tabs.Count - 1) : new Rectangle(S(8), 0, 0, 0);
-            return new Rectangle(last.Right + S(6), S(6) + (Height - S(6) - S(30)) / 2, S(30), S(30));
+            var lay = Layout();
+            int right = SearchRect.Right;
+            foreach (var r in lay.Item1) if (!r.IsEmpty) right = Math.Max(right, r.Right);
+            foreach (var c in lay.Item2) right = Math.Max(right, c.Item2.Right + S(3));
+            return new Rectangle(right + S(6), S(6) + (Height - S(6) - S(30)) / 2, S(30), S(30));
         }
 
         public void RefreshTabs()
         {
+            // a group without tabs is gone (closed, moved away, ungrouped)
+            foreach (var k in Groups.Keys.Where(k => !Tabs.Any(t => t.Group == k)).ToList()) Groups.Remove(k);
             bool anyLoading = Tabs.Exists(t => t.Loading);
             spin.Enabled = anyLoading;
             Invalidate();
@@ -161,6 +232,7 @@ namespace GBrowser
                 {
                     var t = Tabs[i];
                     var r = TabRect(i);
+                    if (r.IsEmpty) continue;   // in a collapsed group
                     bool sel = i == Selected;
                     if (sel)
                     {
@@ -236,6 +308,26 @@ namespace GBrowser
                     }
                 }
             }
+            // group chips and the coloured line under each group's tabs
+            {
+                var lay = Layout();
+                foreach (var c in lay.Item2)
+                {
+                    var grp = Groups[c.Item1];
+                    var col = GroupColor(grp.Color);
+                    var cr = c.Item2;
+                    int lineRight = cr.Right;
+                    for (int i = 0; i < Tabs.Count; i++) if (Tabs[i].Group == c.Item1 && !lay.Item1[i].IsEmpty) lineRight = Math.Max(lineRight, lay.Item1[i].Right - S(4));
+                    using (var b = new SolidBrush(col)) g.FillRectangle(b, cr.X, Height - S(3), lineRight - cr.X, S(3));
+                    using (var path = Theme.Round(cr, S(8))) using (var b = new SolidBrush(col)) g.FillPath(b, path);
+                    if (!string.IsNullOrEmpty(grp.Name))
+                    {
+                        var fg = Theme.Dark ? Color.FromArgb(0x20, 0x21, 0x24) : Color.White;
+                        TextRenderer.DrawText(g, grp.Name, ChipFont, cr, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+                    }
+                    else using (var b = new SolidBrush(Theme.Dark ? Color.FromArgb(0x20, 0x21, 0x24) : Color.White)) g.FillEllipse(b, cr.X + cr.Width / 2 - S(4), cr.Y + cr.Height / 2 - S(4), S(8), S(8));
+                }
+            }
             // tab search (left)
             var sr = SearchRect;
             using (var p = Theme.Round(sr, S(8)))
@@ -266,7 +358,8 @@ namespace GBrowser
 
         int HitTab(Point p)
         {
-            for (int i = 0; i < Tabs.Count; i++) if (TabRect(i).Contains(p)) return i;
+            var l = Layout().Item1;
+            for (int i = 0; i < l.Length; i++) if (!l[i].IsEmpty && l[i].Contains(p)) return i;
             return -1;
         }
 
@@ -275,7 +368,7 @@ namespace GBrowser
         /// <summary>Where a tab dropped at p goes (index between tabs).</summary>
         public int IndexAt(Point p)
         {
-            for (int i = 0; i < Tabs.Count; i++) { var r = TabRect(i); if (p.X < r.X + r.Width / 2) return i; }
+            for (int i = 0; i < Tabs.Count; i++) { var r = TabRect(i); if (!r.IsEmpty && p.X < r.X + r.Width / 2) return i; }
             return Tabs.Count;
         }
 
@@ -334,6 +427,13 @@ namespace GBrowser
         {
             HideCard();
             int h = HitTab(e.Location);
+            string chip = h < 0 ? ChipAt(e.Location) : null;
+            if (chip != null)
+            {
+                if (e.Button == MouseButtons.Left) GroupToggled?.Invoke(chip);
+                else if (e.Button == MouseButtons.Right) GroupMenu?.Invoke(chip, PointToScreen(e.Location));
+                return;
+            }
             if (e.Button == MouseButtons.Left)
             {
                 if (PlusRect().Contains(e.Location)) { pressPlus = true; Invalidate(); return; }
@@ -370,5 +470,16 @@ namespace GBrowser
             if (disposing) { spin.Dispose(); tip.Dispose(); cardTimer.Dispose(); card?.Dispose(); }
             base.Dispose(disposing);
         }
+    }
+}
+
+namespace GBrowser
+{
+    /// <summary>A tab group of a window (name, Chrome colour index 0-8, collapsed).</summary>
+    public class TabGroup
+    {
+        public string Name { get; set; } = "";
+        public int Color { get; set; }
+        public bool Collapsed { get; set; }
     }
 }
