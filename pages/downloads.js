@@ -92,6 +92,8 @@
     const m = el('div', { class: 'menu', role: 'menu' },
       running ? item('OpenNew', 'Open when done', () => act(d.id, 'openwhendone'), !!d.openWhenDone) : null,
       running ? el('div', { class: 'menu-sep' }) : null,
+      d.canAlwaysOpen ? item('OpenNew', 'Always open files of this type', () => act(d.id, 'alwaysopen'), !!d.alwaysOpen) : null,
+      d.canAlwaysOpen ? el('div', { class: 'menu-sep' }) : null,
       item('Public', 'Open link in new tab', () => openUrl(url, { ctrlKey: true })),
       item('Copy', 'Copy link', async () => {
         try { await navigator.clipboard.writeText(url); snack('Link copied'); } catch (err) { snack('Copy failed'); }

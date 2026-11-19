@@ -76,7 +76,7 @@ Last full audit: 19-11-2026.
 | SmartScreen: block shown in GBrowser, Download anyway | Done (19-11-2026) |
 | Show downloads when a download starts (bubble) | Done 19-11-2026 (download button opens a bubble with the 5 most recent downloads and live progress, Show in folder, Full download history; it opens by itself when a download starts and closes after about 6 s unless the pointer is on it; a finished row opens the file; tested) |
 | Warn when closing with downloads running | Done 19-11-2026 (closing the last window or Exit: "Cancel download?" with Keep downloading / Exit; not asked at Windows shutdown; tested both answers with a 1 GB download) |
-| "Always open files of this type" | Missing |
+| "Always open files of this type" | Done 19-11-2026 (a download's menu on the Downloads page; later downloads of that type open when done; programs and scripts (.exe, .msi, .bat, .ps1, .js, .lnk ...) can never be set, like Chrome; Settings > Downloads > Open automatically lists the types with Clear; tested: a .zip opened in the default program by itself) |
 
 ## Ad blocking (AdGuard / uBlock level control)
 | Feature | Status |

@@ -1450,13 +1450,18 @@ namespace GBrowser
                 // read once: every read of e.DownloadOperation returns a new wrapper object
                 var op = e.DownloadOperation;
                 var fast = await FastDownload.TryTakeOver(op, path, referer, core.CookieManager);
-                if (fast != null) { e.Cancel = true; fast.Item.ReplaceTarget = replace; }   // GBrowser downloads it in parts
+                Downloads.Item tracked;
+                if (fast != null) { e.Cancel = true; fast.Item.ReplaceTarget = replace; tracked = fast.Item; }   // GBrowser downloads it in parts
                 else
                 {
                     var it = Downloads.Track(op, path);
                     it.ReplaceTarget = replace;
                     it.Core = core;
+                    tracked = it;
                 }
+                // "Always open files of this type"
+                string autoType = Downloads.AutoOpenType(path);
+                if (autoType != null && Store.Settings.AutoOpenTypes.Contains(autoType)) tracked.OpenWhenDone = true;
                 downloadsSeen = true;
                 OnDownloadsChanged();
                 ShowDownloadBubble(true);   // like Chrome: the bubble opens when a download starts
@@ -2396,7 +2401,12 @@ namespace GBrowser
                         { "replaces", d.ReplaceTarget != null ? Path.GetFileName(d.ReplaceTarget) : "" },
                         { "speed", d.Fast != null ? d.Fast.Speed : d.State == "in_progress" ? d.EngineSpeed : 0 }, { "connections", d.Fast != null ? d.Fast.Connections : 0 },
                         { "segments", d.Fast != null ? d.Fast.Segments() : null }, { "durationMs", d.DurationMs }, { "openWhenDone", d.OpenWhenDone },
-                        { "limited", d.Engine == "multi" && st.DownloadSpeedLimit > 0 } }).ToList();
+                        { "limited", d.Engine == "multi" && st.DownloadSpeedLimit > 0 },
+                        { "canAlwaysOpen", Downloads.AutoOpenType(d.Path) != null },
+                        { "alwaysOpen", Downloads.AutoOpenType(d.Path) is string at && st.AutoOpenTypes.Contains(at) } }).ToList();
+                case "downloads.autoOpen":
+                    if (m.ContainsKey("clear")) { st.AutoOpenTypes.Clear(); Store.SaveSettings(); }
+                    return st.AutoOpenTypes.ToList();
                 case "downloads.folder":
                     return new Dictionary<string, object> { { "path", DownloadFolder() }, { "custom", !string.IsNullOrEmpty(st.DownloadFolder) } };
                 case "downloads.pick":
@@ -2420,6 +2430,14 @@ namespace GBrowser
                         case "folder": if (File.Exists(d.Path)) Process.Start("explorer.exe", "/select,\"" + d.Path + "\""); break;
                         case "cancel": case "pause": case "resume": case "retry": case "anyway": DownloadAction(d, Str(m, "action")); break;
                         case "openwhendone": d.OpenWhenDone = !d.OpenWhenDone; Downloads.Save(); break;
+                        case "alwaysopen":
+                        {
+                            string ty = Downloads.AutoOpenType(d.Path);
+                            if (ty == null) break;
+                            if (!st.AutoOpenTypes.Remove(ty)) st.AutoOpenTypes.Add(ty);
+                            Store.SaveSettings();
+                            break;
+                        }
                         case "remove": Downloads.All.Remove(d); Downloads.Save(); break;
                     }
                     return null;

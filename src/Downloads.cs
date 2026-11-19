@@ -172,5 +172,23 @@ namespace GBrowser
         }
 
         public static Item Find(int id) => All.FirstOrDefault(i => i.Id == id);
+
+        /// <summary>The file type for "Always open files of this type" (".pdf"), or null when it may not be opened by
+        /// itself: like Chrome, programs and scripts never open automatically.</summary>
+        public static string AutoOpenType(string path)
+        {
+            string ext = System.IO.Path.GetExtension(path ?? "").ToLowerInvariant();
+            if (ext.Length < 2) return null;
+            switch (ext)
+            {
+                case ".exe": case ".msi": case ".msix": case ".msixbundle": case ".appx": case ".appxbundle": case ".bat": case ".cmd":
+                case ".com": case ".scr": case ".pif": case ".cpl": case ".dll": case ".sys": case ".ps1": case ".psm1": case ".vbs":
+                case ".vbe": case ".js": case ".jse": case ".wsf": case ".wsh": case ".hta": case ".jar": case ".lnk": case ".url":
+                case ".reg": case ".inf": case ".scf": case ".msc": case ".application": case ".gadget": case ".iso": case ".img":
+                case ".vhd": case ".vhdx": case ".appref-ms": case ".settingcontent-ms": case ".library-ms":
+                    return null;
+            }
+            return ext;
+        }
     }
 }
