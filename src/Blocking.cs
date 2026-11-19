@@ -763,7 +763,7 @@ namespace GBrowser
         public bool css(string doc, string href, bool top, string css) => b.QueueCss(doc, href, top, css);
         public bool cssok(string doc) => b.CssOk(doc);
         public bool dnt() => S.DoNotTrack;
-        public string p(string href) => "";   // privacy masking: WebView2 already is Edge, its values are genuine
+        public string p(string href) => Identity.PageConfig(href);   // Hide my identity (Identity.cs)
 
         public string keys(string href, string keys)
         {

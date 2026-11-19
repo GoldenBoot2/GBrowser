@@ -676,7 +676,8 @@ namespace GBrowser
             if (Tabs.Count == 0) NewTab(null);
             strip.RefreshTabs();
             // load extensions once at start so their background scripts run (profile is shared by all tabs)
-            if (isFirst) { CustomLists.Start(); HostUpdates.Start(); }   // your rules + custom lists; daily host lists
+            if (isFirst) { CustomLists.Start(); HostUpdates.Start(); }
+            if (isFirst && st.HideIdentity && st.IdentityEachStart) Identity.NewSeed();   // a new identity each start   // your rules + custom lists; daily host lists
             await LoadExtensionsOnce();
         }
 
@@ -770,6 +771,18 @@ namespace GBrowser
 #else
         internal const string DefaultRoot = "Software";
 #endif
+
+        // ---------- Hide my identity ----------
+
+        async void NewIdentity()
+        {
+            if (!MaterialDialog.AskWithCheck(this, "New identity?", new[] { Tuple.Create(IconData.Person,
+                    "Sites see a new browser: what they stored about this one (site storage, caches, tracking cookies) is cleared and tracking IDs change.") },
+                    "Also sign out of all sites", out bool signOut, "New identity")) return;
+            var core = AnyCore;
+            await Identity.New(core, signOut);
+            if (Current?.Created == true) Current.View.CoreWebView2.Reload();
+        }
 
         // ---------- element picker ----------
 
@@ -1804,6 +1817,7 @@ namespace GBrowser
             m.AddNote("Total blocked: " + st.TotalBlocked.ToString("N0"));
             if (site != null && st.AdblockEnabled) m.Add("Hide an element on this page", IconData.Block, null, () => PickElement(null));
             if (t != null) m.Add("Request log", IconData.Find, null, () => NewTab(Pages.Url("log") + "?tab=" + t.Id));
+            if (st.HideIdentity) m.Add("New identity", IconData.Person, "Identity " + Identity.Id, () => NewIdentity());
             m.Add("Blocking tests", IconData.Verified, null, () => OpenPage("tests"));
             m.Add("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings"));
             m.ShowAt(toolbar, toolbar.ButtonRect("shield"), true, "shield");
@@ -2157,6 +2171,9 @@ namespace GBrowser
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
                         case "HostListUpdates": st.HostListUpdates = v is bool hu && hu; break;
+                        case "HideIdentity": st.HideIdentity = v is bool hi && hi; if (st.HideIdentity && st.IdentitySeed == 0) Identity.NewSeed(); break;
+                        case "IdentityNoise": st.IdentityNoise = v is bool inz && inz; break;
+                        case "IdentityEachStart": st.IdentityEachStart = v is bool ies && ies; break;
                         case "AskWhereToSave": st.AskWhereToSave = v is bool aw && aw; break;
                         case "SearchSuggestions": st.SearchSuggestions = v is bool ss && ss; break;
                         case "DownloadConnections": st.DownloadConnections = Math.Max(1, Math.Min(16, Convert.ToInt32(v))); break;
@@ -2503,6 +2520,11 @@ namespace GBrowser
                 case "hosts.state":
                     return new Dictionary<string, object> { { "on", st.HostListUpdates }, { "state", HostUpdates.State },
                         { "updated", st.HostListsUpdated }, { "hosts", FilterEngine.ExtraHostCount } };
+                case "identity.get":
+                    return new Dictionary<string, object> { { "on", st.HideIdentity }, { "noise", st.IdentityNoise }, { "eachStart", st.IdentityEachStart }, { "id", Identity.Id } };
+                case "identity.new":
+                    await Identity.New(tab.View.CoreWebView2, m.TryGetValue("signOut", out var so) && so is bool sob && sob);
+                    return Identity.Id;
                 case "stats.reset": st.TotalBlocked = 0; Store.SaveSettings(); return null;
                 case "lists.set":
                 {

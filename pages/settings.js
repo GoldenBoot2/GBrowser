@@ -316,6 +316,21 @@
   drawPerms();
   main.append(permCard);
 
+  // Hide my identity
+  const idi = await gb.send('identity.get');
+  const idSub = el('div', { class: 'sub', text: 'Identity ' + idi.id });
+  const newId = el('button', { class: 'btn tonal', text: 'New identity' });
+  newId.addEventListener('click', async () => {
+    const out = confirm('New identity: clear what sites stored about this browser (site storage, caches, tracking cookies)? You stay signed in.');
+    if (!out) return;
+    const id = await gb.send('identity.new', { signOut: false });
+    idSub.textContent = 'Identity ' + id; snack('New identity');
+  });
+  const idRow = row('Person', 'Hide my identity', 'Sites cannot recognise you again or link your visits: tracking IDs change, nothing local is handed out. GBrowser stays a genuine Microsoft Edge.', sw('HideIdentity'));
+  main.append(el('div', { class: 'card', id: 'identity' }, el('h2', { text: 'Hide my identity' }), idRow,
+    row('Restore', 'New identity each start', null, sw('IdentityEachStart')),
+    row('Palette', 'Canvas, WebGL and audio noise', 'Stable per site and identity; some fingerprint test sites can notice it', sw('IdentityNoise')),
+    el('div', { class: 'row' }, el('div', { class: 'text' }, idSub, el('div', { class: 'sub', text: 'The IP address stays the same (that needs a VPN).' })), newId)));
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Privacy and security' }),
     row('Lock', 'Always use secure connections', 'Opens sites over HTTPS; warns before an insecure site', sw('HttpsFirst')),
     row('ShieldLock', 'Dangerous site and download protection', 'Microsoft Defender SmartScreen', sw('SmartScreen')),

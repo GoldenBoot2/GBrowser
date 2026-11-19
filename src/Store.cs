@@ -178,7 +178,12 @@ namespace GBrowser
         public bool BlockThirdPartyCookies { get; set; } = false;
         public string UaOverride { get; set; }          // genuine Edge client hints for pages (UaOverride.cs), measured once
         public string UaOverrideVersion { get; set; }   // engine version they were measured on
-        public bool HostListUpdates { get; set; } = true;       // host lists downloaded again each day
+        public bool HostListUpdates { get; set; } = true;
+        public bool HideIdentity { get; set; } = false;          // sites cannot link visits (see Identity.cs)
+        public bool IdentityNoise { get; set; } = false;         // canvas / WebGL / audio noise (detectors may notice it)
+        public bool IdentityEachStart { get; set; } = true;      // a new identity at every start
+        public long IdentitySeed { get; set; }
+        public long IdentityStart { get; set; }       // host lists downloaded again each day
         public long HostListsUpdated { get; set; }   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
         public List<WindowSession> Windows { get; set; } = new List<WindowSession>();

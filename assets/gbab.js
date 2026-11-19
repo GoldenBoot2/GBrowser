@@ -967,7 +967,8 @@
       }
     }
     var NP = window.Navigator && Navigator.prototype;
-    if (NP && DBG.indexOf('m') < 0) {
+    // the Android app's WebView-to-Chrome fixes; GBrowser is Edge already (cfg.desktop)
+    if (NP && !cfg.desktop && DBG.indexOf('m') < 0) {
       getterOn(NP, 'hardwareConcurrency', 8);
       getterOn(NP, 'deviceMemory', 8);
       // Chrome on arm64 phones says "Linux armv81"; WebView says "Linux aarch64"
@@ -986,9 +987,11 @@
         return langs;
       });
     }
-    chromeLike(window, cfg);
-    realmHooks.push(function (w) { chromeLike(w, cfg); });
-    if (window.NetworkInformation && DBG.indexOf('i') < 0) {
+    if (!cfg.desktop) {
+      chromeLike(window, cfg);
+      realmHooks.push(function (w) { chromeLike(w, cfg); });
+    }
+    if (window.NetworkInformation && !cfg.desktop && DBG.indexOf('i') < 0) {
       var NI = NetworkInformation.prototype;
       getterOn(NI, 'effectiveType', '4g');
       getterOn(NI, 'rtt', 50);
@@ -999,10 +1002,12 @@
       getterOn(NI, 'downlinkMax', Infinity);
     }
     batteryMask();
-    speechMask(window);
-    realmHooks.push(speechMask);
+    if (!cfg.desktop) {
+      speechMask(window);
+      realmHooks.push(speechMask);
+    }
     // client hints from JS: Chrome brands, no phone model, generic Android version
-    if (window.NavigatorUAData && DBG.indexOf('u') < 0) {
+    if (window.NavigatorUAData && !cfg.desktop && DBG.indexOf('u') < 0) {
       var UD = NavigatorUAData.prototype;
       var fix = function (list) {
         return (list || []).map(function (b) {
@@ -1012,7 +1017,7 @@
       getterOn(UD, 'brands', function (g) { return fix(g.call(this)); });
       methodOn(UD, 'getHighEntropyValues', function (f) {
         return {getHighEntropyValues(hints) {
-          return f.apply(this, arguments).then(function (v) {
+          return nat(f, this, arguments).then(function (v) {
             if (v.brands) v.brands = fix(v.brands);
             if (v.fullVersionList) v.fullVersionList = fix(v.fullVersionList);
             return v;
@@ -1039,19 +1044,19 @@
     if (CP && C2 && cfg.cn && DBG.indexOf('v') < 0) {
       methodOn(CP, 'toDataURL', function (f) {
         return {toDataURL() {
-          try { var c = noisyCopy(this); if (c) return f.apply(c, arguments); } catch (e) {}
-          return f.apply(this, arguments);
+          try { var c = noisyCopy(this); if (c) return nat(f, c, arguments); } catch (e) {}
+          return nat(f, this, arguments);
         }}.toDataURL;
       });
       methodOn(CP, 'toBlob', function (f) {
         return {toBlob() {
-          try { var c = noisyCopy(this); if (c) return f.apply(c, arguments); } catch (e) {}
-          return f.apply(this, arguments);
+          try { var c = noisyCopy(this); if (c) return nat(f, c, arguments); } catch (e) {}
+          return nat(f, this, arguments);
         }}.toBlob;
       });
       methodOn(C2, 'getImageData', function (f) {
         return {getImageData() {
-          var img = f.apply(this, arguments);
+          var img = nat(f, this, arguments);
           try { if (img.data.length <= 4194304) noisePixels(img.data); } catch (e) {}
           return img;
         }}.getImageData;
@@ -1063,7 +1068,7 @@
       if (!G || !cfg.cn || DBG.indexOf('g') >= 0) return;
       methodOn(G.prototype, 'readPixels', function (f) {
         return {readPixels() {
-          var r = f.apply(this, arguments);
+          var r = nat(f, this, arguments);
           try { var px = arguments[6]; if (px && px.length <= 4194304) noisePixels(px); } catch (e) {}
           return r;
         }}.readPixels;
@@ -1077,7 +1082,7 @@
         if (!OAC) return;
         methodOn(OAC.prototype, 'startRendering', function (f) {
           return {startRendering() {
-            var p = f.apply(this, arguments);
+            var p = nat(f, this, arguments);
             return p && p.then ? p.then(function (b) { try { rendered.add(b); } catch (e) {} return b; }) : p;
           }}.startRendering;
         });
@@ -1098,12 +1103,12 @@
       methodOn(AudioBuffer.prototype, 'copyFromChannel', function (f) {
         return {copyFromChannel(dest, ch) {
           try { if (rendered.has(this)) this.getChannelData(ch); } catch (e) {}
-          return f.apply(this, arguments);
+          return nat(f, this, arguments);
         }}.copyFromChannel;
       });
       methodOn(AudioBuffer.prototype, 'getChannelData', function (f) {
         return {getChannelData() {
-          var d = f.apply(this, arguments);
+          var d = nat(f, this, arguments);
           try {
             if (rendered.has(this) && !done.has(d)) {
               done.add(d);
@@ -1122,7 +1127,7 @@
     if (window.AnalyserNode && DBG.indexOf('a') < 0) {
       methodOn(AnalyserNode.prototype, 'getFloatFrequencyData', function (f) {
         return {getFloatFrequencyData(a) {
-          var r0 = f.apply(this, arguments);
+          var r0 = nat(f, this, arguments);
           try { var r = rng(base ^ 0x27d4eb2d); for (var i = 0; i < a.length; i += 7) a[i] += (r() - 0.5) * 1e-4; } catch (e) {}
           return r0;
         }}.getFloatFrequencyData;
@@ -1292,14 +1297,14 @@
     if (window.Storage) {
       methodOn(Storage.prototype, 'getItem', function (f) {
         return {getItem(k) {
-          var v = f.apply(this, arguments);
+          var v = nat(f, this, arguments);
           return v != null && TRACK.test(String(k)) ? mask(String(k), String(v)) : v;
         }}.getItem;
       });
       methodOn(Storage.prototype, 'setItem', function (f) {
         return {setItem(k, v) {
           if (TRACK.test(String(k))) return f.call(this, k, mask(String(k), String(v)));
-          return f.apply(this, arguments);
+          return nat(f, this, arguments);
         }}.setItem;
       });
     }
