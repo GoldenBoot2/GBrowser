@@ -30,7 +30,7 @@ Last full audit: 19-11-2026.
 | Move a tab between windows (it keeps its page and state), drag a tab out of the tab row into its own window (follows the mouse), drop it on another window's tab row | Done 19-11-2026 (move / merge tested with the page state kept; the mouse drag itself not tried by me: needs the real mouse) |
 | One running GBrowser: a second start hands its addresses (links, files) to the running one as tabs; no address = a new window | Done 19-11-2026 |
 | Crashed tab page with Reload (keeps address and title), "Page unresponsive" Wait / Exit page, restart with tabs restored when the engine stops | Done (19-11-2026) |
-| Tab hover card (title + site) | Missing |
+| Tab hover card (title + site) | Done 19-11-2026 (Material card under the tab after 0.5 s: title in up to two lines, site, notes: private, sleeping, camera / mic, muted / playing sound, blocked count; follows the pointer from tab to tab once shown, never takes focus or clicks; checked by screenshot through a test command, real mouse timing for the user to try) |
 | Tabs not loaded yet show the site's remembered icon | Done (19-11-2026) |
 
 ## Address bar (omnibox)

@@ -36,12 +36,41 @@ namespace GBrowser
         readonly Timer spin = new Timer { Interval = 50 };
         float spinAngle;
         readonly ToolTip tip = new ToolTip();
+        // Chrome's tab hover card (title, site, notes) instead of a tooltip for the tab itself
+        HoverCard card;
+        readonly Timer cardTimer = new Timer { Interval = 500 };
+        int cardTab = -1;
+
+        void ShowCard(int i)
+        {
+            if (i < 0 || i >= Tabs.Count || FindForm() == null) { HideCard(); return; }
+            if (card == null || card.IsDisposed) card = new HoverCard();
+            cardTab = i;
+            card.ShowFor(FindForm(), Tabs[i], RectangleToScreen(TabRect(i)));
+        }
+
+#if AUTOMATION
+        public void TestCard(int i) { if (i < 0) HideCard(); else ShowCard(i); }
+        public IntPtr CardHandle => card != null && !card.IsDisposed && card.Visible ? card.Handle : IntPtr.Zero;
+#endif
+        void HideCard()
+        {
+            cardTimer.Stop();
+            cardTab = -1;
+            if (card != null && !card.IsDisposed && card.Visible) card.Hide();
+        }
         string tipText;
 
         public TabStrip()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.SurfaceContainerHigh;
+            cardTimer.Tick += (o, e) =>
+            {
+                cardTimer.Stop();
+                // still resting on that tab, with the window active (no card over other apps)
+                if (cardTab >= 0 && cardTab == hover && Form.ActiveForm == FindForm()) ShowCard(cardTab);
+            };
             spin.Tick += (s, e) => { spinAngle = (spinAngle + 30) % 360; Invalidate(); };
         }
 
@@ -285,18 +314,25 @@ namespace GBrowser
                 hover = h; hoverClose = hc; hoverPlus = hp; hoverSearch = hs;
                 Invalidate();
                 string text = hs ? "Search tabs (Ctrl+Shift+A)" : hp ? "New tab (Ctrl+T)" : hc ? "Close tab (Ctrl+W)" :
-                    ha ? (Tabs[h].Muted ? "Unmute tab" : "Mute tab") : h >= 0 ? Tabs[h].TooltipText : null;
+                    ha ? (Tabs[h].Muted ? "Unmute tab" : "Mute tab") : null;
                 if (text != tipText) { tipText = text; tip.SetToolTip(this, text); }
+                // the hover card: after a short rest on a tab; once one shows, it follows the pointer from tab to tab
+                bool onBody = h >= 0 && !hc && !ha;
+                if (!onBody) HideCard();
+                else if (card != null && !card.IsDisposed && card.Visible) { if (h != cardTab) ShowCard(h); }
+                else { cardTab = h; cardTimer.Stop(); cardTimer.Start(); }
             }
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
+            HideCard();
             hover = -1; hoverClose = hoverPlus = hoverSearch = false; Invalidate();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            HideCard();
             int h = HitTab(e.Location);
             if (e.Button == MouseButtons.Left)
             {
@@ -331,7 +367,7 @@ namespace GBrowser
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { spin.Dispose(); tip.Dispose(); }
+            if (disposing) { spin.Dispose(); tip.Dispose(); cardTimer.Dispose(); card?.Dispose(); }
             base.Dispose(disposing);
         }
     }

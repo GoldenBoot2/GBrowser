@@ -3010,6 +3010,10 @@ namespace GBrowser
                     toolbar.Address.KeyForTest(arg == "ShiftDelete" ? Keys.Delete | Keys.Shift : (Keys)Enum.Parse(typeof(Keys), arg));
                     await Task.Delay(300);
                     return "text=" + toolbar.Address.Text + " | " + omni.Describe();
+                case "hovercard":
+                    strip.TestCard(int.Parse(arg));
+                    await Task.Delay(300);
+                    return strip.CardHandle.ToString();
                 case "mediatest":
                 {
                     // test: "<camera> <microphone>" live tracks reported for the current tab, as the page script does
