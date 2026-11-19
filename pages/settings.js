@@ -10,6 +10,17 @@
     b.addEventListener('click', () => { s[key] = !s[key]; b.setAttribute('aria-checked', String(s[key])); set(key, s[key]); });
     return b;
   }
+  const fmtDT = d => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  // a filter list's version: dates written in many ways by the lists ("202611191107", "19 Nov 2026 08:58 UTC") shown
+  // in one day-first style; other versions as "version 2.5.5.59"
+  function fmtVersion(v) {
+    if (!v || v.startsWith('%')) return '';
+    let m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(v);
+    if (m) return fmtDT(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5])));
+    m = /^(\d{1,2} \w{3} \d{4}) (\d{2}:\d{2}) UTC$/.exec(v);
+    if (m) { const d = new Date(v.replace(' UTC', 'Z').replace(/^(\d{1,2}) (\w{3}) (\d{4}) /, '$2 $1 $3 ')); return isNaN(d) ? v : fmtDT(d); }
+    return /^\d+(\.\d+)+$/.test(v) ? 'version ' + v : v;
+  }
   function row(iconName, title, sub, control) {
     return el('div', { class: 'row' }, icon(iconName), el('div', { class: 'text' },
       el('div', { class: 'title', text: title }), sub ? el('div', { class: 'sub', text: sub }) : null), control);
@@ -63,7 +74,7 @@
   const zoomSel = el('select', { 'aria-label': 'Page zoom' }, [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500]
     .map(v => el('option', { value: String(v), text: v + '%', selected: v === dz })));
   zoomSel.addEventListener('change', () => set('DefaultZoom', +zoomSel.value / 100));
-  main.append(el('div', { class: 'card', id: 'appearance' }, el('h2', { text: 'Appearance' }), row('Tune', 'Theme', null, themeSel),
+  main.append(el('div', { class: 'card', id: 'appearance' }, el('h2', { text: 'Appearance' }), row('Contrast', 'Theme', null, themeSel),
     el('div', { class: 'row' }, icon('Palette'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Colour' }), swatches)),
     row('ZoomIn', 'Page zoom', null, zoomSel), fontSizeRow, fontsRow));
   // fonts, like Chrome's Customize fonts (empty = the default font)
@@ -88,8 +99,39 @@
     el('button', { class: 'btn', onclick: () => gb.send('app.restart') }, icon('Refresh'), 'Restart'));
   async function langState() { const st = await gb.send('languages.state'); langRestart.style.display = st.restart ? '' : 'none'; }
   async function saveLangs(list) { await set('Languages', list); s.Languages = list.length ? list : null; langs = list.length ? list : navigator.languages.slice(); drawLangs(); langState(); }
-  const langAdd = el('select', { 'aria-label': 'Add a language' });
-  langAdd.addEventListener('change', () => { if (langAdd.value && !langs.includes(langAdd.value)) saveLangs(langs.concat(langAdd.value)); });
+  const langAdd = el('button', { class: 'btn tonal' }, icon('Add'), 'Add languages');
+  langAdd.addEventListener('click', () => {
+    // Chrome's "Add languages" dialog: search, tick, Add
+    const picked = new Set();
+    const search = el('input', { class: 'field', placeholder: 'Search languages', spellcheck: 'false', 'aria-label': 'Search languages' });
+    const list = el('div', { class: 'pick-list' });
+    const ok = el('button', { class: 'btn', text: 'Add', disabled: true });
+    const cancel = el('button', { class: 'btn text', text: 'Cancel' });
+    const shade = el('div', { class: 'dialog-shade' }, el('div', { class: 'dialog', role: 'dialog', 'aria-label': 'Add languages' },
+      el('h2', { text: 'Add languages' }), search, list, el('div', { class: 'dialog-actions' }, cancel, ok)));
+    const draw = () => {
+      const q = search.value.trim().toLowerCase();
+      list.textContent = '';
+      const starts = l => q && (l.name.toLowerCase().startsWith(q) || l.code.toLowerCase().startsWith(q)) ? 0 : 1;
+      for (const l of langAll.slice().sort((a, b) => starts(a) - starts(b))) {
+        if (langs.includes(l.code)) continue;
+        if (q && !(l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q))) continue;
+        const cb = el('input', { type: 'checkbox', checked: picked.has(l.code) });
+        cb.addEventListener('change', () => { if (cb.checked) picked.add(l.code); else picked.delete(l.code); ok.disabled = !picked.size; });
+        list.append(el('label', { class: 'row' }, cb, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }), el('div', { class: 'sub', text: l.code }))));
+      }
+      if (!list.children.length) list.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: 'No match' })));
+    };
+    const close = () => shade.remove();
+    search.addEventListener('input', draw);
+    cancel.addEventListener('click', close);
+    shade.addEventListener('click', e => { if (e.target === shade) close(); });
+    shade.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    ok.addEventListener('click', () => { close(); saveLangs(langs.concat([...picked])); });
+    document.body.append(shade);
+    draw();
+    search.focus();
+  });
   const langReset = el('button', { class: 'btn text', text: 'Use Windows languages', onclick: () => saveLangs([]) });
   function drawLangs() {
     langList.textContent = '';
@@ -103,14 +145,13 @@
       langList.append(el('div', { class: 'row' }, icon('Language'), el('div', { class: 'text' },
         el('div', { class: 'title', text: langName(c) }), el('div', { class: 'sub', text: c })), el('div', { class: 'actions' }, up, down, del)));
     });
-    langAdd.textContent = '';
-    langAdd.append(el('option', { value: '', text: 'Add a language' }), ...langAll.filter(l => !langs.includes(l.code)).map(l => el('option', { value: l.code, text: l.name + ' (' + l.code + ')' })));
     langReset.hidden = !(s.Languages && s.Languages.length) && langs.join() === navigator.languages.join();
   }
   drawLangs();
   langState();
-  main.append(el('div', { class: 'card', id: 'languages' }, el('h2', { text: 'Languages' }), langList,
-    el('div', { class: 'row' }, el('div', { class: 'text' }), langReset, langAdd), langRestart));
+  main.append(el('div', { class: 'card', id: 'languages' }, el('div', { class: 'row' }, el('div', { class: 'text' },
+    el('div', { class: 'title', text: 'Preferred languages' }), el('div', { class: 'sub', text: 'Sites show content in these languages when they can, in this order' })),
+    langReset, langAdd), langList, langRestart));
 
   // Start and search
   const engine = el('select', { 'aria-label': 'Search engine' }, engines.map(e => el('option', { value: e.id, text: e.name, selected: e.id === s.SearchEngine })));
@@ -162,13 +203,13 @@
     main.append(allowed);
     const lists = el('div', { class: 'card' }, el('h2', { text: 'Filter lists' }),
       row('Shield', ab.ready ? ab.rules.toLocaleString() + ' rules' : (ab.error || 'Loading'),
-        ab.ready ? 'Built ' + fmtIsoDate(ab.built) + ', loaded in ' + ab.loadMs + ' ms' : null, null));
+        ab.ready ? 'Built ' + (/^\d{4}-\d{2}-\d{2}$/.test(ab.built || '') ? new Date(ab.built + 'T00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : fmtIsoDate(ab.built)) + ', loaded in ' + ab.loadMs + ' ms' : null, null));
     // each list on / off (applies to pages loaded after the change); grouped like the switches above
     const groupName = ['Ads', 'Annoyances', 'Trackers'];
     for (const g of ['0', '1', '2']) {
       const of = ab.lists.filter(l => (l.group || '0') === g);
       if (!of.length) continue;
-      lists.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: groupName[+g] })));
+      lists.append(el('div', { class: 'group indent', text: groupName[+g] }));
       for (const l of of) {
         const b = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(l.on !== false), 'aria-label': l.name });
         b.addEventListener('click', async () => {
@@ -178,14 +219,14 @@
           catch (e) { snack(e.message); }
         });
         if (!l.file) b.disabled = true;
-        lists.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }),
-          el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (l.version && !l.version.startsWith('%') ? ' - ' + l.version : '') })), b));
+        lists.append(el('div', { class: 'row indent' }, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }),
+          el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (fmtVersion(l.version) ? ', ' + fmtVersion(l.version) : '') })), b));
       }
     }
     // daily host-list update
     const hs = await gb.send('hosts.state');
     const upd = el('button', { class: 'btn text', text: 'Update now' });
-    const hsub = () => hs.state || (hs.updated ? 'Updated ' + new Date(hs.updated).toLocaleString('en-GB') + ', ' + hs.hosts.toLocaleString() + ' hosts' : 'Not updated yet');
+    const hsub = () => hs.state || (hs.updated ? 'Updated ' + fmtDT(new Date(hs.updated)) + (hs.hosts ? ', ' + hs.hosts.toLocaleString() + ' new hosts' : ', built-in lists are newer') : 'Not updated yet');
     const hrow = row('Download', 'Update host lists daily', hsub(), el('div', { class: 'actions' }, upd, sw('HostListUpdates')));
     upd.addEventListener('click', async () => {
       upd.disabled = true; upd.textContent = 'Updating...';
@@ -203,10 +244,11 @@
     const ur = await gb.send('userrules.get');
     const ta = el('textarea', { class: 'field', spellcheck: 'false', 'aria-label': 'Your rules', placeholder: '||ads.example.com^\nexample.com##.banner\n@@||example.org^' });
     ta.value = ur.text;
-    const probs = el('div');
+    const probs = el('div', { class: 'rows' });
+    const count = el('div', { class: 'sub' });
     const showProblems = (list, n) => {
       probs.textContent = '';
-      probs.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: n + (n === 1 ? ' rule in use' : ' rules in use') + (list.length ? ', ' + list.length + ' not used:' : '') })));
+      count.textContent = n + (n === 1 ? ' rule in use' : ' rules in use') + (list.length ? ', ' + list.length + ' not used' : '');
       for (const p of list.slice(0, 50))
         probs.append(el('div', { class: 'row' }, icon('Warning'), el('div', { class: 'text' },
           el('div', { class: 'title', text: 'Line ' + p.line + ': ' + p.text }), el('div', { class: 'sub', text: p.reason }))));
@@ -220,7 +262,7 @@
     const help = el('div', { class: 'sub', text: 'Block: ||host^  or an address pattern.  Allow: @@||host^.  Hide: site.com##selector (or ##selector everywhere).  Scriptlets: site.com#%#//scriptlet(\'name\', \'arg\').' });
     const pad = el('div', { class: 'row' }, el('div', { class: 'text' }, ta, help));
     pad.style.display = 'block';
-    main.append(el('div', { class: 'card', id: 'userrules' }, el('h2', { text: 'Your rules' }), pad, el('div', { class: 'row' }, save), probs));
+    main.append(el('div', { class: 'card', id: 'userrules' }, el('h2', { text: 'Your rules' }), pad, el('div', { class: 'row' }, el('div', { class: 'text' }, count), save), probs));
 
     const cl = el('div', { class: 'card', id: 'customlists' }, el('h2', { text: 'Custom filter lists' }));
     const listRows = el('div');
@@ -242,7 +284,7 @@
           await gb.send('lists.trust', { url: l.url, on: !l.trusted }); drawLists();
         }));
         acts.append(iconButton('Delete', 'Remove', async () => { await gb.send('lists.remove', { url: l.url }); drawLists(); }));
-        const when = l.updated ? new Date(l.updated).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'never';
+        const when = l.updated ? fmtDT(new Date(l.updated)) : 'never';
         listRows.append(el('div', { class: 'row' }, icon('Shield'), el('div', { class: 'text' },
           el('div', { class: 'title', text: l.title }),
           el('div', { class: 'sub', text: l.rules.toLocaleString() + ' rules - updated ' + when + (l.error ? ' - ' + l.error : '') + ' - ' + l.url })), trust, acts, on));
@@ -256,7 +298,7 @@
       setTimeout(drawLists, 300);
     });
     upd.addEventListener('click', async () => { upd.disabled = true; try { await gb.send('lists.update'); snack('Updated'); } catch (e) { snack(e.message); } upd.disabled = false; drawLists(); });
-    cl.append(listRows, el('div', { class: 'row' }, url, addBtn, upd));
+    cl.append(el('div', { class: 'row' }, url, addBtn, upd), listRows);
     main.append(cl);
     drawLists();
   }
@@ -265,7 +307,7 @@
   const sleep = el('select', { 'aria-label': 'Sleeping tabs' }, [[0, 'Never'], [1, '1 minute'], [5, '5 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour']]
     .map(([v, t]) => el('option', { value: v, text: t, selected: v === s.SleepMinutes })));
   sleep.addEventListener('change', () => set('SleepMinutes', +sleep.value));
-  const memRows = el('div');
+  const memRows = el('div', { class: 'rows' });
   const memCard = el('div', { class: 'card' }, el('h2', { text: 'Memory' }),
     row('Bedtime', 'Put background tabs to sleep after', null, sleep),
     row('Memory', 'Low memory for background tabs', null, sw('LowMemoryHiddenTabs')),
@@ -276,7 +318,7 @@
       const m = await gb.send('memory');
       memRows.textContent = '';
       memRows.append(row('Memory', 'In use now: ' + m.totalMb.toFixed(0) + ' MB',
-        m.tabs + ' tabs: ' + m.live + ' active, ' + m.sleeping + ' sleeping, ' + m.unloaded + ' not loaded', null));
+        m.tabs + (m.tabs === 1 ? ' tab: ' : ' tabs: ') + m.live + ' active, ' + m.sleeping + ' sleeping, ' + m.unloaded + ' not loaded', null));
     } catch (e) { }
   }
   mem(); setInterval(mem, 3000);
@@ -377,8 +419,11 @@
     const list = await gb.send('permissions.list').catch(() => []);
     permList.textContent = '';
     if (!list.length) { permList.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'sub', text: 'No site has asked yet' })))); return; }
+    let exts = [];
+    if (list.some(p => p.origin.startsWith('chrome-extension://'))) exts = await gb.send('ext.list').catch(() => []);
     for (const p of list) {
       let site = p.origin; try { site = new URL(p.origin).host; } catch (e) { }
+      if (p.origin.startsWith('chrome-extension://')) { const x = (exts || []).find(e => e.id === site); site = x ? x.name + ' (extension)' : site; }
       permList.append(row(p.kind === 'Camera' ? 'Videocam' : p.kind === 'Microphone' ? 'Mic' : p.kind === 'Geolocation' ? 'Location' : p.kind === 'Notifications' ? 'Notifications' : 'Tune',
         site, p.what + ' \u00b7 ' + (p.state === 'Allow' ? 'Allowed' : 'Blocked'),
         iconButton('Delete', 'Reset', async () => { await gb.send('permissions.reset', { kind: p.kind, origin: p.origin }); drawPerms(); })));
@@ -389,7 +434,7 @@
 
   // Hide my identity
   const idi = await gb.send('identity.get');
-  const idSub = el('div', { class: 'sub', text: 'Identity ' + idi.id });
+  const idSub = el('div', { class: 'title', text: 'Identity ' + idi.id });
   const newId = el('button', { class: 'btn tonal', text: 'New identity' });
   newId.addEventListener('click', async () => {
     const out = confirm('New identity: clear what sites stored about this browser (site storage, caches, tracking cookies)? You stay signed in.');
@@ -401,7 +446,7 @@
   main.append(el('div', { class: 'card', id: 'identity' }, el('h2', { text: 'Hide my identity' }), idRow,
     row('Restore', 'New identity each start', null, sw('IdentityEachStart')),
     row('Palette', 'Canvas, WebGL and audio noise', 'Stable per site and identity; some fingerprint test sites can notice it', sw('IdentityNoise')),
-    el('div', { class: 'row' }, el('div', { class: 'text' }, idSub, el('div', { class: 'sub', text: 'The IP address stays the same (that needs a VPN).' })), newId)));
+    el('div', { class: 'row' }, icon('Fingerprint'), el('div', { class: 'text' }, idSub, el('div', { class: 'sub', text: 'The IP address stays the same (that needs a VPN).' })), newId)));
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Privacy and security' }),
     row('Lock', 'Always use secure connections', 'Opens sites over HTTPS; warns before an insecure site', sw('HttpsFirst')),
     row('ShieldLock', 'Dangerous site and download protection', 'Microsoft Defender SmartScreen', sw('SmartScreen')),
@@ -452,7 +497,7 @@
     ['search-sec', 'Search engine', 'Search', [searchCard]],
     ['default-sec', 'Default browser', 'Public', [cardOf('Default browser')]],
     ['startup-sec', 'On startup', 'Restore', [startupCard]],
-    ['languages-sec', 'Languages', 'Language', [cardOf('Languages')]],
+    ['languages-sec', 'Languages', 'Language', [document.getElementById('languages')]],
     ['downloads-sec', 'Downloads', 'Download', [cardOf('Downloads')]],
     // shown here, not in a new tab: their pages' scripts draw into these boxes (loaded when the section is first opened)
     ['extensions-sec', 'Extensions', 'Extension', [el('div', { class: 'embed', 'data-script': 'extensions.js' })]],

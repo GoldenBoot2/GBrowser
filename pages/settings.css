@@ -14,3 +14,15 @@ main.settings-layout { max-width: 1240px; display: grid; grid-template-columns: 
   main.settings-layout { grid-template-columns: minmax(0, 1fr); }
   .settings-nav { display: none; }
 }
+/* descriptions and help text wrap instead of being cut off */
+.settings-section .row .sub { white-space: normal; }
+/* Material dialog (Add languages) */
+.dialog-shade { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 20; }
+.dialog { width: min(520px, 90vw); max-height: 80vh; display: flex; flex-direction: column; gap: 12px; padding: 22px 0 16px;
+  background: var(--surface-container-high); border-radius: 28px; box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+.dialog h2 { margin: 0; padding: 0 24px; font-size: 22px; font-weight: 500; color: var(--on-surface); }
+.dialog > .field { margin: 0 24px; height: 44px; flex: none; box-sizing: border-box; }
+.dialog .pick-list { overflow: auto; flex: 1; min-height: 200px; border-top: 1px solid var(--outline-variant); border-bottom: 1px solid var(--outline-variant); }
+.dialog .pick-list label.row { cursor: pointer; min-height: 48px; padding: 6px 24px; }
+.dialog .pick-list label.row:hover { background: var(--hover); }
+.dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 24px; }

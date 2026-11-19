@@ -30,7 +30,7 @@ ICONS = [
     ('TextFields', 'text_fields', ''), ('FontDownload', 'font_download', ''),
     ('ArrowUp', 'arrow_upward', ''), ('ArrowDown', 'arrow_downward', ''), ('Spellcheck', 'spellcheck', ''),
     ('Share', 'share', ''),
-    ('ChevronRight', 'chevron_right', ''), ('Minus', 'remove', ''), ('SaveShare', 'ios_share', ''), ('Build', 'build', ''),
+    ('ChevronRight', 'chevron_right', ''), ('Contrast', 'contrast', ''), ('Fingerprint', 'fingerprint', ''), ('Minus', 'remove', ''), ('SaveShare', 'ios_share', ''), ('Build', 'build', ''),
     # window buttons drawn in the tab row (thin weight, 20 px optical size, like Chrome's 1 px lines)
     ('WinMin', 'remove', 'wght300', 20), ('WinMax', 'crop_square', 'wght300', 20),
     ('WinRestore', 'filter_none', 'wght300', 20), ('WinClose', 'close', 'wght300', 20),
