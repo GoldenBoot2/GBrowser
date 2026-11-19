@@ -137,6 +137,7 @@ namespace GBrowser
                 Current.View?.Focus();
             };
             toolbar.Star += ToggleBookmark;
+            toolbar.ZoomClicked += () => { if (Current?.Created == true) { Current.View.ZoomFactor = Store.Settings.DefaultZoom; SaveSiteZoom(Current); } };
             toolbar.MenuClicked += ShowMenu;
             // address bar suggestions (history, bookmarks, open tabs, search suggestions)
             omni = new Omnibox(toolbar.Address, toolbar, () => toolbar.RectangleToScreen(toolbar.PillRect), () => Tabs, () => Current);
@@ -1155,6 +1156,10 @@ namespace GBrowser
                 : url.StartsWith("http://") && !Security.IsLocal(Blocking.HostOf(url)) ? "insecure" : "";
             if (toolbar.ShowHome != Store.Settings.ShowHomeButton) { toolbar.ShowHome = Store.Settings.ShowHomeButton; toolbar.LayoutNow(); }
             toolbar.Bookmarked = Store.IsBookmarked(url);
+            int zp = t.Created ? (int)Math.Round(t.View.ZoomFactor * 100) : 100, dz = (int)Math.Round(Store.Settings.DefaultZoom * 100);
+            bool zs = t.Created && !Pages.IsInternal(url) && zp != dz;
+            if (zs != toolbar.ZoomShown || zp != toolbar.ZoomPercent || dz != toolbar.DefaultZoomPercent)
+            { toolbar.ZoomShown = zs; toolbar.ZoomPercent = zp; toolbar.DefaultZoomPercent = dz; toolbar.LayoutNow(); }
             toolbar.BlockedCount = t.Blocked;
             string pageHost = Blocking.HostOf(url);
             toolbar.ShieldOn = pageHost == null ? Store.Settings.AdblockEnabled : Blocking.OnFor(pageHost);
@@ -1580,7 +1585,7 @@ namespace GBrowser
             double z = Math.Round(t.View.ZoomFactor, 3);
             var sz = Store.Settings.SiteZoom;
             bool changed;
-            if (Math.Abs(z - 1) < 0.005) changed = sz.Remove(key);
+            if (Math.Abs(z - Store.Settings.DefaultZoom) < 0.005) changed = sz.Remove(key);
             else { changed = !sz.TryGetValue(key, out var old) || Math.Abs(old - z) > 0.001; sz[key] = z; }
             if (changed) Store.SaveSettings();
             UpdateUi();
@@ -1591,7 +1596,7 @@ namespace GBrowser
             if (!t.Created) return;
             string key = ZoomKey(t.View.CoreWebView2.Source);
             if (key == null) return;
-            double want = Store.Settings.SiteZoom.TryGetValue(key, out var z) ? z : 1.0;
+            double want = Store.Settings.SiteZoom.TryGetValue(key, out var z) ? z : Store.Settings.DefaultZoom;
             if (Math.Abs(t.View.ZoomFactor - want) < 0.001) return;
             t.ApplyingZoom = true;
             try { t.View.ZoomFactor = want; } finally { BeginInvoke((Action)(() => t.ApplyingZoom = false)); }
@@ -2180,6 +2185,14 @@ namespace GBrowser
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
                         case "HostListUpdates": st.HostListUpdates = v is bool hu && hu; break;
+                        case "DefaultZoom":
+                            if (double.TryParse(Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture), System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var dzv) && dzv >= 0.25 && dzv <= 5)
+                            {
+                                st.DefaultZoom = dzv;
+                                foreach (var w in App.Windows) foreach (var tb in w.Tabs) w.ApplySiteZoom(tb);
+                            }
+                            break;
                         case "HideIdentity": st.HideIdentity = v is bool hi && hi; if (st.HideIdentity && st.IdentitySeed == 0) Identity.NewSeed(); break;
                         case "IdentityNoise": st.IdentityNoise = v is bool inz && inz; break;
                         case "IdentityEachStart": st.IdentityEachStart = v is bool ies && ies; break;
@@ -2824,6 +2837,14 @@ namespace GBrowser
                     toolbar.Address.KeyForTest(arg == "ShiftDelete" ? Keys.Delete | Keys.Shift : (Keys)Enum.Parse(typeof(Keys), arg));
                     await Task.Delay(300);
                     return "text=" + toolbar.Address.Text + " | " + omni.Describe();
+                case "toolbarbtn":
+                {
+                    // test: "<name>" = its bounds (empty = hidden); "<name> click" = press it
+                    var parts = arg.Split(' ');
+                    if (parts.Length > 1 && parts[1] == "click") { toolbar.ClickButton(parts[0]); await Task.Delay(300); }
+                    var rb = toolbar.ButtonRect(parts[0]);
+                    return rb.IsEmpty ? "hidden" : rb.ToString() + " zoom=" + (Current?.View?.ZoomFactor.ToString() ?? "-");
+                }
                 case "persistinfo":
                 {
                     string sc = Store.ReadText("session-cookies.json") ?? "(none)";

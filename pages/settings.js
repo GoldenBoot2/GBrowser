@@ -46,8 +46,14 @@
     swatches.append(cb);
   }
   drawSwatches();
+  // page zoom for sites without their own zoom (Chrome's list)
+  const dz = Math.round((s.DefaultZoom || 1) * 100);
+  const zoomSel = el('select', { 'aria-label': 'Page zoom' }, [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500]
+    .map(v => el('option', { value: String(v), text: v + '%', selected: v === dz })));
+  zoomSel.addEventListener('change', () => set('DefaultZoom', +zoomSel.value / 100));
   main.append(el('div', { class: 'card', id: 'appearance' }, el('h2', { text: 'Appearance' }), row('Tune', 'Theme', null, themeSel),
-    el('div', { class: 'row' }, icon('Palette'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Colour' }), swatches))));
+    el('div', { class: 'row' }, icon('Palette'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Colour' }), swatches)),
+    row('ZoomIn', 'Page zoom', null, zoomSel)));
   if (location.hash === '#appearance') document.getElementById('appearance').scrollIntoView();
 
   // Start and search

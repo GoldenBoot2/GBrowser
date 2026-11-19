@@ -41,7 +41,7 @@ Last full audit: 19-11-2026.
 | Suggestions while typing (history, bookmarks, open tabs, search suggestions), inline autocomplete, Shift+Delete removes | Done (19-11-2026; setting to turn search suggestions off) |
 | Search engines: choose default | Done; custom engines / keywords: Missing |
 | Site info panel (icon left of the address: connection, permissions with switches + reset, cookies count + delete site data, ad blocking on the site, site settings) | Done (19-11-2026); certificate viewer missing |
-| Zoom indicator in the address bar (click to reset) | Missing |
+| Zoom indicator in the address bar (click to reset) | Done 19-11-2026 (zoom-in / zoom-out icon left of the star while the page differs from the default zoom, tooltip with the percentage, click = reset; tested) |
 | Bookmark star / Ctrl+D: "Bookmark added" with name, address, folder, Remove (Chrome's bubble) | Done 19-11-2026 |
 | Copy link / QR code / share page | Missing |
 
@@ -49,7 +49,7 @@ Last full audit: 19-11-2026.
 | Feature | Status |
 |---|---|
 | Zoom (Ctrl +/-/0, wheel), remembered per site | Done (19-11-2026) |
-| Default page zoom setting | Missing |
+| Default page zoom setting | Done 19-11-2026 (Settings > Appearance > Page zoom, Chrome's 25-500 % list; sites with their own zoom keep it; tested at 125 % and back) |
 | Find in page (Ctrl+F, F3, Ctrl+G, Shift+F3, Enter / Shift+Enter, Esc; per-tab, match count) | Done, GBrowser find bar (19-11-2026) |
 | Page right-click menu (page, link, image, media, selection, text field) | Done (19-11-2026: GBrowser Material menu, engine commands behind it) |
 | Print (Ctrl+P) | Engine UI (print preview) |

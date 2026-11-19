@@ -154,6 +154,7 @@ namespace GBrowser
         public string DownloadConflict { get; set; } = "ask";      // a file with that name exists: ask | keep (both) | replace
         public Dictionary<string, bool> ExternalAllowed { get; set; } = new Dictionary<string, bool>();   // "origin|scheme": open app links without asking
         public Dictionary<string, double> SiteZoom { get; set; } = new Dictionary<string, double>();   // host -> zoom, like Chrome
+        public double DefaultZoom { get; set; } = 1.0;   // Settings > Appearance > Page zoom (sites without their own zoom)
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }
