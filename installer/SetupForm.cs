@@ -13,7 +13,7 @@ using GBrowser;
 namespace GBrowserSetup
 {
     /// <summary>The setup window: a brand panel (animated logo, drifting light) and a feature showcase that keeps
-    /// playing during the install, then a success screen. Everything is drawn here (Material 3, GBrowser's gold
+    /// playing during the install, then a success screen. Everything is drawn here (Material 3, GBrowser's
     /// palette, light or dark like Windows) and animated with a 60 fps timer.</summary>
     internal sealed class SetupForm : Form
     {
@@ -578,7 +578,8 @@ namespace GBrowserSetup
         }
     }
 
-    /// <summary>GBrowser's gold Material 3 scheme (same values as the browser's Palette.Gold), light or dark like Windows.</summary>
+    /// <summary>GBrowser's default scheme (Chrome's colours, same values as the browser's Palette.Chrome), light or dark like
+    /// Windows; the brand panel is a deep blue from the same palette.</summary>
     internal static class Pal
     {
         public static bool Dark;
@@ -597,19 +598,19 @@ namespace GBrowserSetup
             catch { }
             if (Dark)
             {
-                Primary = C(0xF0BF48); OnPrimary = C(0x402D00); PrimaryContainer = C(0x5B4300); OnPrimaryContainer = C(0xFFDFA0);
-                Surface = C(0x17130B); Container = C(0x241F17); OnSurface = C(0xECE1D4); OnSurfaceVariant = C(0xD3C5B0);
-                Outline = C(0x9C8F7C); OutlineVariant = C(0x4F4637); Error = C(0xFFB4AB); OnError = C(0x690005);
-                BrandTop = C(0x2E2310); BrandBottom = C(0x120E07); BrandText = C(0xFFF3DC); BrandSub = C(0xE3CFA6);
-                Glow = C(0xC8901A); Glow2 = C(0x8A5A00);
+                Primary = C(0xA8C7FA); OnPrimary = C(0x062E6F); PrimaryContainer = C(0x0842A0); OnPrimaryContainer = C(0xD3E3FD);
+                Surface = C(0x202124); Container = C(0x292A2D); OnSurface = C(0xE3E3E3); OnSurfaceVariant = C(0xC4C7C5);
+                Outline = C(0x8E918F); OutlineVariant = C(0x444746); Error = C(0xF2B8B5); OnError = C(0x601410);
+                BrandTop = C(0x062E6F); BrandBottom = C(0x041E49); BrandText = C(0xFFFFFF); BrandSub = C(0xD3E3FD);
+                Glow = C(0x4C8DF6); Glow2 = C(0x0842A0);
             }
             else
             {
-                Primary = C(0x785A00); OnPrimary = C(0xFFFFFF); PrimaryContainer = C(0xFFDFA0); OnPrimaryContainer = C(0x261A00);
-                Surface = C(0xFFF8F2); Container = C(0xF4EDE1); OnSurface = C(0x1F1B13); OnSurfaceVariant = C(0x4D4639);
-                Outline = C(0x7F7667); OutlineVariant = C(0xD0C5B4); Error = C(0xBA1A1A); OnError = C(0xFFFFFF);
-                BrandTop = C(0x3A2A06); BrandBottom = C(0x16100A); BrandText = C(0xFFF3DC); BrandSub = C(0xE8D5AE);
-                Glow = C(0xE0A526); Glow2 = C(0x9A6A00);
+                Primary = C(0x0B57D0); OnPrimary = C(0xFFFFFF); PrimaryContainer = C(0xD3E3FD); OnPrimaryContainer = C(0x041E49);
+                Surface = C(0xFFFFFF); Container = C(0xF3F6FC); OnSurface = C(0x1F1F1F); OnSurfaceVariant = C(0x444746);
+                Outline = C(0x747775); OutlineVariant = C(0xE1E3E1); Error = C(0xB3261E); OnError = C(0xFFFFFF);
+                BrandTop = C(0x0842A0); BrandBottom = C(0x041E49); BrandText = C(0xFFFFFF); BrandSub = C(0xD3E3FD);
+                Glow = C(0x7CACF8); Glow2 = C(0x0B57D0);
             }
             Hover = Color.FromArgb(0x14, OnSurface);
         }

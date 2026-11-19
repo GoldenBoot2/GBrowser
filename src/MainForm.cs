@@ -2552,7 +2552,7 @@ namespace GBrowser
                         case "ThemeColor":
                         {
                             string tc = (v as string ?? "").Trim();
-                            if (tc == "chrome" || tc == "gold" || tc == "accent" || System.Text.RegularExpressions.Regex.IsMatch(tc, "^#[0-9a-fA-F]{6}$")) st.ThemeColor = tc.ToLowerInvariant();
+                            if (tc == "chrome" || tc == "accent" || System.Text.RegularExpressions.Regex.IsMatch(tc, "^#[0-9a-fA-F]{6}$")) st.ThemeColor = tc.ToLowerInvariant();
                             else throw new Exception("Bad colour");
                             Store.SaveSettings();
                             ApplyTheme(true);

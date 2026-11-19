@@ -12,12 +12,10 @@ namespace GBrowser
     {
         public sealed class Scheme : Dictionary<string, Color> { }
 
-        /// <summary>Preset seeds shown in Settings. "chrome" (the default) is Chrome's own scheme; "gold" keeps
-        /// GBrowser's original hand-tuned scheme.</summary>
+        /// <summary>Preset seeds shown in Settings. "chrome" (the default) is Chrome's own scheme.</summary>
         public static readonly string[][] Presets =
         {
             new[] { "chrome", "Chrome (default)", "#0B57D0" },
-            new[] { "gold", "Gold", "#785A00" },
             new[] { "#1A73E8", "Blue" }, new[] { "#00897B", "Teal" }, new[] { "#2E7D32", "Green" },
             new[] { "#6750A4", "Purple" }, new[] { "#C2185B", "Pink" }, new[] { "#C62828", "Red" },
             new[] { "#E65100", "Orange" }, new[] { "#5D6B7A", "Grey" },
@@ -41,18 +39,6 @@ namespace GBrowser
             return s;
         }
 
-        // ---- the original gold scheme (exact values; dark surfaces raised to Chrome's lightness, see DarkSurfaces)
-        static Scheme Gold(bool dark)
-        {
-            int[] v = dark
-                ? new[] { 0xF0BF48, 0x402D00, 0x5B4300, 0xFFDFA0, 0x17130B, 0x241F17, 0x2F2921, 0x3A342B, 0x3E382F, 0xECE1D4, 0xD3C5B0, 0x9C8F7C, 0x4F4637, 0xFFB4AB }
-                : new[] { 0x785A00, 0xFFFFFF, 0xFFDFA0, 0x261A00, 0xFFF8F2, 0xF4EDE1, 0xEEE7DB, 0xE8E1D5, 0xFFFFFF, 0x1F1B13, 0x4D4639, 0x7F7667, 0xD0C5B4, 0xBA1A1A };
-            var s = new Scheme();
-            for (int i = 0; i < Roles.Length; i++) s[Roles[i]] = Color.FromArgb(255, Color.FromArgb(v[i]));
-            if (dark) DarkSurfaces(s, s["surface-container"]);
-            return s;
-        }
-
         /// <summary>Dark surfaces at Chrome's lightness (measured on Chrome 158 dark, 19-11-2026: Settings page L* 13,
         /// cards L* 17, dividers L* 27), tinted with the scheme's own hue.</summary>
         static void DarkSurfaces(Scheme s, Color tint)
@@ -70,10 +56,10 @@ namespace GBrowser
             "on-surface", "on-surface-variant", "outline", "outline-variant", "error",
         };
 
-        /// <summary>Seed for a setting value: "gold", "accent" (Windows accent colour) or "#RRGGBB".</summary>
+        /// <summary>Seed for a setting value: "chrome", "accent" (Windows accent colour) or "#RRGGBB".</summary>
         public static Color? SeedOf(string setting)
         {
-            if (string.IsNullOrEmpty(setting) || setting == "gold" || setting == "chrome") return null;
+            if (string.IsNullOrEmpty(setting) || setting == "chrome") return null;
             if (setting == "accent") return WindowsAccent();
             try { return ColorTranslator.FromHtml(setting); } catch { return null; }
         }
@@ -81,7 +67,7 @@ namespace GBrowser
         public static Scheme For(string setting, bool dark)
         {
             var seed = SeedOf(setting);
-            var s = seed != null ? FromSeed(seed.Value, dark) : setting == "gold" ? Gold(dark) : Chrome(dark);
+            var s = seed != null ? FromSeed(seed.Value, dark) : Chrome(dark);
             if (s.ContainsKey("frame")) return s;
             // the window parts, like Chrome: light = darker tab strip, toolbar in the page colour; dark (measured on
             // Chrome 158, 19-11-2026): tab strip L* 12, toolbar / active tab / new tab page L* 25, address box L* 16

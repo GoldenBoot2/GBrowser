@@ -1,11 +1,11 @@
-# Draws assets/gbrowser.ico: gold circle (#785A00 -> #A27C00, top to bottom) with the white Material Symbols
+# Draws assets/gbrowser.ico: blue circle (Chrome's #0B57D0 -> #1B6EF3, top to bottom) with the white Material Symbols
 # Rounded "language" glyph, sizes 16-256 (PNG frames inside the ICO). Stdlib only, anti-aliased, nonzero fill.
 # Run: python -I tools/make_icon.py   (after tools/fetch_icons.py, which writes src/IconData.cs)
 import os, re, struct, zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
-TOP, BOTTOM = (0x78, 0x5A, 0x00), (0xA2, 0x7C, 0x00)
+TOP, BOTTOM = (0x0B, 0x57, 0xD0), (0x1B, 0x6E, 0xF3)
 GLYPH = 0.62   # glyph box as a share of the icon
 SS = 4         # samples per pixel in each direction
 

@@ -7,13 +7,13 @@ using Microsoft.Win32;
 
 namespace GBrowser
 {
-    /// <summary>Material 3 colours from a gold seed (GoldenBoot brand), light and dark. Settings.ThemeMode:
+    /// <summary>Material 3 colours (default: Chrome's own scheme, see Palette.cs), light and dark. Settings.ThemeMode:
     /// "system" follows Windows (Settings > Personalization > Colors > app mode), or "light" / "dark".</summary>
     internal static class Theme
     {
         public static bool Dark { get; private set; }
 
-        // current scheme (Settings.ThemeColor: "chrome", "gold", "accent" or "#RRGGBB"; see Palette.cs)
+        // current scheme (Settings.ThemeColor: "chrome", "accent" or "#RRGGBB"; see Palette.cs)
         static Palette.Scheme scheme = Palette.For("chrome", false);
         static string schemeKey = "";
         static Color R(string role) => scheme[role];

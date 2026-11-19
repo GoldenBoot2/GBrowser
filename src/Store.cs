@@ -31,13 +31,8 @@ namespace GBrowser
         {
             Directory.CreateDirectory(DataDir);
             Settings = Read<Settings>("settings.json") ?? new Settings();
-            // 0.1.8: Chrome's colours became the default (user, 19-11-2026); the old default moves once, a colour picked
-            // afterwards stays
-            if (!Settings.ChromeColorsDefault)
-            {
-                if (string.IsNullOrEmpty(Settings.ThemeColor) || Settings.ThemeColor == "gold") Settings.ThemeColor = "chrome";
-                Settings.ChromeColorsDefault = true;
-            }
+            // 0.1.8: Chrome's colours are the default and the old gold scheme is gone (user, 19-11-2026)
+            if (string.IsNullOrEmpty(Settings.ThemeColor) || Settings.ThemeColor == "gold") Settings.ThemeColor = "chrome";
             Bookmarks = Read<List<Bookmark>>("bookmarks.json") ?? new List<Bookmark>();
             Bm.Migrate();
             History = Read<List<HistoryItem>>("history.json") ?? new List<HistoryItem>();
@@ -134,8 +129,7 @@ namespace GBrowser
         public string DevToolsDock { get; set; } = "right";  // right | bottom (docked DevTools, DevToolsDock.cs)
         public double DevToolsWidth { get; set; } = 0.38;    // share of the page area
         public double DevToolsHeight { get; set; } = 0.4;
-        public string ThemeColor { get; set; } = "chrome";  // chrome (default) | gold | accent (Windows accent colour) | #RRGGBB
-        public bool ChromeColorsDefault { get; set; }        // the move from the old default (gold) to Chrome's colours is done
+        public string ThemeColor { get; set; } = "chrome";  // chrome (default) | accent (Windows accent colour) | #RRGGBB
         public bool RestoreTabs { get; set; } = true;
         public int SleepMinutes { get; set; } = 5;          // 0 = never put hidden tabs to sleep
         public bool LowMemoryHiddenTabs { get; set; } = true;
