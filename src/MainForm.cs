@@ -1174,6 +1174,9 @@ namespace GBrowser
                 // a crashed page keeps the page's own title on its tab, like Chrome
                 if (Pages.PageName(core.Source) == "crashed") { F().strip.RefreshTabs(); return; }
                 t.Title = string.IsNullOrEmpty(core.DocumentTitle) ? Pages.ToDisplay(core.Source) : core.DocumentTitle;
+#if AUTOMATION
+                Blocking.TestLog.Add("TITLE " + DateTime.Now.ToString("HH:mm:ss.fff") + " " + t.Title + " (doc='" + core.DocumentTitle + "' src=" + core.Source + ")");
+#endif
                 if (Pages.IsInternal(core.Source)) t.Title = BrowserTab.PageTitle(core.Source);
                 if (!t.Private) Store.UpdateHistoryTitle(core.Source, core.DocumentTitle);
                 F().strip.RefreshTabs();
@@ -1332,6 +1335,9 @@ namespace GBrowser
             if (t == null) return;
             var core = t.Created ? t.View.CoreWebView2 : null;
             string url = core?.Source ?? t.Url ?? "";
+            // a new engine sits on about:blank until its first page arrives (measured 19-11-2026: the new tab showed
+            // "about:blank" for ~40 ms); until then the address is the page the tab is going to
+            if (url == "about:blank" && !string.IsNullOrEmpty(t.Url) && t.Url != "about:blank") url = t.Url;
             toolbar.CanBack = core?.CanGoBack ?? false;
             toolbar.CanForward = core?.CanGoForward ?? false;
             toolbar.Loading = t.Loading;

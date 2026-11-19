@@ -301,6 +301,9 @@ namespace GBrowser
         /// <summary>full = the address, shown = Chrome-style short form (no https://, no www., no lone "/").</summary>
         public void SetUrl(string full, string shown)
         {
+#if AUTOMATION
+            if ((full ?? "") != FullUrl) Blocking.TestLog.Add("SETURL " + DateTime.Now.ToString("HH:mm:ss.fff") + " full=" + full + " shown=" + shown);
+#endif
             string oldFull = FullUrl, oldShown = ShownUrl, text = Address.Text;
             FullUrl = full ?? "";
             ShownUrl = shown ?? "";
