@@ -154,6 +154,7 @@ namespace GBrowser
                 // like Chrome: a link opens in a background tab right after the current one
                 NewTab = url => NewTab(url, false, Current == null ? -1 : Tabs.IndexOf(Current) + 1),
                 NewPrivateTab = url => NewPrivateTab(url),
+                HideElement = p => PickElement(p),
                 SearchUrl = text => (Search.Engines.TryGetValue(Store.Settings.SearchEngine ?? "google", out var en) ? en[1] : Search.Engines["google"][1]) + Uri.EscapeDataString(text),
             };
             toolbar.DownloadsClicked += OpenDownloads;
@@ -675,6 +676,7 @@ namespace GBrowser
             if (Tabs.Count == 0) NewTab(null);
             strip.RefreshTabs();
             // load extensions once at start so their background scripts run (profile is shared by all tabs)
+            if (isFirst) CustomLists.Start();   // your rules + custom lists (rebuilt in the background)
             await LoadExtensionsOnce();
         }
 
@@ -766,6 +768,45 @@ namespace GBrowser
 #else
         internal const string DefaultRoot = "Software";
 #endif
+
+        // ---------- element picker ----------
+
+        bool picking;
+        /// <summary>Hide an element: GBrowser's picker (assets/picker.js) in an isolated world of the page; the selector
+        /// chosen becomes a rule for this site in "Your rules" and hides it at once. at = right-click point (CSS px).</summary>
+        async void PickElement(Point? at, bool auto = false)
+        {
+            var t = Current;
+            if (picking || t?.Created != true) return;
+            var core = t.View.CoreWebView2;
+            string url = core.Source, host = Blocking.HostOf(url);
+            if (host == null || Pages.IsInternal(url)) return;
+            picking = true;
+            try
+            {
+                var tree = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("Page.getFrameTree", "{}"));
+                string frameId = (((tree["frameTree"] as Dictionary<string, object>)["frame"]) as Dictionary<string, object>)["id"] as string;
+                var w = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("Page.createIsolatedWorld",
+                    Store.ToJson(new Dictionary<string, object> { { "frameId", frameId }, { "worldName", "gbpicker" } })));
+                int ctx = Convert.ToInt32(w["executionContextId"]);
+                string js = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "picker.js"));
+                if (at.HasValue) js = "window.__gbPickAt=[" + at.Value.X + "," + at.Value.Y + "];" + (auto ? "window.__gbPickAuto=true;" : "") + js;
+                var r = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("Runtime.evaluate",
+                    Store.ToJson(new Dictionary<string, object> { { "expression", js }, { "contextId", ctx }, { "awaitPromise", true }, { "returnByValue", true }, { "userGesture", true } })));
+                string sel = ((r["result"] as Dictionary<string, object>)?["value"]) as string;
+                if (string.IsNullOrWhiteSpace(sel) || sel.Contains("\n")) return;
+                string rule = host + "##" + sel;
+                var st = Store.Settings;
+                st.UserRules = (string.IsNullOrEmpty(st.UserRules) ? "" : st.UserRules.TrimEnd('\n') + "\n") + rule;
+                Store.SaveSettings();
+                CustomLists.Rebuild();
+                if (!(t.Blocking?.HideNow(sel + "{display:none!important}") ?? false)) core.Reload();
+                lastPickRule = rule;
+            }
+            catch (Exception ex) { lastPickRule = "error " + ex.Message; }
+            finally { picking = false; }
+        }
+        string lastPickRule;   // test builds read it
 
         // ---------- tabs between windows ----------
 
@@ -1714,6 +1755,7 @@ namespace GBrowser
             Toggle("Block pages of ad sites", st.BlockAdSitePages, v => st.BlockAdSitePages = v, st.AdblockEnabled);
             m.AddSeparator();
             m.AddNote("Total blocked: " + st.TotalBlocked.ToString("N0"));
+            if (site != null && st.AdblockEnabled) m.Add("Hide an element on this page", IconData.Block, null, () => PickElement(null));
             m.Add("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings"));
             m.ShowAt(toolbar, toolbar.ButtonRect("shield"), true, "shield");
         }
@@ -2208,6 +2250,56 @@ namespace GBrowser
                         { "total", st.TotalBlocked }, { "allowed", st.AllowedSites },
                     };
                 }
+                case "userrules.get":
+                {
+                    var last = CustomLists.Last;
+                    return new Dictionary<string, object>
+                    {
+                        { "text", st.UserRules ?? "" },
+                        { "problems", (last?.Problems ?? new List<FilterEngine.Problem>()).Where(p => p.Source == "")
+                            .Select(p => new Dictionary<string, object> { { "line", p.Line }, { "text", p.Text }, { "reason", p.Reason } }).ToList() },
+                        { "rules", last != null && last.Counts.TryGetValue("", out var n) ? n : 0 },
+                    };
+                }
+                case "userrules.set":
+                {
+                    st.UserRules = (Str(m, "text") ?? "").Replace("\r\n", "\n");
+                    Store.SaveSettings();
+                    // your rules checked now (the full set is rebuilt in the background)
+                    var eng = FilterEngine.Instance;
+                    var chk = eng?.BuildUser(new[] { new FilterEngine.FilterSource { Name = "", Text = st.UserRules, Trusted = true } });
+                    CustomLists.Rebuild();
+                    return new Dictionary<string, object>
+                    {
+                        { "problems", (chk?.Problems ?? new List<FilterEngine.Problem>()).Select(p => new Dictionary<string, object> { { "line", p.Line }, { "text", p.Text }, { "reason", p.Reason } }).ToList() },
+                        { "rules", chk != null && chk.Counts.TryGetValue("", out var n2) ? n2 : 0 },
+                    };
+                }
+                case "lists.custom":
+                    return st.CustomLists.Select(l => new Dictionary<string, object>
+                    {
+                        { "url", l.Url }, { "title", l.Title ?? l.Url }, { "trusted", l.Trusted }, { "known", CustomLists.IsKnown(l.Url) },
+                        { "on", l.Enabled }, { "rules", l.Rules }, { "updated", l.Updated }, { "hours", l.Hours }, { "error", l.Error ?? "" },
+                    }).ToList();
+                case "lists.add":
+                {
+                    string err = await CustomLists.Add(Str(m, "url"), m.TryGetValue("trust", out var tv) && tv is bool tb && tb);
+                    if (err != null) throw new Exception(err);
+                    return null;
+                }
+                case "lists.remove": CustomLists.Remove(Str(m, "url")); return null;
+                case "lists.update": await CustomLists.UpdateDue(true); return null;
+                case "lists.trust":
+                case "lists.toggle":
+                {
+                    var l = st.CustomLists.FirstOrDefault(x => x.Url == Str(m, "url"));
+                    if (l == null) throw new Exception("Not found");
+                    bool v = m.TryGetValue("on", out var ov2) && ov2 is bool ob2 && ob2;
+                    if (cmd == "lists.trust") l.Trusted = v; else l.Enabled = v;
+                    Store.SaveSettings();
+                    CustomLists.Rebuild();
+                    return null;
+                }
                 case "lists.set":
                 {
                     string file = Str(m, "file");
@@ -2397,6 +2489,12 @@ namespace GBrowser
                         string.Join(", ", w.Tabs.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url))));
                 case "movetab": MoveTabToNewWindow(int.Parse(arg), null, false); return "ok";
                 case "mergetab": MoveTabTo(Current, App.Windows[int.Parse(arg)], -1); return "ok";
+                case "gc":
+                    System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+                    GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+                    return (GC.GetTotalMemory(false) / 1048576.0).ToString("F1") + " MB managed";
+                case "pick": { var a2 = arg.Split(' '); lastPickRule = null; PickElement(new Point(int.Parse(a2[0]), int.Parse(a2[1])), true); return "ok"; }
+                case "pickresult": return lastPickRule ?? "(none)";
                 case "bmbar": return bookmarksBar.TestItems();
                 case "bmimport": return (arg.EndsWith(".json") ? Bm.ImportChromium(File.ReadAllText(arg), "Test") : Bm.ImportHtml(File.ReadAllText(arg), "Test")).ToString();
                 case "bmexport": File.WriteAllText(arg, Bm.ExportHtml()); return "ok";

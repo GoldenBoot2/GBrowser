@@ -12,7 +12,7 @@ namespace GBrowser
     /// <summary>Ad-block filter engine: a C# port of the WebView Adblocker Android app's FilterEngine.java. It reads the
     /// same compiled files (filters/*, written by tools/build_filters.py): host hash table, token-indexed URL rules,
     /// page exceptions, cosmetic rules, scriptlets, $redirect stubs, $removeparam/$urlskip and response rules.</summary>
-    internal sealed class FilterEngine
+    internal sealed partial class FilterEngine
     {
         // same values as tools/build_filters.py
         public const int F_EXC = 1, F_IMPORTANT = 2, F_THIRD = 4, F_FIRST = 8, F_MATCHCASE = 16, F_REGEX = 32;
@@ -387,6 +387,13 @@ namespace GBrowser
         public string Match(string url, string host, string pageHost, int type, int groups)
         {
             if (string.IsNullOrEmpty(host)) return null;
+            var uu = user;
+            if (uu != null)
+            {
+                // your own rules and custom lists first (see UserFilters.cs)
+                var ud = UserMatch(uu, url, host, pageHost, type);
+                if (ud != null) return ud.Length == 0 ? null : ud.Substring(1);
+            }
             int party = 0;
             if (!string.IsNullOrEmpty(pageHost)) party = psl.Registrable(host) == psl.Registrable(pageHost) ? 1 : 2;
             var st = new State();
@@ -767,7 +774,8 @@ namespace GBrowser
 
         CosCtx Ctx(string pageUrl, string host, int groups)
         {
-            string key = groups + host;
+            var uu = user;
+            string key = groups + host + "|" + (uu?.Version ?? 0);
             lock (cosCache)
                 if (cosCache.TryGetValue(key, out var hit)) return hit;
             var c = new CosCtx();
@@ -780,6 +788,7 @@ namespace GBrowser
             var sl = new List<string>(); var slExc = new HashSet<string>(StringComparer.Ordinal);
             var ext = new List<string>(); var jsIds = new List<string>();
             if (pageOn) CollectSpecific(host, groups, sels, cssRules, exc, sl, slExc, ext, jsIds);
+            if (pageOn && uu != null) CollectUser(uu, host, sels, cssRules, exc, sl, slExc, ext);
             if (!all) { sels.Clear(); cssRules.Clear(); exc.Clear(); }
             c.Exceptions = exc;
             var js = new StringBuilder();
@@ -806,6 +815,7 @@ namespace GBrowser
             c.Extra = ext.Count == 0 && jsIds.Count == 0 ? "" : ex.ToString();
             var sb = new StringBuilder(4096);
             if (c.Generic) sb.Append(exc.Count == 0 ? UnkeyedCss(groups) : Css(Unkeyed(groups), exc));
+            if (c.Generic && uu != null && uu.generic.Count > 0) sb.Append(exc.Count == 0 ? uu.genericCss : Css(uu.generic.ToArray(), exc));
             if (c.Specific)
             {
                 foreach (var s in sels) if (!exc.Contains(s)) sb.Append(s).Append(HIDE);

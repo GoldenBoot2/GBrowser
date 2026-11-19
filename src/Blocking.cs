@@ -68,6 +68,13 @@ namespace GBrowser
             return true;
         }
 
+        /// <summary>Hiding CSS for this tab's top document right away (a rule just made with the element picker).</summary>
+        internal bool HideNow(string css)
+        {
+            var d = cssDocs.Values.FirstOrDefault(x => x.Top && !x.Broken);
+            return d != null && QueueCss(d.Doc, d.Href, true, css);
+        }
+
         internal bool CssOk(string doc)
         {
             bool ok = cssDocs.TryGetValue(doc ?? "", out var d) && !d.Broken;

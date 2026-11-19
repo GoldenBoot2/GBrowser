@@ -122,6 +122,70 @@
     main.append(lists);
   }
 
+  // Your rules (trusted) and custom filter lists (trust check like AdGuard: unknown sources cannot use trusted-*
+  // scriptlets or CSS rules unless you trust them)
+  if (ab) {
+    const ur = await gb.send('userrules.get');
+    const ta = el('textarea', { class: 'field', spellcheck: 'false', 'aria-label': 'Your rules', placeholder: '||ads.example.com^\nexample.com##.banner\n@@||example.org^' });
+    ta.value = ur.text;
+    const probs = el('div');
+    const showProblems = (list, n) => {
+      probs.textContent = '';
+      probs.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: n + (n === 1 ? ' rule in use' : ' rules in use') + (list.length ? ', ' + list.length + ' not used:' : '') })));
+      for (const p of list.slice(0, 50))
+        probs.append(el('div', { class: 'row' }, icon('Warning'), el('div', { class: 'text' },
+          el('div', { class: 'title', text: 'Line ' + p.line + ': ' + p.text }), el('div', { class: 'sub', text: p.reason }))));
+    };
+    showProblems(ur.problems, ur.rules);
+    const save = el('button', { class: 'btn tonal', text: 'Save' });
+    save.addEventListener('click', async () => {
+      try { const r = await gb.send('userrules.set', { text: ta.value }); showProblems(r.problems, r.rules); snack('Saved: applies to pages you open now'); }
+      catch (e) { snack(e.message); }
+    });
+    const help = el('div', { class: 'sub', text: 'Block: ||host^  or an address pattern.  Allow: @@||host^.  Hide: site.com##selector (or ##selector everywhere).  Scriptlets: site.com#%#//scriptlet(\'name\', \'arg\').' });
+    const pad = el('div', { class: 'row' }, el('div', { class: 'text' }, ta, help));
+    pad.style.display = 'block';
+    main.append(el('div', { class: 'card', id: 'userrules' }, el('h2', { text: 'Your rules' }), pad, el('div', { class: 'row' }, save), probs));
+
+    const cl = el('div', { class: 'card', id: 'customlists' }, el('h2', { text: 'Custom filter lists' }));
+    const listRows = el('div');
+    const url = el('input', { class: 'field', placeholder: 'https://... list address', 'aria-label': 'List address' });
+    url.style.flex = '1';
+    const addBtn = el('button', { class: 'btn tonal', text: 'Add' });
+    const upd = el('button', { class: 'btn text', text: 'Update all' });
+    async function drawLists() {
+      const ls = await gb.send('lists.custom');
+      listRows.textContent = '';
+      if (!ls.length) listRows.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: 'None. Add a list by its address.' })));
+      for (const l of ls) {
+        const on = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(l.on), 'aria-label': 'Use ' + l.title });
+        on.addEventListener('click', async () => { l.on = !l.on; on.setAttribute('aria-checked', String(l.on)); await gb.send('lists.toggle', { url: l.url, on: l.on }); });
+        const trust = el('span', { class: 'chip' + (l.trusted ? '' : ' warn'), text: l.known ? 'Known source' : l.trusted ? 'Trusted by you' : 'Not trusted' });
+        const acts = el('div', { class: 'actions' });
+        if (!l.known) acts.append(iconButton(l.trusted ? 'ShieldLock' : 'Shield', l.trusted ? 'Stop trusting' : 'Trust this list (allows trusted scriptlets and CSS rules)', async () => {
+          if (!l.trusted && !confirm('Trust "' + l.title + '"? A trusted list may run trusted scriptlets and change page styles. Only trust lists from makers you know.')) return;
+          await gb.send('lists.trust', { url: l.url, on: !l.trusted }); drawLists();
+        }));
+        acts.append(iconButton('Delete', 'Remove', async () => { await gb.send('lists.remove', { url: l.url }); drawLists(); }));
+        const when = l.updated ? new Date(l.updated).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'never';
+        listRows.append(el('div', { class: 'row' }, icon('Shield'), el('div', { class: 'text' },
+          el('div', { class: 'title', text: l.title }),
+          el('div', { class: 'sub', text: l.rules.toLocaleString() + ' rules - updated ' + when + (l.error ? ' - ' + l.error : '') + ' - ' + l.url })), trust, acts, on));
+      }
+    }
+    addBtn.addEventListener('click', async () => {
+      const u = url.value.trim(); if (!u) return;
+      addBtn.disabled = true; addBtn.textContent = 'Adding...';
+      try { await gb.send('lists.add', { url: u }); url.value = ''; snack('Added'); } catch (e) { snack(e.message); }
+      addBtn.disabled = false; addBtn.textContent = 'Add';
+      setTimeout(drawLists, 300);
+    });
+    upd.addEventListener('click', async () => { upd.disabled = true; try { await gb.send('lists.update'); snack('Updated'); } catch (e) { snack(e.message); } upd.disabled = false; drawLists(); });
+    cl.append(listRows, el('div', { class: 'row' }, url, addBtn, upd));
+    main.append(cl);
+    drawLists();
+  }
+
   // Memory
   const sleep = el('select', { 'aria-label': 'Sleeping tabs' }, [[0, 'Never'], [1, '1 minute'], [5, '5 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour']]
     .map(([v, t]) => el('option', { value: v, text: t, selected: v === s.SleepMinutes })));

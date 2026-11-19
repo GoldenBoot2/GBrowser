@@ -9,7 +9,7 @@ Last full audit: 19-11-2026.
 1. #7 New window (Ctrl+N, drag a tab out), set as default browser (done 19-11-2026; drag with the real mouse to be tried by the user).
 2. #8 Import from Chrome / Edge (bookmarks done 19-11-2026), cookies and site data (with the cookie manager, 5), passwords page, bookmark folders (done 19-11-2026).
 3. Bookmarks (user, 19-11-2026; done 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
-4. Ad blocking (user, 19-11-2026): built-in lists on / off (done 19-11-2026), custom lists with trust check, user rules editor, element picker.
+4. Ad blocking (user, 19-11-2026): done 19-11-2026 (lists on / off, custom lists with trust check, your rules, element picker).
 5. Cookie manager, 19 features (user, 19-11-2026): see "Cookie manager" below.
 6. Android app features missing here (user, 19-11-2026): see "From the Android app" below.
 7. Remaining Missing rows in the tables below.
@@ -83,9 +83,9 @@ Last full audit: 19-11-2026.
 |---|---|
 | Built-in lists (AdGuard, EasyList, EasyPrivacy, uBlock, HaGeZi, OISD...), groups ads / annoyances / trackers | Done |
 | Turn each built-in list on / off | Done 19-11-2026: every compiled rule keeps the lists it comes from (bit mask; one rule in several lists is still one rule), Settings > Filter lists has a switch per list. Regression: with all lists on, 207,612 network answers and all cosmetic / scriptlet / JS / link-cleaning / response answers identical to the old engine; with only some groups on, the new engine also blocks the 2,753 corpus requests that a rule shared by two groups covers (the old build dropped such rules from the second group). Memory and load time unchanged (heap 11.1 vs 10.5 MB, 179 vs 188 ms) |
-| Custom filter lists by address, with a trust check like AdGuard's (known / trusted list sources vs unknown; unknown lists cannot use risky rule types such as scriptlets / $redirect) and update interval | Missing (user, 19-11-2026) |
-| User rules editor (block / allow / cosmetic rules, syntax check) | Missing (user, 19-11-2026) |
-| Element picker: hide an element on a page by pointing at it (creates a user rule) | Missing (user, 19-11-2026) |
+| Custom filter lists by address, with a trust check like AdGuard's (known / trusted list sources vs unknown; unknown lists cannot use risky rule types such as scriptlets / $redirect) and update interval | Done 19-11-2026: Settings > Custom filter lists (add by address, on / off, remove, update all); lists from known makers (AdGuard, EasyList, uBlock Origin, HaGeZi, OISD, ...) are trusted, others are not until you trust them: no trusted-* scriptlets, no CSS rules (tested: 2 of 4 rules taken untrusted, 4 trusted); update interval from the list's "! Expires" (else a day), checked hourly; plain host rules stored as hashes (HaGeZi Light, 91,291 rules: +0.7 MB) |
+| User rules editor (block / allow / cosmetic rules, syntax check) | Done 19-11-2026: Settings > Your rules: ||host^ / patterns / /regex/ / @@ exceptions with $third-party, $domain=, $important, types, $redirect; ##, #@#, extended CSS, #$# CSS, scriptlets (AdGuard and uBO syntax); lines that cannot be used are listed with the reason. Your rules and custom lists decide before the built-in lists (an allow rule allows, a block rule blocks) |
+| Element picker: hide an element on a page by pointing at it (creates a user rule) | Done 19-11-2026: shield menu > Hide an element on this page, or right-click > Hide this element...; runs in an isolated world the page cannot reach, highlights the element, Wider / Narrower, editable selector with match count; the rule goes to Your rules and the element hides at once |
 | Per-site switch, stealth mode, blocked count | Done |
 
 ## Privacy and security

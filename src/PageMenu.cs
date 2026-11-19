@@ -16,6 +16,7 @@ namespace GBrowser
         public sealed class Host
         {
             public Action<string> NewTab, NewPrivateTab;
+            public Action<Point> HideElement;   // element picker at this point (CSS pixels)
             public Func<string, string> SearchUrl;
         }
 
@@ -131,6 +132,12 @@ namespace GBrowser
                 else if (selection.Length > 0) Cmd("print", "Print...", IconData.Print, "Ctrl+P");
             }
             Sep();
+            string pg = core.Source;
+            if (host.HideElement != null && pg != null && (pg.StartsWith("http://") || pg.StartsWith("https://")))
+            {
+                var at0 = e.Location;
+                Own("Hide this element...", IconData.Block, null, () => host.HideElement(at0));
+            }
             Cmd("inspectElement", "Inspect", IconData.Code, "Ctrl+Shift+I");
             while (m.Items.Count > 0 && m.Items[m.Items.Count - 1].Separator) m.Items.RemoveAt(m.Items.Count - 1);
 

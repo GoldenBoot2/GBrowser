@@ -163,7 +163,9 @@ namespace GBrowser
         public int WindowH { get; set; } = 800;
         public bool WindowMax { get; set; }
         public long LastBookmarkFolder { get; set; } = 1;
-        public List<string> DisabledLists { get; set; } = new List<string>();   // filter list files turned off one by one   // where the star puts new bookmarks (the last folder chosen)
+        public List<string> DisabledLists { get; set; } = new List<string>();   // filter list files turned off one by one
+        public string UserRules { get; set; } = "";                             // your own filter rules (one per line)
+        public List<CustomList> CustomLists { get; set; } = new List<CustomList>();   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
         public List<WindowSession> Windows { get; set; } = new List<WindowSession>();
     }

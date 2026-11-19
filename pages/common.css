@@ -82,6 +82,11 @@ main { max-width: 900px; margin: 0 auto; padding: 24px 32px 64px; }
 select, input.field { height: 40px; border-radius: 8px; border: 1px solid var(--outline); background: var(--field); padding: 0 12px;
   font: inherit; color: var(--on-surface); caret-color: var(--primary); }
 select:focus, input.field:focus { outline: 2px solid var(--primary); border-color: transparent; }
+textarea.field { width: 100%; min-height: 180px; border-radius: 8px; border: 1px solid var(--outline); background: var(--field);
+  color: inherit; padding: 10px 12px; font: 13px/1.5 Consolas, 'Cascadia Mono', monospace; resize: vertical; box-sizing: border-box; }
+textarea.field:focus { outline: 2px solid var(--primary); border-color: transparent; }
+.chip { display: inline-block; padding: 2px 10px; border-radius: 8px; font-size: 12px; background: var(--primary-container); color: var(--on-primary-container); }
+.chip.warn { background: var(--error-container, #ffdad6); color: var(--on-error-container, #410002); }
 
 .switch { position: relative; width: 52px; height: 32px; flex: none; border-radius: 16px; border: 2px solid var(--outline);
   background: var(--surface-container-highest); cursor: pointer; padding: 0; transition: background .15s; }
