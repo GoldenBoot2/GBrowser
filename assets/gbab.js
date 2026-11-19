@@ -978,12 +978,27 @@
       };
     }
     // same picture -> same tiny noise within this session and site; new noise next session
-    function noisePixels(data) {
-      var r = rng(base), n = data.length;
-      for (var i = 0; i < n; i += 4) {
-        if (r() < 0.04) {
-          var ch = i + ((r() * 3) | 0);
-          data[ch] = data[ch] ^ 1;
+    // Pixel noise that reads like a different GPU / font rasteriser, not like tampering (BrowserScan flagged the
+    // old random flips, 19-11-2026). Only opaque pixels whose colour differs from all four neighbours change
+    // (anti-aliased text and curves); blank, flat, gradient and hard-edged areas keep their exact values. The new
+    // lowest bit depends only on the pixel's position, this identity and the pixel's upper 7 bits, so every read
+    // path (whole canvas, part of it, toDataURL, a write-back and read again) gives the same answer.
+    // ext: the real pixels with a 1-pixel border (ew = width + 2); out: the same area without the border, changed
+    // in place; (ox, oy): position of out's first pixel in the canvas
+    function noiseArea(ext, ew, out, w, h, ox, oy, ostride) {
+      var row = ew * 4, os = ostride || w;
+      function flat(q, r7, g7, b7) { return ext[q + 3] !== 255 || ((ext[q] >> 1) === r7 && (ext[q + 1] >> 1) === g7 && (ext[q + 2] >> 1) === b7); }
+      for (var j = 0; j < h; j++) {
+        for (var i = 0; i < w; i++) {
+          var e = ((j + 1) * ew + i + 1) * 4;
+          if (ext[e + 3] !== 255) continue;
+          var r7 = ext[e] >> 1, g7 = ext[e + 1] >> 1, b7 = ext[e + 2] >> 1;
+          if (flat(e - 4, r7, g7, b7) || flat(e + 4, r7, g7, b7) || flat(e - row, r7, g7, b7) || flat(e + row, r7, g7, b7)) continue;
+          var hsh = Math.imul(base ^ Math.imul(ox + i, 0x9E3779B1) ^ Math.imul(oy + j, 0x85EBCA77), 0xC2B2AE3D) ^ (r7 << 14 | g7 << 7 | b7);
+          hsh = Math.imul(hsh ^ (hsh >>> 15), 0x2C1B3C6D); hsh ^= hsh >>> 13;
+          if ((hsh & 7) !== 0) continue;   // about 1 in 8 of those pixels
+          var o = (j * os + i) * 4 + ((hsh >>> 3) % 3);
+          out[o] = (out[o] & 254) | ((hsh >>> 5) & 1);
         }
       }
     }
@@ -1050,7 +1065,11 @@
     var CP = window.HTMLCanvasElement && HTMLCanvasElement.prototype;
     var C2 = window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype;
     var origGet = C2 && C2.getImageData;
+    // only canvases with text on them get noise: text rendering is what differs between machines (the fingerprint);
+    // pixels a page wrote itself (CreepJS writes random colours and reads them back) keep their exact values
+    var texted = new WeakSet();
     function noisyCopy(canvas) {
+      if (!texted.has(canvas)) return null;
       var w = canvas.width, h = canvas.height;
       if (!w || !h || w * h > 1048576) return null;
       var c = document.createElement('canvas');
@@ -1058,7 +1077,7 @@
       var x = c.getContext('2d');
       x.drawImage(canvas, 0, 0);
       var img = origGet.call(x, 0, 0, w, h);
-      noisePixels(img.data);
+      noiseArea(origGet.call(x, -1, -1, w + 2, h + 2).data, w + 2, img.data, w, h, 0, 0);
       x.putImageData(img, 0, 0);
       return c;
     }
@@ -1075,10 +1094,21 @@
           return nat(f, this, arguments);
         }}.toBlob;
       });
+      ['fillText', 'strokeText'].forEach(function (n) {
+        methodOn(C2, n, function (f) {
+          var o = {fillText() { var r = nat(f, this, arguments); try { texted.add(this.canvas); } catch (e) {} return r; },
+            strokeText() { var r = nat(f, this, arguments); try { texted.add(this.canvas); } catch (e) {} return r; }};
+          return o[n];
+        });
+      });
       methodOn(C2, 'getImageData', function (f) {
         return {getImageData() {
           var img = nat(f, this, arguments);
-          try { if (img.data.length <= 4194304) noisePixels(img.data); } catch (e) {}
+          try {
+            var sx = +arguments[0] | 0, sy = +arguments[1] | 0, sw = img.width, sh = img.height;
+            if (texted.has(this.canvas) && img.data.length <= 4194304 && +arguments[2] > 0 && +arguments[3] > 0)
+              noiseArea(origGet.call(this, sx - 1, sy - 1, sw + 2, sh + 2).data, sw + 2, img.data, sw, sh, sx, sy);
+          } catch (e) {}
           return img;
         }}.getImageData;
       });
@@ -1090,7 +1120,14 @@
       methodOn(G.prototype, 'readPixels', function (f) {
         return {readPixels() {
           var r = nat(f, this, arguments);
-          try { var px = arguments[6]; if (px && px.length <= 4194304) noisePixels(px); } catch (e) {}
+          try {
+            var a = arguments, px = a[6], w = a[2] | 0, h = a[3] | 0;
+            if (px instanceof Uint8Array && a.length === 7 && a[4] === 0x1908 && a[5] === 0x1401 && w > 2 && h > 2 &&
+                px.length >= w * h * 4 && px.length <= 4194304) {
+              var copy = new Uint8Array(px.subarray(0, w * h * 4));
+              noiseArea(copy, w, px.subarray(w * 4 + 4), w - 2, h - 2, (a[0] | 0) + 1, (a[1] | 0) + 1, w);
+            }
+          } catch (e) {}
           return r;
         }}.readPixels;
       });
