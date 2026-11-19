@@ -13,6 +13,7 @@ Last full audit: 19-11-2026.
 5. Cookie manager, 19 features (user, 19-11-2026; done 19-11-2026): see "Cookie manager" below.
 6. Android app features missing here (user, 19-11-2026): see "From the Android app" below.
 7. Remaining Missing rows in the tables below.
+8. Chrome settings GBrowser lacks (user, 19-11-2026: "no need to add any missing ones. add them to pending"; the Settings page was reorganised like Chrome's the same day): see "Settings compared with Chrome 157" at the end. Small: Autofill and passwords switches (offer to save passwords; addresses and payment), Reset settings, proxy settings and Manage certificates links, "Show downloads when they're done", bookmarks bar "Only on New Tab page", On startup "specific pages", tab search button and Ctrl+Tab most-recently-used, hover card memory usage. Medium: site settings defaults + exception lists (JavaScript, images, pop-ups), third-party cookie exceptions, manage search engines / site search, secure connections public vs private sites, graphics acceleration, focus highlight and caret browsing, remove permissions of unused sites, Safety Check, search box for Settings. Large: profiles, translate, Live Caption, vertical tabs, split view, Energy Saver.
 
 ## Tabs and windows
 | Feature | Status |

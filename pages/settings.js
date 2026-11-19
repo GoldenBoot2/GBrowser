@@ -77,7 +77,6 @@
       fontsBox.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'title', text: label })), sel));
     }
   });
-  if (location.hash === '#appearance') document.getElementById('appearance').scrollIntoView();
 
   // Languages (Chrome's Settings > Languages): the order is the Accept-Language header and navigator.languages
   const langAll = await gb.send('languages.all');
@@ -423,4 +422,72 @@
     clearBtn.disabled = false;
   } }, icon('Delete'), 'Clear data');
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Clear browsing data' }), checks, el('div', { class: 'row' }, clearBtn)));
+
+  // ---- Chrome's layout: a sidebar of sections in Chrome's order, each section's cards under its title ----
+  const cards = [...main.children];
+  const cardOf = t => cards.find(c => c.classList.contains('card') && c.querySelector(':scope > h2')?.textContent === t);
+  const rowOf = (card, t) => card && [...card.children].find(r => r.querySelector('.title')?.textContent === t);
+  const card = (title, id, ...kids) => el('div', { class: 'card', id: id || null }, el('h2', { text: title }), ...kids.filter(Boolean));
+  const start = cardOf('Start and search'), priv = cardOf('Privacy and security'), abc = cardOf('Ad blocking');
+  // Appearance: home button with its page and the bookmarks bar, before the font settings (Chrome's order)
+  const appear = cardOf('Appearance');
+  const fontAnchor = appear && [...appear.children].find(r => r.querySelector('.title')?.textContent === 'Font size');
+  for (const t of ['Show home button', 'Home page', 'Bookmarks bar']) { const r = rowOf(start, t); if (r && appear) appear.insertBefore(r, fontAnchor || null); }
+  { const z = rowOf(appear, 'Page zoom'); if (z) appear.append(z); }   // Chrome: page zoom after the fonts
+  const searchCard = card('Search engine', 'search', rowOf(start, 'Search engine'), rowOf(start, 'Search suggestions'));
+  const startupCard = card('On startup', 'startup', rowOf(start, 'Reopen tabs on start'));
+  // Privacy and security: Chrome's cards
+  const delCard = cardOf('Clear browsing data');
+  if (delCard) delCard.querySelector(':scope > h2').textContent = 'Delete browsing data';
+  const cookieCard = card('Third-party cookies and site data', 'cookies', rowOf(priv, 'Cookies and site data'), rowOf(abc, 'Do Not Track'),
+    rowOf(priv, 'Clear data when GBrowser closes'));
+  const dnsBox = priv && [...priv.children].find(r => r.classList.contains('rows'));
+  const secCard = card('Security', 'security', rowOf(priv, 'Always use secure connections'), rowOf(priv, 'Dangerous site and download protection'),
+    rowOf(priv, 'Tracking prevention'), dnsBox, rowOf(priv, 'Your data is encrypted'));
+  const linkCard = (title, iconName, sub, url) => {
+    const r = el('div', { class: 'row link' }, icon(iconName), el('div', { class: 'text' }, el('div', { class: 'title', text: title }), sub ? el('div', { class: 'sub', text: sub }) : null), icon('OpenNew'));
+    r.addEventListener('click', () => openUrl(url));
+    return el('div', { class: 'card' }, r);
+  };
+  const SECTIONS = [
+    ['privacy', 'Privacy and security', 'Lock', [delCard, cookieCard, secCard, cardOf('Site settings'), cardOf('Hide my identity')]],
+    ['adblock', 'Ad blocking', 'Shield', [abc, cardOf('Sites without blocking'), cardOf('Filter lists'), cardOf('Your rules'), cardOf('Custom filter lists')]],
+    ['performance', 'Performance', 'Speed', [cardOf('Memory'), cardOf('Always keep these sites active')]],
+    ['appearance-sec', 'Appearance', 'Palette', [appear]],
+    ['search-sec', 'Search engine', 'Search', [searchCard]],
+    ['default-sec', 'Default browser', 'Public', [cardOf('Default browser')]],
+    ['startup-sec', 'On startup', 'Restore', [startupCard]],
+    ['languages-sec', 'Languages', 'Language', [cardOf('Languages')]],
+    ['downloads-sec', 'Downloads', 'Download', [cardOf('Downloads')]],
+    ['extensions-sec', 'Extensions', 'Extension', [linkCard('Extensions', 'Extension', 'Manage, install and remove extensions', 'https://gbrowser.local/extensions.html')]],
+    ['about-sec', 'About GBrowser', 'Info', [linkCard('About GBrowser', 'Info', 'Version, updates and developer', 'https://gbrowser.local/about.html')]],
+  ];
+  // the old containers are empty now
+  for (const c of [start, priv]) if (c && c.querySelectorAll('.row').length === 0) c.remove();
+  const nav = el('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' });
+  const content = el('div', { class: 'settings-content' });
+  const links = {};
+  for (const [id, title, iconName, list] of SECTIONS) {
+    // a card that is the whole section does not repeat the section's title (like Chrome)
+    for (const c of list) { const h = c && c.querySelector(':scope > h2'); if (h && h.textContent === title) h.remove(); }
+    const sec = el('section', { id, class: 'settings-section' }, el('h2', { class: 'section-title', text: title }), ...list.filter(Boolean));
+    content.append(sec);
+    const a = el('a', { href: '#' + id, class: 'nav-item' }, icon(iconName, 's20'), el('span', { text: title }));
+    a.addEventListener('click', e => { e.preventDefault(); sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); history.replaceState(null, '', '#' + id); });
+    links[id] = a;
+    nav.append(a);
+  }
+  main.textContent = '';
+  main.classList.add('settings-layout');
+  main.append(nav, content);
+  // the section in view is highlighted in the sidebar (like Chrome)
+  const mark = id => { for (const k in links) links[k].classList.toggle('on', k === id); };
+  const io = new IntersectionObserver(es => {
+    const vis = [...content.children].filter(sec => { const r = sec.getBoundingClientRect(); return r.bottom > 120 && r.top < innerHeight * 0.5; });
+    if (vis.length) mark(vis[0].id);
+  }, { threshold: [0, 0.25, 0.5, 1], rootMargin: '-80px 0px 0px 0px' });
+  for (const sec of content.children) io.observe(sec);
+  mark(SECTIONS[0][0]);
+  // links into a section or card (#appearance, #identity, #downloads ...)
+  if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) setTimeout(() => t.scrollIntoView({ block: 'start' }), 50); }
 })();
