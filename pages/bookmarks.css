@@ -1,0 +1,13 @@
+main { max-width: 1120px; }
+.bm { display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; }
+.bm .nav .row { min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
+.bm .nav .row + .row { border-top: 0; }
+.bm .nav .row.on { background: var(--primary-container); color: var(--on-primary-container); }
+.bm .nav .row.on .icon { color: var(--on-primary-container); }
+.bm .list .row.head { min-height: 48px; }
+.bm .list .row.head .title { font-weight: 600; }
+.bm .row.before { box-shadow: inset 0 2px 0 var(--primary); }
+.bm .row.after { box-shadow: inset 0 -2px 0 var(--primary); }
+.bm .row.drop { background: var(--primary-container); }
+.bm .row.dragging { opacity: .5; }
+@media (max-width: 760px) { .bm { grid-template-columns: 1fr; } }

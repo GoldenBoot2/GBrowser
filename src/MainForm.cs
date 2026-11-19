@@ -57,6 +57,7 @@ namespace GBrowser
                 };
             restoreWs = ws;
             Activated += (s, e) => App.Activated(this);
+            if (!bookmarksHooked) { bookmarksHooked = true; Bm.Changed += OnBookmarksChanged; }
             FilterEngine.Preload();
             Theme.Update();
             Text = "GBrowser";
@@ -169,6 +170,14 @@ namespace GBrowser
             };
             uiTimer.Start();
             bookmarksBar.Open += (url, newTab) => { if (newTab) NewTab(url, false); else Current?.Navigate(url); };
+            bookmarksBar.OpenWindow += url => App.NewWindow(new[] { url });
+            bookmarksBar.OpenPrivate += url => NewPrivateTab(url);
+            bookmarksBar.Edit += b => EditBookmarkDialog(b, b.Folder ? "Edit folder" : "Edit bookmark");
+            bookmarksBar.AddPage += AddPageDialog;
+            bookmarksBar.AddFolder += AddFolderDialog;
+            bookmarksBar.Manager += () => OpenPage("bookmarks");
+            bookmarksBar.ImportNow += () => NewTab(Pages.Url("bookmarks") + "#import");
+            bookmarksBar.HideBar += ToggleBookmarksBar;
 
             sleepTimer.Tick += async (s, e) =>
             {
@@ -1113,16 +1122,79 @@ namespace GBrowser
             ResumeLayout();
         }
 
+        /// <summary>Star / Ctrl+D, like Chrome: a new bookmark goes to the folder used last and the "Bookmark added"
+        /// dialog lets you rename it, pick its folder or remove it; on a bookmarked page it edits that bookmark.</summary>
         void ToggleBookmark()
         {
             var t = Current;
             if (t == null) return;
             string url = t.Created ? t.View.CoreWebView2.Source : t.Url;
             if (string.IsNullOrEmpty(url) || Pages.PageName(url) == "newtab") return;
-            Store.ToggleBookmark(url, t.Title);
-            UpdateUi();
-            bookmarksBar.Invalidate();
+            var b = Bm.ForUrl(url);
+            bool added = b == null;
+            if (added) b = Bm.Add(url, t.Title, Store.Settings.LastBookmarkFolder);
+            EditBookmarkDialog(b, added ? "Bookmark added" : "Edit bookmark");
         }
+
+        /// <summary>Name, address (not for folders) and folder of a bookmark; Remove deletes it.</summary>
+        internal void EditBookmarkDialog(Bookmark b, string title)
+        {
+            var folders = Bm.Folders().Where(f => !b.Folder || (f.Item1 != b.Id && !f.Item2.Contains(" / " + b.Title + " / "))).ToList();
+            int sel = Math.Max(0, folders.FindIndex(f => f.Item1 == b.Parent));
+            var inputs = new List<Tuple<string, string, string[]>> { Tuple.Create("Name", b.Title, (string[])null) };
+            if (!b.Folder) inputs.Add(Tuple.Create("URL", b.Url, (string[])null));
+            inputs.Add(Tuple.Create("Folder", sel.ToString(), folders.Select(f => f.Item2).ToArray()));
+            int r = MaterialDialog.Edit(this, title, new Tuple<string, string>[0], inputs, out var v, "Done", "Remove", null);
+            if (r == 2) Bm.Remove(b.Id);
+            else if (r == 1)
+            {
+                string url = b.Folder ? null : (Search.ToUrl(v[1]) ?? b.Url);
+                Bm.Edit(b.Id, v[0], url);
+                int fi = int.Parse(v[v.Length - 1]);
+                if (fi >= 0 && fi < folders.Count && folders[fi].Item1 != b.Parent)
+                {
+                    Bm.Move(b.Id, folders[fi].Item1, -1);
+                    if (!b.Folder) { Store.Settings.LastBookmarkFolder = folders[fi].Item1; Store.SaveSettings(); }
+                }
+            }
+        }
+
+        /// <summary>"Add page" (the current page's name and address to start with, like Chrome).</summary>
+        void AddPageDialog(long parent, int index)
+        {
+            var t = Current;
+            string url = t == null ? "" : t.Created ? t.View.CoreWebView2.Source : t.Url;
+            if (Pages.IsInternal(url)) url = "";
+            var r = MaterialDialog.Edit(this, "Add page", new Tuple<string, string>[0], new[]
+            {
+                Tuple.Create("Name", url.Length > 0 ? t.Title : "", (string[])null), Tuple.Create("URL", url, (string[])null)
+            }, out var v, "Save", null, "Cancel");
+            if (r != 1) return;
+            string u = Search.ToUrl(v[1] ?? "");
+            if (string.IsNullOrWhiteSpace(v[1]) || u == null) return;
+            Bm.Add(u, string.IsNullOrWhiteSpace(v[0]) ? u : v[0], parent, index);
+        }
+
+        void AddFolderDialog(long parent, int index)
+        {
+            var v = MaterialDialog.Prompt(this, "New folder", new Tuple<string, string>[0], new[] { Tuple.Create("Name", "New folder", false) }, "Save");
+            if (v != null) Bm.AddFolder(v[0], parent, index);
+        }
+
+                /// <summary>Every window's star and bookmarks bar follow bookmark changes.</summary>
+        static void OnBookmarksChanged()
+        {
+            foreach (var w in App.Windows.ToList())
+            {
+                if (w.IsDisposed) continue;
+                w.bookmarksBar.Invalidate();
+                w.UpdateUi();
+                foreach (var t in w.Tabs)
+                    if (t.Created && Pages.PageName(t.View.CoreWebView2.Source) == "bookmarks")
+                        try { t.View.CoreWebView2.PostWebMessageAsJson("{\"type\":\"bookmarks\"}"); } catch { }
+            }
+        }
+        static bool bookmarksHooked;
 
         void OpenPage(string name)
         {
@@ -1809,6 +1881,8 @@ namespace GBrowser
         }
 
         static string Str(Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) && v != null ? v.ToString() : null;
+        static long Lng(Dictionary<string, object> m, string k, long def) =>
+            m.TryGetValue(k, out var v) && v != null && long.TryParse(Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture), out var n) ? n : def;
 
         async Task<object> HandleCommand(BrowserTab tab, string cmd, Dictionary<string, object> m)
         {
@@ -1832,7 +1906,7 @@ namespace GBrowser
                 case "newtab.data":
                 {
                     var tiles = new List<object>();
-                    foreach (var b in Store.Bookmarks.Take(8)) tiles.Add(new Dictionary<string, object> { { "url", b.Url }, { "title", b.Title } });
+                    foreach (var b in Store.Bookmarks.Where(x => !x.Folder && x.Parent == Bm.Bar).Take(8)) tiles.Add(new Dictionary<string, object> { { "url", b.Url }, { "title", b.Title } });
                     if (tiles.Count < 8)
                     {
                         var seen = new HashSet<string>(tiles.Select(x => (string)((Dictionary<string, object>)x)["url"]));
@@ -1849,7 +1923,60 @@ namespace GBrowser
                     }
                     return new Dictionary<string, object> { { "tiles", tiles }, { "engine", Search.Engines.TryGetValue(st.SearchEngine ?? "", out var en) ? en[0] : "Google" } };
                 }
-                case "bookmarks.list": return Store.Bookmarks;
+                case "bookmarks.list": return Store.Bookmarks.Where(b => !b.Folder).ToList();
+                case "bookmarks.tree":
+                    return new Dictionary<string, object>
+                    {
+                        { "roots", new[] { new Dictionary<string, object> { { "Id", Bm.Bar }, { "Title", Bm.RootName(Bm.Bar) } },
+                                           new Dictionary<string, object> { { "Id", Bm.Other }, { "Title", Bm.RootName(Bm.Other) } } } },
+                        { "items", Store.Bookmarks },
+                    };
+                case "bookmarks.add":
+                {
+                    string u = Search.ToUrl(Str(m, "url") ?? "");
+                    if (u == null) throw new Exception("Not a valid address");
+                    Bm.Add(u, Str(m, "title"), Lng(m, "parent", Bm.Bar), (int)Lng(m, "index", -1));
+                    return null;
+                }
+                case "bookmarks.addFolder": Bm.AddFolder(Str(m, "title"), Lng(m, "parent", Bm.Bar), (int)Lng(m, "index", -1)); return null;
+                case "bookmarks.edit":
+                {
+                    var nu = Str(m, "url");
+                    Bm.Edit(Lng(m, "id", 0), Str(m, "title"), string.IsNullOrWhiteSpace(nu) ? null : (Search.ToUrl(nu) ?? nu));
+                    return null;
+                }
+                case "bookmarks.move": if (!Bm.Move(Lng(m, "id", 0), Lng(m, "parent", Bm.Bar), (int)Lng(m, "index", -1))) throw new Exception("Cannot move there"); return null;
+                case "bookmarks.delete": Bm.Remove(Lng(m, "id", 0)); return null;
+                case "bookmarks.export":
+                {
+                    using (var d = new SaveFileDialog { Filter = "Bookmarks (*.html)|*.html", FileName = "bookmarks_" + DateTime.Now.ToString("dd_MM_yyyy") + ".html" })
+                    {
+                        if (d.ShowDialog(this) != DialogResult.OK) return false;
+                        File.WriteAllText(d.FileName, Bm.ExportHtml(), new System.Text.UTF8Encoding(false));
+                        return true;
+                    }
+                }
+                case "bookmarks.importFile":
+                {
+                    using (var d = new OpenFileDialog { Filter = "Bookmarks (*.html;*.htm)|*.html;*.htm" })
+                    {
+                        if (d.ShowDialog(this) != DialogResult.OK) return -1;
+                        return Bm.ImportHtml(File.ReadAllText(d.FileName), "file");
+                    }
+                }
+                case "bookmarks.browsers":
+                    return Bm.OtherBrowsers().Select((b, i) => new Dictionary<string, object> { { "i", i }, { "browser", b.Item1 }, { "profile", b.Item2 } }).ToList();
+                case "bookmarks.importBrowser":
+                {
+                    var list = Bm.OtherBrowsers();
+                    int i = (int)Lng(m, "i", -1);
+                    if (i < 0 || i >= list.Count) throw new Exception("Not found");
+                    string text;
+                    // the browser may be running: read a shared copy
+                    using (var fs = new FileStream(list[i].Item3, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var rd = new StreamReader(fs)) text = rd.ReadToEnd();
+                    return Bm.ImportChromium(text, list[i].Item1);
+                }
                 case "favicons":
                 {
                     // site icons for a page's list (one per site): { "<site key>": "data:image/png;base64,..." }
@@ -1865,13 +1992,8 @@ namespace GBrowser
                     return o;
                 }
                 case "bookmarks.remove":
-                    Store.Bookmarks.RemoveAll(b => b.Url == Str(m, "url")); Store.SaveBookmarks(); bookmarksBar.Invalidate(); UpdateUi(); return null;
-                case "bookmarks.rename":
-                {
-                    var b = Store.Bookmarks.FirstOrDefault(x => x.Url == Str(m, "url"));
-                    if (b != null) { b.Title = Str(m, "title") ?? b.Title; var nu = Str(m, "newUrl"); if (!string.IsNullOrWhiteSpace(nu)) b.Url = Search.ToUrl(nu) ?? b.Url; Store.SaveBookmarks(); bookmarksBar.Invalidate(); }
+                    foreach (var x in Store.Bookmarks.Where(x => !x.Folder && x.Url == Str(m, "url")).ToList()) Bm.Remove(x.Id);
                     return null;
-                }
                 case "history.list":
                 {
                     string q = (Str(m, "q") ?? "").Trim().ToLowerInvariant();
@@ -1886,7 +2008,7 @@ namespace GBrowser
                 }
                 case "history.clear":
                     Store.History.Clear(); Store.SaveHistory();
-                    Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url));
+                    Favicons.ClearExcept(Store.Bookmarks.Where(b => !b.Folder).Select(b => b.Url));
                     if (Profile != null) await Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.BrowsingHistory);
                     return null;
                 case "default.info":
@@ -1977,7 +2099,7 @@ namespace GBrowser
                         {
                             case "cookies": flags |= CoreWebView2BrowsingDataKinds.AllSite; break;
                             case "cache": flags |= CoreWebView2BrowsingDataKinds.DiskCache | CoreWebView2BrowsingDataKinds.CacheStorage; break;
-                            case "history": flags |= CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory; Store.History.Clear(); Store.SaveHistory(); Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url)); break;
+                            case "history": flags |= CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory; Store.History.Clear(); Store.SaveHistory(); Favicons.ClearExcept(Store.Bookmarks.Where(b => !b.Folder).Select(b => b.Url)); break;
                             case "passwords": flags |= CoreWebView2BrowsingDataKinds.PasswordAutosave; break;
                             case "autofill": flags |= CoreWebView2BrowsingDataKinds.GeneralAutofill; break;
                         }
@@ -2264,6 +2386,14 @@ namespace GBrowser
                         string.Join(", ", w.Tabs.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url))));
                 case "movetab": MoveTabToNewWindow(int.Parse(arg), null, false); return "ok";
                 case "mergetab": MoveTabTo(Current, App.Windows[int.Parse(arg)], -1); return "ok";
+                case "bmbar": return bookmarksBar.TestItems();
+                case "bmimport": return (arg.EndsWith(".json") ? Bm.ImportChromium(File.ReadAllText(arg), "Test") : Bm.ImportHtml(File.ReadAllText(arg), "Test")).ToString();
+                case "bmexport": File.WriteAllText(arg, Bm.ExportHtml()); return "ok";
+                case "bmbarclick": bookmarksBar.TestClick(int.Parse(arg)); return "ok";
+                case "bmbarright": bookmarksBar.TestRightClick(int.Parse(arg)); return "ok";
+                case "bmbardrag": { var a2 = arg.Split(' '); bookmarksBar.TestDrag(int.Parse(a2[0]), int.Parse(a2[1])); return "ok"; }
+                case "bmbardrop": { var a2 = arg.Split(new[] { ' ' }, 3); bookmarksBar.TestDropUrl(a2[0], a2.Length > 2 ? a2[2] : "", int.Parse(a2[1])); return "ok"; }
+                case "bmstar": BeginInvoke((Action)ToggleBookmark); return "ok";
                 case "winclose": { var w = App.Windows[int.Parse(arg)]; BeginInvoke((Action)w.Close); return "ok"; }
                 case "winactivate": App.Windows[int.Parse(arg)].Activate(); return "ok";
                 case "quit": BeginInvoke((Action)(() => App.Quit())); return "ok";
@@ -2493,7 +2623,7 @@ namespace GBrowser
                 var p = Profile;
                 Store.History.Clear();
                 Store.SaveHistory();
-                Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url));
+                Favicons.ClearExcept(Store.Bookmarks.Where(b => !b.Folder).Select(b => b.Url));
                 p.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.AllSite | CoreWebView2BrowsingDataKinds.DiskCache |
                     CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory)
                     .ContinueWith(_ => BeginInvoke((Action)Close));

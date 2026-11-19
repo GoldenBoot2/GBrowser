@@ -7,8 +7,8 @@ Last full audit: 19-11-2026.
 ## Pending (build order, 19-11-2026)
 0. Undetectable page scripts, open part (user, 19-11-2026; in progress): AdGuard scriptlet audit (done 19-11-2026); same-origin navigated frames (site rules done 19-11-2026); ExtendedCss inline styles; $csp <meta> (with the cookie manager's response-header editing); Stealth read cost on heavy pages (25-28 ms); privacy wrappers (with Hide my identity). See "Undetectable page scripts" below.
 1. #7 New window (Ctrl+N, drag a tab out), set as default browser (done 19-11-2026; drag with the real mouse to be tried by the user).
-2. #8 Import from Chrome / Edge, cookies and site data, passwords page, bookmark folders.
-3. Bookmarks (user, 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
+2. #8 Import from Chrome / Edge (bookmarks done 19-11-2026), cookies and site data (with the cookie manager, 5), passwords page, bookmark folders (done 19-11-2026).
+3. Bookmarks (user, 19-11-2026; done 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
 4. Ad blocking (user, 19-11-2026): built-in lists on / off, custom lists with trust check, user rules editor, element picker.
 5. Cookie manager, 19 features (user, 19-11-2026): see "Cookie manager" below.
 6. Android app features missing here (user, 19-11-2026): see "From the Android app" below.
@@ -42,7 +42,7 @@ Last full audit: 19-11-2026.
 | Search engines: choose default | Done; custom engines / keywords: Missing |
 | Site info panel (icon left of the address: connection, permissions with switches + reset, cookies count + delete site data, ad blocking on the site, site settings) | Done (19-11-2026); certificate viewer missing |
 | Zoom indicator in the address bar (click to reset) | Missing |
-| Bookmark star | Done |
+| Bookmark star / Ctrl+D: "Bookmark added" with name, address, folder, Remove (Chrome's bubble) | Done 19-11-2026 |
 | Copy link / QR code / share page | Missing |
 
 ## Page and content
@@ -108,12 +108,12 @@ Last full audit: 19-11-2026.
 | Feature | Status |
 |---|---|
 | Bookmarks: bar, page, edit, delete | Done |
-| Bookmark folders, bookmark manager, import / export (HTML) | Missing |
-| Bookmarks bar: right-click menu (open, open in new tab / private tab, edit, delete, add page / folder), drag to reorder, drop a link or the address-bar icon onto it | Missing (user, 19-11-2026) |
-| Bookmarks page: edit, delete, drag to reorder | Partly (edit / delete exist; reorder Missing) (user, 19-11-2026) |
-| Empty bookmarks bar handled like Chrome (hint "For quick access, place your bookmarks here on the bookmarks bar", "Import bookmarks now" link) | Missing (user, 19-11-2026) |
+| Bookmark folders, bookmark manager, import / export (HTML) | Done 19-11-2026: Bookmarks bar / Other bookmarks with folders (old bookmarks moved to the bar), manager page with folder tree, search, add page / folder, edit, delete, move, drag to reorder or into a folder; HTML import (any browser's export, tested) and export (Netscape format, tested) |
+| Bookmarks bar: right-click menu (open, open in new tab / private tab, edit, delete, add page / folder), drag to reorder, drop a link or the address-bar icon onto it | Done 19-11-2026: folders open as menus (Open all), overflow menu, Other bookmarks at the right, right-click menu, drag to reorder / onto a folder, dropped links become bookmarks (tested through the bar's own drop code; real mouse drags to be tried by the user) |
+| Bookmarks page: edit, delete, drag to reorder | Done 19-11-2026 (page drag uses the same move command that was tested; the mouse drag itself not tried by me) |
+| Empty bookmarks bar handled like Chrome (hint "For quick access, place your bookmarks here on the bookmarks bar", "Import bookmarks now" link) | Done 19-11-2026 |
 | History page with search, delete | Done |
-| Import from Chrome / Edge (bookmarks, history; passwords if possible) | Missing |
+| Import from Chrome / Edge (bookmarks, history; passwords if possible) | Bookmarks Done 19-11-2026 (Chrome, Edge, Brave profiles on this PC; the reader was tested with a sample file, not with your own profiles). History: Missing (Chrome keeps it in an SQLite database; needs a reader). Passwords: not possible (Chrome 127+ encrypts them with app-bound keys only Chrome can read) |
 | Startup: continue where you left off / new tab / specific pages | Partly (restore on/off) |
 | Home button / home page | Done |
 | Appearance: theme, colours, light / dark | Done |

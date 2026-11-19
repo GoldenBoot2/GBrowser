@@ -123,7 +123,7 @@ namespace GBrowser
                 v.Count++;
                 if (h.Time > v.Last) { v.Last = h.Time; if (!string.IsNullOrEmpty(h.Title)) v.Title = h.Title; }
             }
-            foreach (var b in Store.Bookmarks)
+            foreach (var b in Store.Bookmarks.Where(x => !x.Folder && !string.IsNullOrEmpty(x.Url)))
             {
                 if (!map.TryGetValue(b.Url, out var v)) map[b.Url] = v = new Visit { Url = b.Url, Title = b.Title };
                 v.Bookmark = true;

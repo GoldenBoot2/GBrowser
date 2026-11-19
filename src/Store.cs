@@ -32,6 +32,7 @@ namespace GBrowser
             Directory.CreateDirectory(DataDir);
             Settings = Read<Settings>("settings.json") ?? new Settings();
             Bookmarks = Read<List<Bookmark>>("bookmarks.json") ?? new List<Bookmark>();
+            Bm.Migrate();
             History = Read<List<HistoryItem>>("history.json") ?? new List<HistoryItem>();
             EncryptLeftovers();
         }
@@ -86,15 +87,7 @@ namespace GBrowser
         public static void SaveBookmarks() => Write("bookmarks.json", Bookmarks);
         public static void SaveHistory() => Write("history.json", History);
 
-        public static bool IsBookmarked(string url) => Bookmarks.Any(b => b.Url == url);
-
-        public static void ToggleBookmark(string url, string title)
-        {
-            var b = Bookmarks.FirstOrDefault(x => x.Url == url);
-            if (b != null) Bookmarks.Remove(b);
-            else Bookmarks.Insert(0, new Bookmark { Url = url, Title = string.IsNullOrEmpty(title) ? url : title, Added = Now() });
-            SaveBookmarks();
-        }
+        public static bool IsBookmarked(string url) => Bm.IsBookmarked(url);
 
         static DateTime lastHistorySave = DateTime.MinValue;
 
@@ -169,6 +162,7 @@ namespace GBrowser
         public int WindowW { get; set; } = 1200;
         public int WindowH { get; set; } = 800;
         public bool WindowMax { get; set; }
+        public long LastBookmarkFolder { get; set; } = 1;   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
         public List<WindowSession> Windows { get; set; } = new List<WindowSession>();
     }
@@ -187,6 +181,9 @@ namespace GBrowser
 
     public class Bookmark
     {
+        public long Id { get; set; }
+        public long Parent { get; set; }      // Bm.Bar (1), Bm.Other (2) or a folder's Id
+        public bool Folder { get; set; }
         public string Url { get; set; }
         public string Title { get; set; }
         public long Added { get; set; }

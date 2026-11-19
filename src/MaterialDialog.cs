@@ -19,7 +19,7 @@ namespace GBrowser
         Rectangle okRect, cancelRect, extraRect;
 
         // optional text fields (page prompt(), sign-in) and a checkbox ("Always allow ...")
-        sealed class Field { public string Label; public MaterialTextBox Box; public Rectangle Outline; public int LabelY; }
+        sealed class Field { public string Label; public MaterialTextBox Box; public Rectangle Outline; public int LabelY; public string[] Options; public int Sel; }
         readonly List<Field> fields = new List<Field>();
         string checkText; bool isChecked; Rectangle checkRect;
 
@@ -34,6 +34,12 @@ namespace GBrowser
             fields.Add(f);
             Controls.Add(f.Box);
         }
+        // a choice among options (e.g. a bookmark's folder): opens a Material menu
+        void AddChoice(string label, string[] options, int sel)
+        {
+            fields.Add(new Field { Label = label ?? "", Options = options, Sel = Math.Max(0, Math.Min(sel, options.Length - 1)) });
+        }
+
         int hover = -1;
 
         MaterialDialog(string title, Image icon, List<Tuple<string, string>> lines, string ok, string cancel)
@@ -83,8 +89,11 @@ namespace GBrowser
                     y += S(4);
                     if (f.Label.Length > 0) { f.LabelY = y; y += S(24); }
                     f.Outline = new Rectangle(S(24), y, w - S(48), S(44));
-                    int bh = f.Box.PreferredHeight;
-                    f.Box.Bounds = new Rectangle(f.Outline.X + S(14), f.Outline.Y + (f.Outline.Height - bh) / 2, f.Outline.Width - S(28), bh);
+                    if (f.Box != null)
+                    {
+                        int bh = f.Box.PreferredHeight;
+                        f.Box.Bounds = new Rectangle(f.Outline.X + S(14), f.Outline.Y + (f.Outline.Height - bh) / 2, f.Outline.Width - S(28), bh);
+                    }
                     y += S(44) + S(8);
                 }
                 if (checkText != null)
@@ -126,9 +135,15 @@ namespace GBrowser
                 if (f.Label.Length > 0)
                     TextRenderer.DrawText(g, f.Label, Font, new Rectangle(f.Outline.X, f.LabelY, f.Outline.Width, S(20)), Theme.OnSurfaceVariant,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                bool foc = f.Box.Focused;
+                bool foc = f.Box != null && f.Box.Focused;
                 using (var p = Theme.Round(f.Outline, S(8)))
                 using (var pen = new Pen(foc ? Theme.Primary : Theme.Outline, foc ? S(2) : 1)) g.DrawPath(pen, p);
+                if (f.Options != null)
+                {
+                    TextRenderer.DrawText(g, f.Options[f.Sel], Font, new Rectangle(f.Outline.X + S(14), f.Outline.Y, f.Outline.Width - S(52), f.Outline.Height),
+                        Theme.OnSurface, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                    Icons.Draw(g, IconData.ArrowDrop, f.Outline.Right - S(36), f.Outline.Y + (f.Outline.Height - S(24)) / 2, S(24), Theme.OnSurfaceVariant);
+                }
             }
             if (checkText != null)
             {
@@ -198,7 +213,20 @@ namespace GBrowser
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            foreach (var f in fields) if (f.Outline.Contains(e.Location)) { f.Box.Focus(); return; }
+            foreach (var f in fields)
+            {
+                if (!f.Outline.Contains(e.Location)) continue;
+                if (f.Box != null) { f.Box.Focus(); return; }
+                var m = new MaterialMenu();
+                var fld = f;
+                for (int i = 0; i < f.Options.Length; i++)
+                {
+                    int k = i;
+                    var it = m.AddToggle(f.Options[i], i == f.Sel, true, () => { fld.Sel = k; Invalidate(); });
+                }
+                m.ShowAt(this, f.Outline, false, null);
+                return;
+            }
         }
 
         static MaterialDialog open;   // the dialog on screen (test builds answer it through the test channel)
@@ -207,7 +235,7 @@ namespace GBrowser
         {
             base.OnShown(e);
             open = this;
-            if (fields.Count > 0) { fields[0].Box.Focus(); fields[0].Box.SelectAll(); }
+            if (fields.Count > 0 && fields[0].Box != null) { fields[0].Box.Focus(); fields[0].Box.SelectAll(); }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -220,7 +248,13 @@ namespace GBrowser
         public static string TestInfo() => open == null ? "none" : open.title + " | " + string.Join(" / ", open.lines.Select(l => l.Item2)) +
             " | fields " + open.fields.Count + (open.checkText != null ? " | check: " + open.checkText + (open.isChecked ? " [x]" : " [ ]") : "") +
             " | buttons " + open.cancelText + " / " + open.okText;
-        public static void TestType(int i, string s) { if (open != null && i < open.fields.Count) { open.fields[i].Box.Clear(); open.fields[i].Box.TypeForTest(s); } }
+        public static void TestType(int i, string s)
+        {
+            if (open == null || i >= open.fields.Count) return;
+            var f = open.fields[i];
+            if (f.Box == null) { if (int.TryParse(s, out var n) && n >= 0 && n < f.Options.Length) { f.Sel = n; open.Invalidate(); } return; }
+            f.Box.Clear(); f.Box.TypeForTest(s);
+        }
         public static void TestCheck() { if (open != null) { open.isChecked = !open.isChecked; open.Invalidate(); } }
         public static void TestClose(bool ok) { if (open != null) { open.DialogResult = ok ? DialogResult.OK : DialogResult.Cancel; open.Close(); } }
         public static IntPtr TestHandle => open != null && open.IsHandleCreated ? open.Handle : IntPtr.Zero;
@@ -235,6 +269,24 @@ namespace GBrowser
                 foreach (var i in inputs) d.AddField(i.Item1, i.Item2, i.Item3);
                 if (d.ShowDialog(owner) != DialogResult.OK) return null;
                 return d.fields.Select(f => f.Box.Text).ToArray();
+            }
+        }
+
+        /// <summary>Text fields and choices (label, value, options: null = text field, value = the chosen index). Returns 1
+        /// for ok, 2 for extra, 0 for cancel / Esc; values = the texts / chosen indexes.</summary>
+        public static int Edit(IWin32Window owner, string title, IEnumerable<Tuple<string, string>> lines, IEnumerable<Tuple<string, string, string[]>> inputs,
+            out string[] values, string ok, string extra, string cancel)
+        {
+            using (var d = new MaterialDialog(title, null, new List<Tuple<string, string>>(lines), ok, cancel) { extraText = extra })
+            {
+                foreach (var i in inputs)
+                {
+                    if (i.Item3 == null) d.AddField(i.Item1, i.Item2, false);
+                    else d.AddChoice(i.Item1, i.Item3, int.TryParse(i.Item2, out var n) ? n : 0);
+                }
+                var r = d.ShowDialog(owner);
+                values = d.fields.Select(f => f.Box != null ? f.Box.Text : f.Sel.ToString()).ToArray();
+                return r == DialogResult.OK ? 1 : r == DialogResult.Retry ? 2 : 0;
             }
         }
 
