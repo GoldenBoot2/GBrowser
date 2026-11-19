@@ -52,9 +52,9 @@ namespace GBrowser
         public Toolbar()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Surface;
+            BackColor = Theme.ToolbarBack;
             Address.Font = new Font("Segoe UI", 10.5f);
-            Address.BackColor = Theme.SurfaceContainerHigh;
+            Address.BackColor = Theme.Omnibox;
             Address.ForeColor = Theme.OnSurface;
             Address.KeyDown += Address_KeyDown;
             Address.GotFocus += (s, e) =>
@@ -65,7 +65,7 @@ namespace GBrowser
                 // keyboard focus (Ctrl+L, F6, new tab) selects the address; a click is handled by the field itself
                 if (MouseButtons == MouseButtons.None) BeginInvoke((Action)(() => Address.SelectAll()));
             };
-            Address.LostFocus += (s, e) => { Address.BackColor = Theme.SurfaceContainerHigh; Address.Text = ShownUrl; Address.ResetView(); LayoutNow(); };
+            Address.LostFocus += (s, e) => { Address.BackColor = Theme.Omnibox; Address.Text = ShownUrl; Address.ResetView(); LayoutNow(); };
             Address.TextChanged += (s, e) => Invalidate();
             Address.PasteAndGo += t => Go?.Invoke(t);
             Controls.Add(Address);
@@ -153,8 +153,8 @@ namespace GBrowser
 
         public void ApplyTheme()
         {
-            BackColor = Theme.Surface;
-            Address.BackColor = Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh;
+            BackColor = Theme.ToolbarBack;
+            Address.BackColor = Address.Focused ? Theme.Field : Theme.Omnibox;
             Address.ForeColor = Theme.OnSurface;
             Invalidate(true);
         }
@@ -169,7 +169,7 @@ namespace GBrowser
             // address pill
             using (var p = Theme.Round(pill, pill.Height / 2f))
             {
-                using (var b = new SolidBrush(Address.Focused ? Theme.Field : Theme.SurfaceContainerHigh)) g.FillPath(b, p);
+                using (var b = new SolidBrush(Address.Focused ? Theme.Field : Theme.Omnibox)) g.FillPath(b, p);
                 if (Address.Focused) using (var pen = new Pen(Theme.Primary, S(2))) g.DrawPath(pen, p);
             }
             // site-info button: the icon (and "Not secure") at the left of the address, clickable like Chrome's

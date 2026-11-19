@@ -646,14 +646,17 @@ namespace GBrowser
         CoreWebView2WebResourceResponse BlockPage(string url, string host)
         {
             string allow = Pages.Origin + "allow?u=" + Uri.EscapeDataString(url);
+            // the colours of the scheme chosen in Settings > Appearance, light and dark
+            var lt = Palette.For(Store.Settings.ThemeColor, false); var dk = Palette.For(Store.Settings.ThemeColor, true);
+            Func<Palette.Scheme, string, string> C = (sc, r) => Palette.Hex(sc[r]);
             string html = "<!doctype html><html><head><meta charset=utf-8><title>Blocked</title><style>"
                 + "body{margin:0;font:15px 'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;"
-                + "min-height:100vh;background:#fff8f2;color:#1f1b13}main{text-align:center;padding:24px;max-width:460px}"
-                + "svg{width:72px;height:72px;fill:#ba1a1a}h1{font-size:24px;font-weight:500;margin:16px 0 4px}"
-                + "p{color:#4d4639;margin:0 0 28px;word-break:break-all}a{display:inline-block;padding:10px 24px;border-radius:20px;"
-                + "border:1px solid #7f7667;color:#785a00;text-decoration:none;font-weight:600}a:hover{background:#f4ede1}"
-                + "@media(prefers-color-scheme:dark){body{background:#17130b;color:#ece1d4}p{color:#d3c5b0}svg{fill:#ffb4ab}"
-                + "a{color:#f0bf48;border-color:#9c8f7c}a:hover{background:#241f17}}</style></head><body><main>"
+                + "min-height:100vh;background:" + C(lt, "surface") + ";color:" + C(lt, "on-surface") + "}main{text-align:center;padding:24px;max-width:460px}"
+                + "svg{width:72px;height:72px;fill:" + C(lt, "error") + "}h1{font-size:24px;font-weight:500;margin:16px 0 4px}"
+                + "p{color:" + C(lt, "on-surface-variant") + ";margin:0 0 28px;word-break:break-all}a{display:inline-block;padding:10px 24px;border-radius:20px;"
+                + "border:1px solid " + C(lt, "outline") + ";color:" + C(lt, "primary") + ";text-decoration:none;font-weight:600}a:hover{background:" + C(lt, "surface-container") + "}"
+                + "@media(prefers-color-scheme:dark){body{background:" + C(dk, "surface") + ";color:" + C(dk, "on-surface") + "}p{color:" + C(dk, "on-surface-variant") + "}svg{fill:" + C(dk, "error") + "}"
+                + "a{color:" + C(dk, "primary") + ";border-color:" + C(dk, "outline") + "}a:hover{background:" + C(dk, "surface-container") + "}}</style></head><body><main>"
                 + "<svg viewBox='0 -960 960 960'><path d='" + IconData.Block + "'/></svg>"
                 + "<h1>Blocked</h1><p>" + System.Net.WebUtility.HtmlEncode(host) + "</p>"
                 + "<a href=\"" + System.Net.WebUtility.HtmlEncode(allow) + "\">Open anyway</a></main></body></html>";

@@ -1,19 +1,22 @@
-/* GBrowser internal pages - Material 3 light, gold seed (same colours as the window, src/Theme.cs) */
+/* GBrowser internal pages - Chrome's colours (the default scheme, src/Palette.cs Chrome); the app sends the scheme
+   chosen in Settings > Appearance (theme.vars), these are only the values before it arrives */
 :root {
-  --primary: #785a00; --on-primary: #fff; --primary-container: #ffdfa0; --on-primary-container: #261a00;
-  --surface: #fff8f2; --surface-container: #f4ede1; --surface-container-high: #eee7db; --surface-container-highest: #e8e1d5;
-  --on-surface: #1f1b13; --on-surface-variant: #4d4639; --outline: #7f7667; --outline-variant: #d0c5b4;
-  --error: #ba1a1a; --field: #fff; --hover: rgba(31,27,19,.08); --press: rgba(31,27,19,.14);
+  --primary: #0b57d0; --on-primary: #fff; --primary-container: #d3e3fd; --on-primary-container: #041e49;
+  --surface: #fff; --surface-container: #f3f6fc; --surface-container-high: #edf2fa; --surface-container-highest: #e3e3e3;
+  --on-surface: #1f1f1f; --on-surface-variant: #444746; --outline: #747775; --outline-variant: #e1e3e1;
+  --error: #b3261e; --field: #fff; --hover: rgba(31,31,31,.08); --press: rgba(31,31,31,.14);
+  --frame: #d3e3fd; --toolbar: #fff; --omnibox: #edf2fa;
   --radius: 16px;
   color-scheme: light dark;
 }
 /* dark: same tones as the window (src/Theme.cs); follows Windows unless Settings > Appearance says otherwise */
 @media (prefers-color-scheme: dark) {
   :root {
-    --primary: #f0bf48; --on-primary: #402d00; --primary-container: #5b4300; --on-primary-container: #ffdfa0;
-    --surface: #17130b; --surface-container: #241f17; --surface-container-high: #2f2921; --surface-container-highest: #3a342b;
-    --on-surface: #ece1d4; --on-surface-variant: #d3c5b0; --outline: #9c8f7c; --outline-variant: #4f4637;
-    --error: #ffb4ab; --field: #3e382f; --hover: rgba(236,225,212,.08); --press: rgba(236,225,212,.14);
+    --primary: #a8c7fa; --on-primary: #062e6f; --primary-container: #0842a0; --on-primary-container: #d3e3fd;
+    --surface: #202124; --surface-container: #292a2d; --surface-container-high: #333438; --surface-container-highest: #3c3c3c;
+    --on-surface: #e3e3e3; --on-surface-variant: #c4c7c5; --outline: #8e918f; --outline-variant: #444746;
+    --error: #f2b8b5; --field: #3c3c3c; --hover: rgba(227,227,227,.08); --press: rgba(227,227,227,.14);
+    --frame: #1f2020; --toolbar: #3c3c3c; --omnibox: #282828;
   }
 }
 * { box-sizing: border-box; }

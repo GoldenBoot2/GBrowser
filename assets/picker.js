@@ -5,23 +5,30 @@
   const host = doc.createElement('div');
   const sh = host.attachShadow({ mode: 'closed' });
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  // colours of GBrowser's current scheme (MainForm fills them in); Chrome's defaults if missing
+  const T = /*THEME*/null || (dark ? { primary: '#a8c7fa', 'on-primary': '#062e6f', 'primary-container': '#0842a0', 'on-primary-container': '#d3e3fd',
+    'surface-container-high': '#333438', 'on-surface': '#e3e3e3', outline: '#8e918f' }
+    : { primary: '#0b57d0', 'on-primary': '#ffffff', 'primary-container': '#d3e3fd', 'on-primary-container': '#041e49',
+    'surface-container-high': '#edf2fa', 'on-surface': '#1f1f1f', outline: '#747775' });
+  const P = T.primary;
+  const rgba = (hex, a) => 'rgba(' + [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16)).join(',') + ',' + a + ')';
   sh.innerHTML = `<style>
     :host { all: initial; }
-    .box { position: fixed; pointer-events: none; z-index: 2147483646; border: 2px solid #f0bf48; background: rgba(240,191,72,.18);
+    .box { position: fixed; pointer-events: none; z-index: 2147483646; border: 2px solid ${P}; background: ${rgba(P, .18)};
       border-radius: 4px; transition: all .06s; display: none; }
-    .other { position: fixed; pointer-events: none; z-index: 2147483645; border: 1px dashed #f0bf48; display: none; }
+    .other { position: fixed; pointer-events: none; z-index: 2147483645; border: 1px dashed ${P}; display: none; }
     .panel { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 2147483647; width: min(640px, 92vw);
-      background: ${dark ? '#2b2620' : '#fff8f0'}; color: ${dark ? '#ede1d4' : '#1f1b16'}; border-radius: 16px; padding: 14px 16px;
+      background: ${T['surface-container-high']}; color: ${T['on-surface']}; border-radius: 16px; padding: 14px 16px;
       box-shadow: 0 8px 28px rgba(0,0,0,.35); font: 14px/1.4 'Segoe UI', system-ui, sans-serif; }
     .title { font-weight: 600; margin-bottom: 8px; }
-    .sel { width: 100%; box-sizing: border-box; height: 38px; border-radius: 8px; border: 1px solid ${dark ? '#998f80' : '#7f7667'};
+    .sel { width: 100%; box-sizing: border-box; height: 38px; border-radius: 8px; border: 1px solid ${T.outline};
       background: transparent; color: inherit; padding: 0 10px; font: 13px Consolas, monospace; }
     .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
     .count { flex: 1; opacity: .8; font-size: 13px; }
     button { height: 36px; padding: 0 16px; border-radius: 18px; border: 0; font: 600 13px 'Segoe UI', sans-serif; cursor: pointer; }
-    .tonal { background: ${dark ? '#5b4300' : '#ffdfa0'}; color: ${dark ? '#ffdfa0' : '#261a00'}; }
-    .filled { background: ${dark ? '#f0bf48' : '#785a00'}; color: ${dark ? '#402d00' : '#fff'}; }
-    .text { background: transparent; color: ${dark ? '#f0bf48' : '#785a00'}; }
+    .tonal { background: ${T['primary-container']}; color: ${T['on-primary-container']}; }
+    .filled { background: ${P}; color: ${T['on-primary']}; }
+    .text { background: transparent; color: ${P}; }
     .hint { font-size: 12.5px; opacity: .75; margin-top: 6px; }
   </style>
   <div class="box"></div>

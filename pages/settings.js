@@ -52,7 +52,7 @@
     for (const p of ti.presets) swatches.append(swatch(p.id, p.name, p.hex));
     if (ti.accent) swatches.append(swatch('accent', 'Windows accent colour', ti.accent, 'Desktop'));
     const custom = ti.color.startsWith('#') && !ti.presets.some(p => p.id === ti.color);
-    const picker = el('input', { type: 'color', value: custom ? ti.color : '#785a00', 'aria-label': 'Custom colour' });
+    const picker = el('input', { type: 'color', value: custom ? ti.color : '#0b57d0', 'aria-label': 'Custom colour' });
     picker.addEventListener('change', () => choose(picker.value));
     const cb = el('label', { class: 'swatch custom' + (custom ? ' on' : ''), title: 'Custom colour' }, icon('Colorize', 's20'), picker);
     if (custom) cb.style.background = ti.color;

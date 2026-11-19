@@ -68,7 +68,7 @@ namespace GBrowser
         public TabStrip()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.SurfaceContainerHigh;
+            BackColor = Theme.Frame;
             cardTimer.Tick += (o, e) =>
             {
                 cardTimer.Stop();
@@ -237,7 +237,7 @@ namespace GBrowser
                     if (sel)
                     {
                         using (var p = Theme.TopRound(new RectangleF(r.X, r.Y, r.Width, r.Height + 1), S(8)))
-                        using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, p);
+                        using (var b = new SolidBrush(Theme.ToolbarBack)) g.FillPath(b, p);
                     }
                     else
                     {

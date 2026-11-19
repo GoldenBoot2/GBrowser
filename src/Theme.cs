@@ -13,8 +13,8 @@ namespace GBrowser
     {
         public static bool Dark { get; private set; }
 
-        // current scheme (Settings.ThemeColor: "gold", "accent" or "#RRGGBB"; see Palette.cs)
-        static Palette.Scheme scheme = Palette.For("gold", false);
+        // current scheme (Settings.ThemeColor: "chrome", "gold", "accent" or "#RRGGBB"; see Palette.cs)
+        static Palette.Scheme scheme = Palette.For("chrome", false);
         static string schemeKey = "";
         static Color R(string role) => scheme[role];
 
@@ -26,6 +26,10 @@ namespace GBrowser
         public static Color SurfaceContainer => R("surface-container");
         public static Color SurfaceContainerHigh => R("surface-container-high");
         public static Color SurfaceContainerHighest => R("surface-container-highest");
+        // window parts (Palette.For): tab strip, toolbar + active tab + bookmarks bar, address box when not typing
+        public static Color Frame => R("frame");
+        public static Color ToolbarBack => R("toolbar");
+        public static Color Omnibox => R("omnibox");
         /// <summary>Focused address box (white in light mode).</summary>
         public static Color Field => R("field");
         public static Color OnSurface => R("on-surface");
@@ -67,7 +71,7 @@ namespace GBrowser
         {
             string mode = Store.Settings.ThemeMode ?? "system";
             bool dark = mode == "dark" || (mode != "light" && SystemDark());
-            string color = Store.Settings.ThemeColor ?? "gold";
+            string color = Store.Settings.ThemeColor ?? "chrome";
             var seed = Palette.SeedOf(color);
             string key = dark + "|" + color + "|" + (seed.HasValue ? seed.Value.ToArgb().ToString() : "");
             bool changed = key != schemeKey;

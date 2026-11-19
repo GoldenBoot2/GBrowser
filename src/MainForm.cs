@@ -61,7 +61,7 @@ namespace GBrowser
             FilterEngine.Preload();
             Theme.Update();
             Text = "GBrowser";
-            BackColor = Theme.Surface;
+            BackColor = Theme.Frame;
             AutoScaleMode = AutoScaleMode.Dpi;
             KeyPreview = true;
             MinimumSize = new Size(480, 360);
@@ -685,14 +685,17 @@ namespace GBrowser
         /// pages (pages that support dark mode paint their own dark background); a dark base here made light-only
         /// sites with a transparent background (bbc.com: dark text, no background) unreadable in dark mode.
         /// GBrowser's own pages are themed, so they keep the theme colour (no white flash while they load).</summary>
-        static Color PageBase(string url) => url == null || Pages.IsInternal(url) || url.StartsWith("about:") ? Theme.Surface : Color.White;
+        static Color PageBase(string url) => url == null || Pages.PageName(url) == "newtab" ? Theme.ToolbarBack   // Chrome: new tab page = toolbar colour
+            : Pages.IsInternal(url) || url.StartsWith("about:") ? Theme.Surface : Color.White;
 
         /// <summary>Applies the current theme to the window, title bar, toolbars and all web content.</summary>
         void ApplyTheme(bool force)
         {
             if (!Theme.Update() && !force) return;
-            BackColor = content.BackColor = bookmarksBar.BackColor = Theme.Surface;
-            strip.BackColor = Theme.SurfaceContainerHigh;
+            BackColor = Theme.Frame;
+            content.BackColor = Theme.Surface;
+            bookmarksBar.BackColor = Theme.ToolbarBack;
+            strip.BackColor = Theme.Frame;
             toolbar.ApplyTheme();
             Theme.TitleBar(Handle);
             SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0027);   // SWP_FRAMECHANGED|NOZORDER|NOMOVE|NOSIZE: redraw the title bar
@@ -939,6 +942,9 @@ namespace GBrowser
                     Store.ToJson(new Dictionary<string, object> { { "frameId", frameId }, { "worldName", "gbpicker" } })));
                 int ctx = Convert.ToInt32(w["executionContextId"]);
                 string js = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "picker.js"));
+                // the picker in GBrowser's current colours (Settings > Appearance), not the page's
+                var sch = Palette.For(Store.Settings.ThemeColor, Theme.Dark);
+                js = js.Replace("/*THEME*/null", Store.ToJson(sch.ToDictionary(kv => kv.Key, kv => (object)Palette.Hex(kv.Value))));
                 if (at.HasValue) js = "window.__gbPickAt=[" + at.Value.X + "," + at.Value.Y + "];" + (auto ? "window.__gbPickAuto=true;" : "") + js;
                 var r = Store.FromJson<Dictionary<string, object>>(await core.CallDevToolsProtocolMethodAsync("Runtime.evaluate",
                     Store.ToJson(new Dictionary<string, object> { { "expression", js }, { "contextId", ctx }, { "awaitPromise", true }, { "returnByValue", true }, { "userGesture", true } })));
@@ -2546,7 +2552,7 @@ namespace GBrowser
                         case "ThemeColor":
                         {
                             string tc = (v as string ?? "").Trim();
-                            if (tc == "gold" || tc == "accent" || System.Text.RegularExpressions.Regex.IsMatch(tc, "^#[0-9a-fA-F]{6}$")) st.ThemeColor = tc.ToLowerInvariant();
+                            if (tc == "chrome" || tc == "gold" || tc == "accent" || System.Text.RegularExpressions.Regex.IsMatch(tc, "^#[0-9a-fA-F]{6}$")) st.ThemeColor = tc.ToLowerInvariant();
                             else throw new Exception("Bad colour");
                             Store.SaveSettings();
                             ApplyTheme(true);
@@ -2691,7 +2697,7 @@ namespace GBrowser
                     var acc = Palette.WindowsAccent();
                     return new Dictionary<string, object>
                     {
-                        { "color", st.ThemeColor ?? "gold" }, { "accent", acc.HasValue ? Palette.Hex(acc.Value) : "" },
+                        { "color", st.ThemeColor ?? "chrome" }, { "accent", acc.HasValue ? Palette.Hex(acc.Value) : "" },
                         { "presets", Palette.Presets.Select(p => new Dictionary<string, object> {
                             { "id", p[0] }, { "name", p[1] }, { "hex", p.Length > 2 ? p[2] : p[0] } }).ToList() },
                     };

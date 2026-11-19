@@ -3,7 +3,7 @@
 .brand .logo { width: 56px; height: 56px; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; }
 .brand .logo .icon { width: 34px; height: 34px; }
 .big-search { width: 100%; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 8px 0 18px; border-radius: 26px;
-  background: var(--surface-container-high); color: var(--on-surface-variant); }
+  background: var(--omnibox, var(--surface-container-high)); color: var(--on-surface-variant); }
 .big-search:focus-within { background: var(--field); box-shadow: 0 1px 6px rgba(31,27,19,.25), inset 0 0 0 2px var(--primary); }
 .big-search input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; font-size: 16px; color: var(--on-surface); caret-color: var(--primary); }
 .big-search .clear { visibility: hidden; }
@@ -11,7 +11,10 @@
 .tiles { display: grid; grid-template-columns: repeat(4, 112px); gap: 8px; justify-content: center; }
 .tile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 8px 12px; border-radius: var(--radius);
   text-decoration: none; color: var(--on-surface); cursor: pointer; }
-.tile:hover { background: var(--surface-container); }
+.tile:hover { background: var(--hover); }
 .customize { position: fixed; right: 24px; bottom: 24px; }
 .tile .letter { width: 48px; height: 48px; font-size: 20px; }
 .tile span { font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* like Chrome: the new tab page has the toolbar's colour, so tab, toolbar and page are one surface */
+html, body { background: var(--toolbar, var(--surface)); }
+.tile .site-icon.big { background: var(--omnibox, var(--surface-container-high)); }

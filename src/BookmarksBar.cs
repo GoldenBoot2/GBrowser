@@ -33,7 +33,7 @@ namespace GBrowser
         public BookmarksBar()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Surface;
+            BackColor = Theme.ToolbarBack;
             AllowDrop = true;
         }
 

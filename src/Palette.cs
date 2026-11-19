@@ -12,16 +12,36 @@ namespace GBrowser
     {
         public sealed class Scheme : Dictionary<string, Color> { }
 
-        /// <summary>Preset seeds shown in Settings. "gold" keeps GBrowser's original hand-tuned scheme.</summary>
+        /// <summary>Preset seeds shown in Settings. "chrome" (the default) is Chrome's own scheme; "gold" keeps
+        /// GBrowser's original hand-tuned scheme.</summary>
         public static readonly string[][] Presets =
         {
+            new[] { "chrome", "Chrome (default)", "#0B57D0" },
             new[] { "gold", "Gold", "#785A00" },
             new[] { "#1A73E8", "Blue" }, new[] { "#00897B", "Teal" }, new[] { "#2E7D32", "Green" },
             new[] { "#6750A4", "Purple" }, new[] { "#C2185B", "Pink" }, new[] { "#C62828", "Red" },
             new[] { "#E65100", "Orange" }, new[] { "#5D6B7A", "Grey" },
         };
 
-        // ---- the original gold scheme (exact values, unchanged)
+        // ---- Chrome's own scheme, the default: Chrome 158's colour tokens (chrome://theme/colors.css) and its Settings
+        // page, read 19-11-2026 with tools/local/chrome_colors.mjs and chrome_dark_page.mjs (temporary profile)
+        static Scheme Chrome(bool dark)
+        {
+            int[] v = dark
+                // primary, on-primary, primary-container, on-primary-container, surface (Settings page), surface-container
+                // (cards), -high, -highest, field, on-surface, on-surface-variant, outline, outline-variant, error
+                ? new[] { 0xA8C7FA, 0x062E6F, 0x0842A0, 0xD3E3FD, 0x202124, 0x292A2D, 0x333438, 0x3C3C3C, 0x3C3C3C, 0xE3E3E3, 0xC4C7C5, 0x8E918F, 0x444746, 0xF2B8B5 }
+                : new[] { 0x0B57D0, 0xFFFFFF, 0xD3E3FD, 0x041E49, 0xFFFFFF, 0xF3F6FC, 0xEDF2FA, 0xE3E3E3, 0xFFFFFF, 0x1F1F1F, 0x444746, 0x747775, 0xE1E3E1, 0xB3261E };
+            var s = new Scheme();
+            for (int i = 0; i < Roles.Length; i++) s[Roles[i]] = Color.FromArgb(255, Color.FromArgb(v[i]));
+            // window: tab strip (header), toolbar / active tab / new tab page (base), address box (omnibox-container)
+            s["frame"] = Color.FromArgb(dark ? 0x1F2020 : 0xD3E3FD); s["toolbar"] = Color.FromArgb(dark ? 0x3C3C3C : 0xFFFFFF);
+            s["omnibox"] = Color.FromArgb(dark ? 0x282828 : 0xEDF2FA);
+            foreach (var k in new[] { "frame", "toolbar", "omnibox" }) s[k] = Color.FromArgb(255, s[k]);
+            return s;
+        }
+
+        // ---- the original gold scheme (exact values; dark surfaces raised to Chrome's lightness, see DarkSurfaces)
         static Scheme Gold(bool dark)
         {
             int[] v = dark
@@ -29,7 +49,18 @@ namespace GBrowser
                 : new[] { 0x785A00, 0xFFFFFF, 0xFFDFA0, 0x261A00, 0xFFF8F2, 0xF4EDE1, 0xEEE7DB, 0xE8E1D5, 0xFFFFFF, 0x1F1B13, 0x4D4639, 0x7F7667, 0xD0C5B4, 0xBA1A1A };
             var s = new Scheme();
             for (int i = 0; i < Roles.Length; i++) s[Roles[i]] = Color.FromArgb(255, Color.FromArgb(v[i]));
+            if (dark) DarkSurfaces(s, s["surface-container"]);
             return s;
+        }
+
+        /// <summary>Dark surfaces at Chrome's lightness (measured on Chrome 158 dark, 19-11-2026: Settings page L* 13,
+        /// cards L* 17, dividers L* 27), tinted with the scheme's own hue.</summary>
+        static void DarkSurfaces(Scheme s, Color tint)
+        {
+            Lch(tint, out double _, out double c, out double h);
+            s["surface"] = Tone(13, c, h); s["surface-container"] = Tone(17, c, h);
+            s["surface-container-high"] = Tone(22, c, h); s["surface-container-highest"] = Tone(27, c, h);
+            s["field"] = Tone(27, c, h);
         }
 
         public static readonly string[] Roles =
@@ -42,7 +73,7 @@ namespace GBrowser
         /// <summary>Seed for a setting value: "gold", "accent" (Windows accent colour) or "#RRGGBB".</summary>
         public static Color? SeedOf(string setting)
         {
-            if (string.IsNullOrEmpty(setting) || setting == "gold") return null;
+            if (string.IsNullOrEmpty(setting) || setting == "gold" || setting == "chrome") return null;
             if (setting == "accent") return WindowsAccent();
             try { return ColorTranslator.FromHtml(setting); } catch { return null; }
         }
@@ -50,7 +81,17 @@ namespace GBrowser
         public static Scheme For(string setting, bool dark)
         {
             var seed = SeedOf(setting);
-            return seed == null ? Gold(dark) : FromSeed(seed.Value, dark);
+            var s = seed != null ? FromSeed(seed.Value, dark) : setting == "gold" ? Gold(dark) : Chrome(dark);
+            if (s.ContainsKey("frame")) return s;
+            // the window parts, like Chrome: light = darker tab strip, toolbar in the page colour; dark (measured on
+            // Chrome 158, 19-11-2026): tab strip L* 12, toolbar / active tab / new tab page L* 25, address box L* 16
+            if (!dark) { s["frame"] = s["surface-container-high"]; s["toolbar"] = s["surface"]; s["omnibox"] = s["surface-container-high"]; }
+            else
+            {
+                Lch(s["surface-container"], out double _, out double c, out double h);
+                s["frame"] = Tone(12, c, h); s["toolbar"] = Tone(25, c, h); s["omnibox"] = Tone(16, c, h);
+            }
+            return s;
         }
 
         /// <summary>Windows accent colour (Settings > Personalization > Colors): HKCU\...\DWM\AccentColor, ABGR.</summary>
@@ -94,8 +135,8 @@ namespace GBrowser
             else
             {
                 s["primary"] = P(80); s["on-primary"] = P(20); s["primary-container"] = P(30); s["on-primary-container"] = P(90);
-                s["surface"] = N(6); s["surface-container"] = N(12); s["surface-container-high"] = N(17); s["surface-container-highest"] = N(22);
-                s["field"] = N(24); s["on-surface"] = N(90); s["on-surface-variant"] = NV(80); s["outline"] = NV(60); s["outline-variant"] = NV(30);
+                s["surface"] = N(13); s["surface-container"] = N(17); s["surface-container-high"] = N(22); s["surface-container-highest"] = N(27);
+                s["field"] = N(27); s["on-surface"] = N(90); s["on-surface-variant"] = NV(80); s["outline"] = NV(60); s["outline-variant"] = NV(30);
                 s["error"] = Color.FromArgb(0xFF, 0xB4, 0xAB);
             }
             return s;
