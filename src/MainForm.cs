@@ -158,7 +158,7 @@ namespace GBrowser
                 HideElement = p => PickElement(p),
                 SearchUrl = text => (Search.Engines.TryGetValue(Store.Settings.SearchEngine ?? "google", out var en) ? en[1] : Search.Engines["google"][1]) + Uri.EscapeDataString(text),
             };
-            toolbar.DownloadsClicked += OpenDownloads;
+            toolbar.DownloadsClicked += () => ShowDownloadBubble(false);
             toolbar.ExtensionsClicked += ShowExtensionsMenu;
             toolbar.StoreChipClicked += InstallFromStorePage;
             toolbar.ShieldClicked += ShowShieldMenu;
@@ -1459,6 +1459,7 @@ namespace GBrowser
                 }
                 downloadsSeen = true;
                 OnDownloadsChanged();
+                ShowDownloadBubble(true);   // like Chrome: the bubble opens when a download starts
             }
             catch { }
             finally { deferral.Complete(); }
@@ -1615,6 +1616,83 @@ namespace GBrowser
         }
 
         void OpenDownloads() => OpenPage("downloads");
+
+        // ---------- download bubble (the toolbar's download button, like Chrome's) ----------
+
+        MaterialMenu dlBubble;
+        Timer dlBubbleTimer;
+
+        static string SizeText(long b) => b >= 1L << 30 ? (b / (double)(1L << 30)).ToString("0.0") + " GB"
+            : b >= 1 << 20 ? (b / (double)(1 << 20)).ToString("0.0") + " MB" : b >= 1024 ? (b / 1024) + " KB" : b + " B";
+
+        static string StatusText(Downloads.Item d)
+        {
+            switch (d.State)
+            {
+                case "in_progress":
+                    return d.Total > 0 ? SizeText(d.Received) + " of " + SizeText(d.Total) + ", " + (int)(d.Received * 100 / d.Total) + "%" : SizeText(d.Received);
+                case "paused": return "Paused";
+                case "completed": return File.Exists(d.Path) ? SizeText(d.Total > 0 ? d.Total : d.Received) : "Deleted";
+                case "blocked": return "Blocked";
+                default: return "Failed";
+            }
+        }
+
+        /// <summary>Recent downloads under the download button, with live progress. auto = opened because a download
+        /// started: it closes again after a few seconds unless the pointer is on it.</summary>
+        void ShowDownloadBubble(bool auto)
+        {
+            if (auto && dlBubble != null && !dlBubble.IsDisposed) { RefreshDownloadBubble(); return; }
+            var recent = Downloads.All.Take(5).ToList();
+            if (recent.Count == 0) { OpenDownloads(); return; }
+            var m = NewMenu();
+            m.MinWidth = 400;   // room for the longest status ("999.9 MB of 999.9 MB, 100%") beside the name
+            m.AddHeader("Recent downloads", IconData.Download);
+            foreach (var d in recent)
+            {
+                var item = d;
+                var e = m.Add(Path.GetFileName(d.Path ?? "download"), IconData.File, StatusText(d), () =>
+                {
+                    if (item.State == "completed" && File.Exists(item.Path)) Process.Start(new ProcessStartInfo(item.Path) { UseShellExecute = true });
+                    else OpenDownloads();
+                });
+                e.Tag = d;
+            }
+            m.AddSeparator();
+            var newest = recent[0];
+            if (File.Exists(newest.Path)) m.Add("Show in folder", IconData.Folder, null, () => Process.Start("explorer.exe", "/select,\"" + newest.Path + "\""));
+            m.Add("Full download history", IconData.History, "Ctrl+J", OpenDownloads);
+            toolbar.ShowDownloads = downloadsSeen = true;
+            toolbar.LayoutNow();
+            if (!m.ShowAt(toolbar, toolbar.ButtonRect("downloads"), true, "downloads")) return;
+            dlBubble = m;
+            dlBubbleTimer?.Dispose();
+            dlBubbleTimer = new Timer { Interval = 500 };
+            int ticks = 0;
+            dlBubbleTimer.Tick += (o, a) =>
+            {
+                if (m.IsDisposed) { dlBubbleTimer.Stop(); return; }
+                RefreshDownloadBubble();
+                ticks++;
+                // auto-opened: closes after 6 s unless the pointer is over it (then it stays until the user leaves it)
+                if (auto && ticks >= 12 && !m.Bounds.Contains(Cursor.Position)) m.Close();
+            };
+            dlBubbleTimer.Start();
+        }
+
+        void RefreshDownloadBubble()
+        {
+            var m = dlBubble;
+            if (m == null || m.IsDisposed) return;
+            bool changed = false;
+            foreach (var e in m.Items)
+                if (e.Tag is Downloads.Item d)
+                {
+                    string st = StatusText(d);
+                    if (st != e.Shortcut) { e.Shortcut = st; changed = true; }
+                }
+            if (changed) m.Invalidate();
+        }
 
         string WebUrl => Current?.Created == true && (Current.View.CoreWebView2.Source.StartsWith("http://") || Current.View.CoreWebView2.Source.StartsWith("https://"))
             ? Current.View.CoreWebView2.Source : null;

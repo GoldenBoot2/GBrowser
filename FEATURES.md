@@ -74,7 +74,7 @@ Last full audit: 19-11-2026.
 | Multi-part downloads, speed limit, open when done | Done |
 | Location, ask where to save, file-exists choice | Done |
 | SmartScreen: block shown in GBrowser, Download anyway | Done (19-11-2026) |
-| Show downloads when a download starts (bubble) | Missing (button only) |
+| Show downloads when a download starts (bubble) | Done 19-11-2026 (download button opens a bubble with the 5 most recent downloads and live progress, Show in folder, Full download history; it opens by itself when a download starts and closes after about 6 s unless the pointer is on it; a finished row opens the file; tested) |
 | Warn when closing with downloads running | Done 19-11-2026 (closing the last window or Exit: "Cancel download?" with Keep downloading / Exit; not asked at Windows shutdown; tested both answers with a 1 GB download) |
 | "Always open files of this type" | Missing |
 

@@ -23,12 +23,14 @@ namespace GBrowser
             public bool Checked, Toggle, Separator, Header, Note;
             public bool Enabled = true;
             public Action Click;
+            public object Tag;                    // the caller's own data (e.g. the download a row shows)
             internal Rectangle Bounds;
             internal bool Selectable => !Separator && !Header && !Note && Enabled;
         }
 
         public static MaterialMenu Current { get; private set; }
         public readonly List<Entry> Items = new List<Entry>();
+        public int MinWidth;   // logical pixels at 96 dpi (rows whose text changes while the menu is open)
         Form owner;
         Rectangle anchorScreen;
         string key;
@@ -99,7 +101,7 @@ namespace GBrowser
 
         void Layout_(bool alignRight)
         {
-            int w = S(200);
+            int w = Math.Max(S(200), S(MinWidth));
             int lead = HasLeading ? S(16 + 20 + 12) : S(16);
             using (var g = CreateGraphics())
                 foreach (var it in Items)
