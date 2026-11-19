@@ -301,9 +301,16 @@ namespace GBrowser
         /// <summary>full = the address, shown = Chrome-style short form (no https://, no www., no lone "/").</summary>
         public void SetUrl(string full, string shown)
         {
+            string oldFull = FullUrl, oldShown = ShownUrl, text = Address.Text;
             FullUrl = full ?? "";
             ShownUrl = shown ?? "";
             if (!Address.Focused) Address.Text = ShownUrl;
+            // focused but not typed in (still the old address or empty): show the new one, like Chrome; typed text stays
+            else if (text.Length == 0 || text == oldFull || text == oldShown)
+            {
+                string now = FullUrl.Length > 0 ? FullUrl : ShownUrl;
+                if (text != now) { Address.Text = now; Address.SelectAll(); }
+            }
             LayoutNow();
         }
 

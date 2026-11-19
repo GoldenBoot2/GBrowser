@@ -279,10 +279,13 @@ namespace GBrowser
             return true;
         }
 
-        /// <summary>Esc: first closes the list and puts back what was typed.</summary>
+        /// <summary>Esc with a suggestion picked by arrow keys: closes the list and puts back what was typed. Without one
+        /// it only closes the list and returns false, so the address bar goes back to the page's address at once (like
+        /// Chrome's OmniboxEditModel::OnEscapeKeyPressed).</summary>
         public bool Escape()
         {
             if (!popup.Visible) return false;
+            if (box.Text == typed) { Close(); return false; }
             setting = true;
             box.Text = typed;
             box.Select(typed.Length, 0);

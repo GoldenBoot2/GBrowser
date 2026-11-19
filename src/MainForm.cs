@@ -848,6 +848,22 @@ namespace GBrowser
 
         // ---------- tabs ----------
 
+        /// <summary>A page starts loading in the shown tab while the address bar has the focus but nothing was typed
+        /// there (a bookmark, a new tab page tile, Back, Home, a menu item): the page gets the focus, like Chrome. Before,
+        /// only Enter in the address bar moved it, so after any other way the address bar stayed focused and, being
+        /// focused, kept showing an empty or old address. The new tab page itself keeps the address bar focused.</summary>
+        void PageTakesFocus(BrowserTab t, string uri)
+        {
+            if (!toolbar.Address.Focused || Pages.PageName(uri) == "newtab") return;
+            string a = toolbar.Address.Text;
+            if (a.Length > 0 && a != toolbar.FullUrl && a != toolbar.ShownUrl) return;   // the user is typing: leave it
+            BeginInvoke((Action)(() =>
+            {
+                if (Current != t || !toolbar.Address.Focused) return;
+                if (t.View != null && t.View.Visible) t.View.Focus(); else content.Focus();
+            }));
+        }
+
         /// <summary>The window that holds this tab now.</summary>
         static MainForm OwnerOf(BrowserTab t) => App.Windows.FirstOrDefault(w => w.Tabs.Contains(t));
 
@@ -900,6 +916,10 @@ namespace GBrowser
             UpdateUi();
             strip.RefreshTabs();
         }
+
+#if AUTOMATION
+        bool SelectNextControlTo(Control c) { c.Select(); return c.ContainsFocus; }
+#endif
 
         /// <summary>Where the default-browser registration goes: the real place, or (test builds) a test key that
         /// changes nothing in Windows.</summary>
@@ -1162,6 +1182,7 @@ namespace GBrowser
             core.NavigationStarting += (o, e) =>
             {
                 t.Loading = true; F().strip.RefreshTabs(); if (t == F().Current) F().UpdateUi();
+                if (t == F().Current) F().PageTakesFocus(t, e.Uri);
                 // the colour under the page: white for websites (as in Chrome), the theme colour for GBrowser's pages
                 var bg = PageBase(e.Uri);
                 if (t.View.DefaultBackgroundColor != bg) t.View.DefaultBackgroundColor = bg;
@@ -3227,6 +3248,17 @@ namespace GBrowser
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
                 case "dbg": Blocking.TestDbg = arg; return "ok";
+                case "focusinfo":
+                {
+                    // test: why the page does not take the keyboard focus
+                    var v = Current.View;
+                    string before = "canFocus=" + v.CanFocus + " canSelect=" + v.CanSelect + " visible=" + v.Visible + " enabled=" + v.Enabled +
+                        " tabStop=" + v.TabStop + " handle=" + v.IsHandleCreated;
+                    bool r = arg == "select" ? SelectNextControlTo(v) : v.Focus();
+                    await Task.Delay(300);
+                    return before + " | focus()=" + r + " viewFocused=" + v.Focused + " contains=" + v.ContainsFocus + " address=" + toolbar.Address.Focused +
+                        " active=" + (ActiveControl?.GetType().Name ?? "none");
+                }
                 case "wins":   // test: windows and their tabs (* = active)
                     return string.Join(" || ", App.Windows.Select((w, i) => i + (w == App.Active ? "*" : "") + " " + w.Bounds + ": " +
                         string.Join(", ", w.Tabs.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url))));
@@ -3457,6 +3489,7 @@ namespace GBrowser
         {
             var url = Search.ToUrl(text);
             if (url != null) Current?.Navigate(url);
+            Current?.View?.Focus();   // as Enter in the address bar does (toolbar.Go)
         }
 #endif
 
