@@ -102,32 +102,49 @@
     } catch (e) {}
   }
   var cwGet = null;
-  if (DBG.indexOf('f') < 0) try {
-    [window.HTMLIFrameElement, window.HTMLFrameElement].forEach(function (F) {
+  // children of a DocumentFragment move out of it on insertion: note them first (CreepJS builds its probe frame
+  // with innerHTML inside a fragment, then appends the fragment)
+  function kidsOf(n) {
+    try {
+      if (!n || n.nodeType !== 11) return null;
+      var out = [];
+      for (var c = n.firstElementChild; c; c = c.nextElementSibling) out.push(c);
+      return out;
+    } catch (e) { return null; }
+  }
+  function patchAfter(n, kids) {
+    if (kids) { for (var i = 0; i < kids.length; i++) patchFramesIn(kids[i]); } else patchFramesIn(n);
+  }
+  // the frame hooks go into every realm we patch, so a frame made from inside a frame (by that frame's own
+  // appendChild / contentWindow, as CreepJS's nested probe does) is patched too; in a child realm the hooks get
+  // that realm's Function.prototype like its own built-ins
+  function frameHooks(W) {
+    var own = function (f) { if (W !== window) try { Object.setPrototypeOf(f, W.Function.prototype); } catch (e) {} return f; };
+    [W.HTMLIFrameElement, W.HTMLFrameElement].forEach(function (F) {
       if (!F) return;
       var P = F.prototype;
       var dw = Object.getOwnPropertyDescriptor(P, 'contentWindow');
       var dd = Object.getOwnPropertyDescriptor(P, 'contentDocument');
       if (dw && dw.get) {
-        if (F === window.HTMLIFrameElement) cwGet = dw.get;
+        if (W === window && F === window.HTMLIFrameElement) cwGet = dw.get;
         Object.defineProperty(P, 'contentWindow', {configurable: true, enumerable: dw.enumerable,
-          get: asNative({get contentWindow() { var v = nat(dw.get, this, [], 1); patchRealm(v); return v; }}.__lookupGetter__('contentWindow'), dw.get)});
+          get: own(asNative({get contentWindow() { var v = nat(dw.get, this, [], 1); patchRealm(v); return v; }}.__lookupGetter__('contentWindow'), dw.get))});
       }
       if (dd && dd.get) {
         Object.defineProperty(P, 'contentDocument', {configurable: true, enumerable: dd.enumerable,
-          get: asNative({get contentDocument() { var v = nat(dd.get, this, [], 1); try { if (v) patchRealm(v.defaultView); } catch (e) {} return v; }}.__lookupGetter__('contentDocument'), dd.get)});
+          get: own(asNative({get contentDocument() { var v = nat(dd.get, this, [], 1); try { if (v) patchRealm(v.defaultView); } catch (e) {} return v; }}.__lookupGetter__('contentDocument'), dd.get))});
       }
     });
     // insertion paths: patch right after the frame enters the page (window[0] / frames[0] reach it too)
-    var NP = Node.prototype, EP = Element.prototype;
+    var NP = W.Node.prototype, EP = W.Element.prototype;
     [[NP, 'appendChild', 0], [NP, 'insertBefore', 0], [NP, 'replaceChild', 0]].forEach(function (m) {
       var f = m[0][m[1]];
       if (typeof f !== 'function') return;
       var o = {};
-      o[m[1]] = {appendChild(n) { var r = nat(f, this, arguments, 1); patchFramesIn(n); return r; },
-        insertBefore(n) { var r = nat(f, this, arguments, 1); patchFramesIn(n); return r; },
-        replaceChild(n) { var r = nat(f, this, arguments, 1); patchFramesIn(n); return r; }}[m[1]];
-      Object.defineProperty(m[0], m[1], {value: asNative(o[m[1]], f), writable: true, enumerable: true, configurable: true});
+      o[m[1]] = {appendChild(n) { var k = kidsOf(n), r = nat(f, this, arguments, 1); patchAfter(n, k); return r; },
+        insertBefore(n) { var k = kidsOf(n), r = nat(f, this, arguments, 1); patchAfter(n, k); return r; },
+        replaceChild(n) { var k = kidsOf(n), r = nat(f, this, arguments, 1); patchAfter(n, k); return r; }}[m[1]];
+      Object.defineProperty(m[0], m[1], {value: own(asNative(o[m[1]], f)), writable: true, enumerable: true, configurable: true});
     });
     ['append', 'prepend', 'after', 'before', 'replaceWith', 'insertAdjacentElement', 'insertAdjacentHTML', 'replaceChildren'].forEach(function (n) {
       var f = EP[n];
@@ -144,15 +161,19 @@
         } catch (e) {}
         return r;
       }
-      Object.defineProperty(EP, n, {value: asNative(w, f), writable: true, enumerable: true, configurable: true});
+      Object.defineProperty(EP, n, {value: own(asNative(w, f)), writable: true, enumerable: true, configurable: true});
     });
     ['innerHTML', 'outerHTML'].forEach(function (n) {
       var d = Object.getOwnPropertyDescriptor(EP, n);
       if (!d || !d.set) return;
       var s = {set innerHTML(v) { nat(d.set, this, [v], 1); patchFramesIn(this); },
         set outerHTML(v) { var p = this.parentNode; nat(d.set, this, [v], 1); patchFramesIn(p); }}.__lookupSetter__(n);
-      Object.defineProperty(EP, n, {get: d.get, set: asNative(s, d.set), enumerable: d.enumerable, configurable: true});
+      Object.defineProperty(EP, n, {get: d.get, set: own(asNative(s, d.set)), enumerable: d.enumerable, configurable: true});
     });
+  }
+  if (DBG.indexOf('f') < 0) try {
+    frameHooks(window);
+    realmHooks.push(function (w) { try { frameHooks(w); } catch (e) {} });
   } catch (e) {}
 
   // ---- privacy mode: hide who the user is (device, app, fingerprints) ----
