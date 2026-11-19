@@ -566,6 +566,7 @@ namespace GBrowser
             if (decision == null) { Record(url, type, "allowed"); return; }
             if (main) { Record(url, type, "page blocked"); e.Response = BlockPage(url, host); return; }
             Count();
+            Consent.OnBlocked(host, PageUrl, core);   // a blocked consent tool: its "necessary only" cookie written for the site
             if (decision.Length > 0)
             {
                 var res = eng.Redirect(decision);

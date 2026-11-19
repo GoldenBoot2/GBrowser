@@ -173,7 +173,7 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 | Identity check page: shows what sites can see (each signal, current identity ID), compares with the last identity to prove everything changed, with links to public test sites | Missing |
 | Identity: not changeable without the user's approval: the IP address (needs a VPN / proxy) and the TLS / HTTP network fingerprint (it is the genuine Edge one, shared by millions); behaviour (typing / mouse rhythm, visit times) and signing in to an old account still re-identify: shown as notes in the identity check page | Note |
 
-| Masked cookie-consent records (OneTrust / Cookiebot) | Missing |
+| Masked cookie-consent records (OneTrust / Cookiebot) | Done 19-11-2026 (Consent.cs, from Android: a blocked OneTrust / Cookiebot script gets its "necessary only" cookie written in the tool's own format, values matched to OneTrust's real cookie on cnn.com: version, encoding, fields; consent ID per install and identity, replaced after New identity; the site's own consent cookie never touched; Cookiebot region from Windows' Home location. Tested on adobe.com, cookiebot.com) |
 | IP-lookup masking | Missing (no VPN / proxy without approval) |
 | Block tracker pages (strict) | Done 19-11-2026: "Block pages of ad and tracker sites" uses every list in use, tracker lists included (tested: google-analytics.com shows the block page) |
 | Per-page request log: Blocked / Allowed / Cookies | Done 19-11-2026: shield menu > Request log (last 500 requests of the tab: allowed / blocked / replaced, type, live, search, filter, Cookies button) |
