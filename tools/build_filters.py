@@ -33,7 +33,35 @@ AG = 'https://filters.adtidy.org/extension/chromium/filters/%d.txt'
 HZ = 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/%s.txt'
 UBO = 'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/%s.txt'
 HZN = 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/native.%s.txt'
-LISTS = [  # (file, group, url, title)
+NATIVE = [('hagezi_native_amazon.txt', 'amazon'), ('hagezi_native_apple.txt', 'apple'), ('hagezi_native_huawei.txt', 'huawei'),
+          ('hagezi_native_lgwebos.txt', 'lgwebos'), ('hagezi_native_oppo_realme.txt', 'oppo-realme'),
+          ('hagezi_native_roku.txt', 'roku'), ('hagezi_native_samsung.txt', 'samsung'),
+          ('hagezi_native_tiktok_extended.txt', 'tiktok.extended'), ('hagezi_native_vivo.txt', 'vivo'),
+          ('hagezi_native_winoffice.txt', 'winoffice'), ('hagezi_native_xiaomi.txt', 'xiaomi')]
+# Disconnect's tracker list (Firefox's "known fingerprinters"): the FingerprintingInvasive category, blocked when loaded
+# from another site, as Firefox does. Left out: bot checks, captchas and payment anti-fraud services, which sites use
+# to let people in or to approve payments (blocking them locks the user out); rules other lists have stay as they are.
+DISCONNECT = 'https://raw.githubusercontent.com/disconnectme/disconnect-tracking-protection/master/services.json'
+DISCONNECT_KEEP = ('awswaf.com', 'smartcaptcha.yandexcloud.net', 'online-metrix.net', 'sardine.ai', 'botnot.io',
+                   'tongdun.net', 'fraudmetrix.cn', 'fraudjs.io', 'antifraudjs.friends2follow.com')
+
+
+def disconnect_rules(text):
+    import json
+    cats = json.loads(text)['categories']
+    doms = set()
+    for ent in cats.get('FingerprintingInvasive', []):
+        for name, v in ent.items():
+            for site, ds in v.items():
+                if isinstance(ds, list):
+                    doms.update(d.strip().lower() for d in ds if isinstance(d, str))
+    keep = lambda d: any(d == k or d.endswith('.' + k) for k in DISCONNECT_KEEP)
+    out = ['! Title: Disconnect fingerprinters (FingerprintingInvasive, third-party)']
+    out += ['||%s^$third-party' % d for d in sorted(doms) if d and not keep(d) and re.match(r'^[a-z0-9.-]+$', d)]
+    return '\n'.join(out) + '\n'
+
+
+LISTS = [  # (file, group, url, title); url may be a list of (file, url) parts joined into one list
     ('adguard_2.txt', 0, AG % 2, 'AdGuard Base'),
     ('adguard_11.txt', 0, AG % 11, 'AdGuard Mobile Ads'),
     ('adguard_3.txt', 2, AG % 3, 'AdGuard Tracking Protection'),
@@ -57,17 +85,9 @@ LISTS = [  # (file, group, url, title)
     ('frogeye.txt', 2, 'https://hostfiles.frogeye.fr/firstparty-trackers.txt',
      'Frogeye first-party trackers'),
     ('extra', 0, None, 'GoldenBoot extra rules'),
-    ('hagezi_native_amazon.txt', 2, HZN % 'amazon', 'HaGeZi native amazon'),
-    ('hagezi_native_apple.txt', 2, HZN % 'apple', 'HaGeZi native apple'),
-    ('hagezi_native_huawei.txt', 2, HZN % 'huawei', 'HaGeZi native huawei'),
-    ('hagezi_native_lgwebos.txt', 2, HZN % 'lgwebos', 'HaGeZi native lgwebos'),
-    ('hagezi_native_oppo_realme.txt', 2, HZN % 'oppo-realme', 'HaGeZi native oppo-realme'),
-    ('hagezi_native_roku.txt', 2, HZN % 'roku', 'HaGeZi native roku'),
-    ('hagezi_native_samsung.txt', 2, HZN % 'samsung', 'HaGeZi native samsung'),
-    ('hagezi_native_tiktok_extended.txt', 2, HZN % 'tiktok.extended', 'HaGeZi native tiktok.extended'),
-    ('hagezi_native_vivo.txt', 2, HZN % 'vivo', 'HaGeZi native vivo'),
-    ('hagezi_native_winoffice.txt', 2, HZN % 'winoffice', 'HaGeZi native winoffice'),
-    ('hagezi_native_xiaomi.txt', 2, HZN % 'xiaomi', 'HaGeZi native xiaomi'),
+    # the 11 device-maker lists share one slot (list masks are 32 bits); every rule of each is kept
+    ('hagezi_native.txt', 2, [(f, HZN % u) for f, u in NATIVE], 'HaGeZi native trackers (11 device makers)'),
+    ('disconnect_fp.txt', 2, DISCONNECT, 'Disconnect fingerprinters'),
     ('adguard_14.txt', 1, AG % 14, 'AdGuard Annoyances'),
     ('adguard_4.txt', 1, AG % 4, 'AdGuard Social Media'),
 ]
@@ -661,7 +681,14 @@ def main():
     extra_path = os.path.join(ROOT, 'tools', 'extra_rules.txt')
     for li, (name, group, url, title) in enumerate(LISTS):
         bit = 1 << li
-        text = open(extra_path, encoding='utf-8').read() if name == 'extra' else fetch(name, url)
+        if name == 'extra':
+            text = open(extra_path, encoding='utf-8').read()
+        elif isinstance(url, list):
+            text = '\n'.join(fetch(f, u) for f, u in url)
+        elif name == 'disconnect_fp.txt':
+            text = disconnect_rules(fetch('disconnect_services.json', url))
+        else:
+            text = fetch(name, url)
         n0 = len(nets)
         own_hosts = 0   # host rules of this list (also those another list has too)
         version = ''
