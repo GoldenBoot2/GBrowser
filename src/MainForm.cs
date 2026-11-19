@@ -3135,6 +3135,7 @@ namespace GBrowser
                     toolbar.Address.KeyForTest(arg == "ShiftDelete" ? Keys.Delete | Keys.Shift : (Keys)Enum.Parse(typeof(Keys), arg));
                     await Task.Delay(300);
                     return "text=" + toolbar.Address.Text + " | " + omni.Describe();
+                case "lastmenu": return PageMenu.LastEngineItems;
                 case "hovercard":
                     strip.TestCard(int.Parse(arg));
                     await Task.Delay(300);

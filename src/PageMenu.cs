@@ -13,6 +13,9 @@ namespace GBrowser
     /// "Magnify image", "Writing direction") are left out. Engine item names measured 19-11-2026 (WebView2 157).</summary>
     internal static class PageMenu
     {
+#if AUTOMATION
+        public static string LastEngineItems = "";
+#endif
         public sealed class Host
         {
             public Action<string> NewTab, NewPrivateTab;
@@ -34,6 +37,9 @@ namespace GBrowser
                 }
             }
             Collect(e.MenuItems);
+#if AUTOMATION
+            LastEngineItems = string.Join(" | ", engine.Values.Select(i => i.Name + "=" + i.Label)) + " || selection=" + (e.ContextMenuTarget.HasSelection ? e.ContextMenuTarget.SelectionText : "");
+#endif
 
             var deferral = e.GetDeferral();
             e.Handled = true;
@@ -58,7 +64,23 @@ namespace GBrowser
 
             if (target.IsEditable)
             {
-                // text field: spelling suggestions from the engine first (any command we do not otherwise list)
+                // a misspelled word (the engine marks it with an empty "spellcheck" item, without suggestions for
+                // custom menus): the Windows spell checker's suggestions first, as in Edge; the choice replaces the word
+                // through the engine's own text input (the right-click selected it)
+                if (engine.ContainsKey("spellcheck") && selection.Length > 0 && selection.Length < 64 && selection.IndexOf(' ') < 0)
+                {
+                    string lang = System.Globalization.CultureInfo.CurrentUICulture.Name;
+                    var sug = WinSpell.Suggest(selection, lang);
+                    foreach (var w in sug)
+                    {
+                        string word = w;
+                        Own(word, null, null, () => _ = core.CallDevToolsProtocolMethodAsync("Input.insertText", Store.ToJson(new Dictionary<string, object> { { "text", word } })));
+                    }
+                    if (sug.Count == 0) m.AddNote("No suggestions");
+                    string misspelled = selection;
+                    Own("Add to dictionary", IconData.Add, null, () => WinSpell.AddToDictionary(misspelled, lang));
+                    Sep();
+                }
                 Cmd("undo", "Undo", IconData.Restore, "Ctrl+Z");
                 Cmd("redo", "Redo", IconData.Refresh, "Ctrl+Y");
                 Sep();
