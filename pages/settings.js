@@ -473,21 +473,26 @@
     const sec = el('section', { id, class: 'settings-section' }, el('h2', { class: 'section-title', text: title }), ...list.filter(Boolean));
     content.append(sec);
     const a = el('a', { href: '#' + id, class: 'nav-item' }, icon(iconName, 's20'), el('span', { text: title }));
-    a.addEventListener('click', e => { e.preventDefault(); sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); history.replaceState(null, '', '#' + id); });
+    a.addEventListener('click', e => { e.preventDefault(); if (location.hash !== '#' + id) history.pushState(null, '', '#' + id); show(id); });
     links[id] = a;
     nav.append(a);
   }
   main.textContent = '';
   main.classList.add('settings-layout');
   main.append(nav, content);
-  // the section in view is highlighted in the sidebar (like Chrome)
-  const mark = id => { for (const k in links) links[k].classList.toggle('on', k === id); };
-  const io = new IntersectionObserver(es => {
-    const vis = [...content.children].filter(sec => { const r = sec.getBoundingClientRect(); return r.bottom > 120 && r.top < innerHeight * 0.5; });
-    if (vis.length) mark(vis[0].id);
-  }, { threshold: [0, 0.25, 0.5, 1], rootMargin: '-80px 0px 0px 0px' });
-  for (const sec of content.children) io.observe(sec);
-  mark(SECTIONS[0][0]);
-  // links into a section or card (#appearance, #identity, #downloads ...)
-  if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) setTimeout(() => t.scrollIntoView({ block: 'start' }), 50); }
+  // one section at a time: the one chosen in the sidebar (the address keeps it, so Back / Forward and links work)
+  function show(target) {
+    let secId = SECTIONS[0][0], card = null;
+    const t = target && document.getElementById(target);
+    if (t) {
+      const sec = t.closest('.settings-section');
+      if (sec) { secId = sec.id; if (t !== sec) card = t; }
+    }
+    for (const sec of content.children) sec.hidden = sec.id !== secId;
+    for (const k in links) links[k].classList.toggle('on', k === secId);
+    if (card) setTimeout(() => card.scrollIntoView({ block: 'start' }), 30);
+    else window.scrollTo(0, 0);
+  }
+  window.addEventListener('popstate', () => show(location.hash.slice(1)));
+  show(location.hash.slice(1));
 })();

@@ -3165,7 +3165,7 @@ namespace GBrowser
                 case "state":
                     return Store.ToJson(new Dictionary<string, object>
                     {
-                        { "selected", strip.Selected }, { "address", toolbar.Address.Text }, { "title", Text },
+                        { "selected", strip.Selected }, { "address", toolbar.Address.Text }, { "shown", toolbar.ShownUrl }, { "addressFocused", toolbar.Address.Focused }, { "title", Text },
                         { "tabs", Tabs.Select(t => new Dictionary<string, object> {
                             { "title", t.Title }, { "url", t.Created ? t.View.CoreWebView2.Source : t.Url }, { "created", t.Created },
                             { "loading", t.Loading }, { "sleeping", t.Sleeping }, { "blocked", t.Blocked } }).ToList() },
