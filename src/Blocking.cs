@@ -186,6 +186,7 @@ namespace GBrowser
 #if AUTOMATION
         public static readonly List<string> TestLog = new List<string>();
         public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
+        public static string[] TestScriptlets;   // test builds: scriptlet calls for pages whose address has slcase=<line>
 #endif
         /// <summary>A note for the test channel's log; nothing in normal builds.</summary>
         static void TestNote(string s)
@@ -537,6 +538,26 @@ namespace GBrowser
             "var c=window.chrome;if(c&&('webview' in c)){try{delete c.webview;}catch(e){}" +
             "if('webview' in c){try{Object.defineProperty(c,'webview',{value:undefined,configurable:true,enumerable:false});}catch(e){}}}}catch(e){}})();";
 
+        /// <summary>The AdGuard scriptlet library without its page-visible marks (measured 19-11-2026, tools/local/slaudit):
+        /// every scriptlet calls window.__debug(details) when it acts, so a page that defines that function is told
+        /// each time we block something; trusted-click-element and href-sanitizer leave Symbol.for("adg-...") /
+        /// ("adguard...") registry symbols on EventTarget.prototype and links; close-window fires "adguard:..." events.
+        /// Replaced with holders inside the page script (adgSpoof, adgHrefKey) and random event names.</summary>
+        internal static string QuietLib(string lib)
+        {
+            if (lib.Length == 0) return lib;
+            string rnd = Guid.NewGuid().ToString("N");
+            return lib
+                .Replace("\"function\"==typeof window.__debug&&window.__debug(e)", "void 0")
+                .Replace("Object.defineProperty(EventTarget.prototype,r,{value:e,writable:!1,enumerable:!1,configurable:!1})",
+                         "(function(){if(adgSpoof.v)throw 0;adgSpoof.v=e})()")
+                .Replace("var t=EventTarget.prototype[r];", "var t=adgSpoof.v;")
+                .Replace("Symbol.for(\"adg-spoof-click-isTrusted\")", "0")
+                .Replace("Symbol.for(\"adguard.href-sanitizer.writes\")", "adgHrefKey")
+                .Replace("adguard:scriptlet-close-window", "x" + rnd.Substring(0, 12))
+                .Replace("adguard:subscribed-to-close-window", "x" + rnd.Substring(12, 12));
+        }
+
         /// <summary>assets/gbab.js with the scriptlet library, AdGuard JS rules and ExtendedCss filled in, behind a
         /// small shim that hands it the bridge (chrome.webview.hostObjects.sync.gb) under the name it expects.</summary>
         static string PageScript()
@@ -548,7 +569,7 @@ namespace GBrowser
                 string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets");
                 string gbab = File.ReadAllText(Path.Combine(dir, "gbab.js"), Encoding.UTF8);
                 string ec = File.ReadAllText(Path.Combine(dir, "extcss.js"), Encoding.UTF8);
-                string lib = eng?.Scriptlets ?? "", raw = eng?.RawJs ?? "";
+                string lib = QuietLib(eng?.Scriptlets ?? ""), raw = eng?.RawJs ?? "";
                 gbab = gbab.Replace("/*SCRIPTLETS*/null", lib.Length == 0 ? "null" : lib)
                            .Replace("/*RAWJS*/null", raw.Length == 0 ? "null" : raw)
                            .Replace("/*EXTCSS*/null", ec.Length == 0 ? "null" : "(function(){" + ec + "\n;return ExtendedCss;})()");
@@ -594,6 +615,16 @@ namespace GBrowser
 
         public string js(string href)
         {
+#if AUTOMATION
+            var tc = Blocking.TestScriptlets;
+            int ci = href.IndexOf("slcase=");
+            if (tc != null && ci >= 0)
+            {
+                int n = 0, k = ci + 7;
+                while (k < href.Length && char.IsDigit(href[k])) n = n * 10 + (href[k++] - '0');
+                return n < tc.Length && tc[n].Length > 0 ? "[" + tc[n] + "]" : "";
+            }
+#endif
             string host = Host(href); var e = FilterEngine.Instance;
             return host == null || e == null || !Blocking.OnFor(host) ? "" : e.ScriptletCalls(href, host, Blocking.Groups());
         }

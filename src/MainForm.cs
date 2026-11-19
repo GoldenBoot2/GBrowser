@@ -2072,6 +2072,8 @@ namespace GBrowser
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
                 case "dbg": Blocking.TestDbg = arg; return "ok";
+                case "slcases":   // test: file with one scriptlet call per line (JSON array), served to pages with slcase=<line>
+                    Blocking.TestScriptlets = arg.Length == 0 ? null : System.IO.File.ReadAllLines(arg); return "ok " + (Blocking.TestScriptlets?.Length ?? 0);
                 case "cdps":   // test: DevTools call in an attached frame session: "<session> <method> <json>"
                 {
                     var parts = arg.Split(new[] { ' ' }, 3);

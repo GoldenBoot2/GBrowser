@@ -4,8 +4,12 @@
    3. Element hiding: site CSS at once; generic rules only for the classes / ids the page uses. */
 (function () {
   'use strict';
-  var SL = /*SCRIPTLETS*/null;
+  // used by the scriptlet library in place of AdGuard's page-visible Symbol.for(...) markers (Blocking.PageScript)
+  var adgSpoof = {}, adgHrefKey = Symbol();
+  var LIB0 = lineHere();
+  var SL = (function (Object, Error) { return /*SCRIPTLETS*/null; })(slObject(), slError());
   var RAWJS = /*RAWJS*/null;
+  var LIB1 = lineHere();
   var EXTCSS = /*EXTCSS*/null;
   var B = window.__gbAdblock;
   if (!B) return;
@@ -30,39 +34,10 @@
   // A bound apply captured now: no stack frame of its own (measured) and immune to later page changes.
   var bApply = Function.prototype.call.bind(Function.prototype.apply);
   var gOPD = Object.getOwnPropertyDescriptor;
-  // extra = our frames above nat() up to the page (the wrapper itself = 1)
+  // nat(): call a built-in for a wrapper of ours; an error it throws loses our frames (scrub(), below: frames of
+  // this injected script are told apart by identity, so wrappers inside wrappers come out right too)
   function nat(f, self, args, extra, Err) {
-    try { return bApply(f, self, args); } catch (e) { throw rethrow(f, self, args, e, (extra || 1) + 2, Err || Error); }
-  }
-  function rethrow(f, self, args, e, ours, Err) {
-    try {
-      var dl = gOPD(Err, 'stackTraceLimit'), dp = gOPD(Err, 'prepareStackTrace');
-      // no stack is recorded, or the page watches these settings: leave the error as it is
-      if (!dl || !('value' in dl) || !dl.writable || typeof dl.value !== 'number' || !(dl.value > 0)) return e;
-      if (dp && !('value' in dp && dp.writable)) return e;
-      var lim = dl.value, prep = dp && dp.value, e2 = e;
-      Err.stackTraceLimit = lim === Infinity ? lim : lim + ours;
-      if (typeof prep === 'function')
-        Err.prepareStackTrace = function (err, frames) { return bApply(prep, this, [err, frames.slice(ours)]); };
-      try {
-        try { bApply(f, self, args); } catch (x) { e2 = x; }
-        if (e2 !== e && e2 !== null && typeof e2 === 'object') {
-          var st = e2.stack;   // formatted now, while our frames can still be taken out
-          if (typeof prep !== 'function' && typeof st === 'string') e2.stack = dropFrames(st, ours);
-          e = e2;
-        }
-      } finally {
-        Err.stackTraceLimit = lim;
-        if (typeof prep === 'function') Err.prepareStackTrace = prep;
-      }
-    } catch (z) {}
-    return e;
-  }
-  function dropFrames(st, n) {
-    var l = st.split('\n'), i = 0;
-    while (i < l.length && !/^\s+at /.test(l[i])) i++;
-    if (i < l.length) l.splice(i, n);
-    return l.join('\n');
+    try { return bApply(f, self, args); } catch (e) { throw scrub(f, self, args, e, Err || Error, true); }
   }
   var natives = new WeakMap();
   var fnToString = Function.prototype.toString;
@@ -83,6 +58,7 @@
     // new, and owns only length and name
     var toStr = asNative({toString() {
       var o = natives.get(this);
+      while (o && typeof o !== 'string' && natives.has(o)) o = natives.get(o);
       if (typeof o === 'string') return o;
       return nat(fnToString, o || this, [], 1);
     }}.toString, fnToString);
@@ -107,7 +83,7 @@
       if (!FP) return;
       patchedRealms.add(win);
       var ct = FP.toString, RE = win.Error;
-      var w = {toString() { var o = natives.get(this); if (typeof o === 'string') return o;
+      var w = {toString() { var o = natives.get(this); while (o && typeof o !== 'string' && natives.has(o)) o = natives.get(o); if (typeof o === 'string') return o;
         return nat(ct, o || this, [], 1, RE); }}.toString;
       try { Object.setPrototypeOf(w, FP); } catch (e) {}
       natives.set(w, ct);
@@ -198,6 +174,377 @@
       Object.defineProperty(proto, name, {value: w, writable: true, enumerable: false, configurable: true});
     } catch (e) {}
   }
+  // ---- scriptlets leave no trace ----
+  // AdGuard's scriptlets put their own functions and Proxies in place of built-ins. Measured 19-11-2026 with
+  // tools/local/slaudit (84 calls, every scriptlet the lists use, each in its own frame, compared with a clean
+  // frame): their source text or a nameless "function () { [native code] }" showed through toString, wrappers
+  // had a prototype, errors carried their frames ("at Object.apply (<anonymous>...)"), receiver errors changed
+  // ("Cannot read properties of undefined" instead of "Illegal invocation"), accessors replaced data methods and
+  // own properties appeared where the browser has none. The generic no-topics scriptlet did that to
+  // document.browsingTopics on EVERY page. So: everything the scriptlets change on the built-ins is recorded
+  // and each changed function gets a shell that is the browser's own function to every check (a Proxy of the
+  // original: same name, length, prototype, own keys, constructability; toString from the original), calls the
+  // scriptlet's version, and takes our frames out of any error that passes through.
+  var oKeys = Reflect.ownKeys, oDef = Object.defineProperty, rConstruct = Reflect.construct;
+  var isProtoOf = Function.prototype.call.bind(Object.prototype.isPrototypeOf), ProxyC = Proxy;
+  // a frame of this injected script: no file name, not eval code, has a line (built-ins have none)
+  function ourFrame(c) {
+    try { return !c.isEval() && !c.getFileName() && c.getLineNumber() != null; } catch (e) { return false; }
+  }
+  // The first line of a stack. Blink adds "Failed to execute 'x' on 'Y': " to the message of the TypeErrors it
+  // throws after V8 has recorded their stack, so there the browser's own first line has the message without it
+  // (DOMExceptions keep it). Measured 19-11-2026 (getComputedStyle(null), appendChild(1), open() with no
+  // arguments, new Element()). blink = thrown by the browser, not by page code.
+  var blinkCtx = /^Failed to (?:execute '[^']*' on '[^']*'|construct '[^']*'|read the '[^']*' property from '[^']*'|set the '[^']*' property on '[^']*'|delete the '[^']*' property from '[^']*'): /;
+  function errHead(err, blink) {
+    var n, m;
+    try { n = err.name; n = n === undefined ? 'Error' : String(n); } catch (e) { n = 'Error'; }
+    try { m = err.message; m = m === undefined ? '' : String(m); } catch (e) { m = ''; }
+    if (blink) {
+      try { if (!(typeof DOMException === 'function' && err instanceof DOMException)) m = m.replace(blinkCtx, ''); } catch (e) {}
+    }
+    return n === '' ? m : m === '' ? n : n + ': ' + m;
+  }
+  // our frames out of e's stack (formatted now, as V8 would); when they cost the page frames at the depth
+  // limit and the throw did not come from page code, the call runs once more with room for them
+  function natF(f, self, args, Err) {
+    try { return bApply(f, self, args); } catch (e) { throw scrub(f, self, args, e, Err || Error, true); }
+  }
+  function scrub(f, self, args, e, Err, again) {
+    if (e === null || (typeof e !== 'object' && typeof e !== 'function')) return e;
+    try {
+      var dl = gOPD(Err, 'stackTraceLimit'), dp = gOPD(Err, 'prepareStackTrace');
+      if (!dl || !('value' in dl) || !dl.writable || typeof dl.value !== 'number' || !(dl.value > 0)) return e;
+      if (dp && !('value' in dp && dp.writable)) return e;
+      var lim = dl.value, prep = dp && dp.value, info = {ours: 0, total: 0, page: false};
+      var install = function () {
+        Err.prepareStackTrace = function (err, frames) {
+          var out = [];
+          info.total = frames.length;
+          for (var i = 0; i < frames.length; i++) {
+            if (ourFrame(frames[i])) { info.ours++; continue; }
+            if (info.ours === 0 && i === 0 && frames[i].getLineNumber() != null) info.page = true;
+            if (out.length < lim) out.push(frames[i]);
+          }
+          if (typeof prep === 'function') return bApply(prep, Err, [err, out]);
+          var s = errHead(err, !info.page);
+          for (var j = 0; j < out.length; j++) s += '\n    at ' + out[j];
+          return s;
+        };
+      };
+      var restore = function () {
+        Err.stackTraceLimit = lim;
+        if (dp) Err.prepareStackTrace = prep; else delete Err.prepareStackTrace;
+      };
+      try { install(); void e.stack; } finally { restore(); }
+      if (again && !info.page && info.ours > 0 && info.total >= lim && lim !== Infinity) {
+        try {
+          Err.stackTraceLimit = lim + 64;
+          install();
+          var e2 = e;
+          try { bApply(f, self, args); } catch (x) { e2 = x; }
+          if (e2 !== e && e2 !== null && typeof e2 === 'object') { void e2.stack; e = e2; }
+        } finally { restore(); }
+      }
+    } catch (z) {}
+    return e;
+  }
+  // what a shell reports as its source: the original's (through earlier masks of ours)
+  function shellSrc(orig) {
+    var o = orig;
+    while (natives.has(o)) { o = natives.get(o); if (typeof o === 'string') break; }
+    return o;
+  }
+  var shellCur = new WeakMap();
+  // which receivers the browser's own method accepts: window functions take window (or nothing), methods of
+  // an interface prototype take its instances. Other receivers go straight to the browser's function, which
+  // answers them exactly as it always does (its "Illegal invocation"), never to the scriptlet's code.
+  // Array / String / Object / Function methods are generic (any receiver), so they get no check.
+  var genericProtos = [Array.prototype, String.prototype, Object.prototype, Function.prototype];
+  function receiverCheck(holder) {
+    if (holder === window) return function (th) { return th === undefined || th === null || th === window; };
+    if (holder === document) return function (th) { return th === document; };
+    try {
+      if (genericProtos.indexOf(holder) >= 0) return null;
+      var C = gOPD(holder, 'constructor');
+      if (C && typeof C.value === 'function' && C.value.prototype === holder)
+        return function (th) { return th !== null && (typeof th === 'object' || typeof th === 'function') && isProtoOf(holder, th); };
+    } catch (e) {}
+    return null;
+  }
+  function shell(orig, cur, holder, brand) {
+    var ok = holder ? receiverCheck(holder) : null;
+    var px = new ProxyC(orig, {
+      apply: function (t, th, a) {
+        if (ok && !ok(th)) return natF(orig, th, a);
+        if (brand) natF(brand, th, []);
+        return natF(cur, th, a);
+      },
+      construct: function (t, a, nt) { return natF(rConstruct, undefined, [cur, a, nt === px ? cur : nt]); }
+    });
+    natives.set(px, shellSrc(orig));
+    shellCur.set(px, cur);
+    return px;
+  }
+  // a read trap (abort-current-inline-script, abort-on-stack-trace, abort-on-property-read on a built-in
+  // method) as a check when the method is called: the property stays the browser's plain method
+  function trapCall(get, holder) {
+    return function () { var fn = bApply(get, holder, []); return bApply(fn, this, arguments); };
+  }
+  // a function made by a scriptlet where the browser has none: looks like a built-in accessor / method
+  function fakeShell(kind, name, cur) {
+    var n = typeof name === 'symbol' ? '[' + (name.description || '') + ']' : String(name), base;
+    if (kind === 'get') base = gOPD({get [name]() { return undefined; }}, name).get;
+    else if (kind === 'set') base = gOPD({set [name](v) {}}, name).set;
+    else base = {[name]() {}}[name];
+    var px = new ProxyC(base, {apply: function (t, th, a) { return natF(cur, th, a); }});
+    natives.set(px, 'function ' + (kind ? kind + ' ' : '') + n + '() { [native code] }');
+    return px;
+  }
+  // What the scriptlets change, recorded before they run. Reading every property of window and ~70
+  // prototypes cost 5-20 ms per page (measured 19-11-2026: YouTube, TOI, BBC), so only these are watched:
+  // what the library assigns to directly (found in the library source and the slaudit run), the property
+  // chain each call names, and everything it defines (recorded by its Object.defineProperty, below).
+  var cloakList = null, cloakSeen = null;
+  var CLOAK_WATCH = [
+    ['', 'setTimeout setInterval requestAnimationFrame fetch open eval getComputedStyle atob btoa onerror Promise ' +
+      'IntersectionObserver MutationObserver RTCPeerConnection webkitRTCPeerConnection addEventListener ' +
+      'removeEventListener decodeURIComponent'],
+    ['document', 'write writeln createElement addEventListener cookie'],
+    ['Document.prototype', 'write writeln createElement browsingTopics'],
+    ['EventTarget.prototype', 'addEventListener removeEventListener dispatchEvent'],
+    ['Node.prototype', 'appendChild insertBefore textContent'],
+    ['Element.prototype', 'attachShadow getBoundingClientRect setAttribute getAttribute hasAttribute innerHTML ' +
+      'append prepend remove'],
+    ['HTMLElement.prototype', 'onerror onload'],
+    ['HTMLScriptElement.prototype', 'src setAttribute'], ['HTMLImageElement.prototype', 'src setAttribute'],
+    ['HTMLIFrameElement.prototype', 'src setAttribute'], ['HTMLLinkElement.prototype', 'href setAttribute'],
+    ['HTMLCanvasElement.prototype', 'getContext'],
+    ['XMLHttpRequest.prototype', 'open send abort getAllResponseHeaders getResponseHeader setRequestHeader'],
+    ['Response.prototype', 'json text'], ['JSON', 'parse stringify'], ['Object', 'keys entries values assign'],
+    ['DOMTokenList.prototype', 'add remove toggle'], ['TextDecoder.prototype', 'decode'],
+    ['WeakMap.prototype', 'set get'], ['Map.prototype', 'set get'], ['Array.prototype', 'push'],
+    ['RTCPeerConnection.prototype', 'createDataChannel createOffer setLocalDescription setRemoteDescription close']
+  ];
+  function cloakNote(o, k) {
+    if (!cloakList || o === null || (typeof o !== 'object' && typeof o !== 'function')) return;
+    try {
+      var ks = cloakSeen.get(o);
+      if (!ks) { ks = new Set(); cloakSeen.set(o, ks); }
+      if (ks.has(k)) return;
+      ks.add(k);
+      cloakList.push([o, k, gOPD(o, k)]);
+    } catch (e) {}
+  }
+  function chainTarget(chain) {
+    try {
+      var parts = String(chain).split('.'), o = window;
+      if (parts.length > 1 && parts[0] === 'window') parts.shift();
+      for (var i = 0; i < parts.length - 1; i++) { o = o[parts[i]]; if (o === null || o === undefined) return null; }
+      return [o, parts[parts.length - 1]];
+    } catch (e) { return null; }
+  }
+  function cloakStart(calls) {
+    cloakList = [];
+    cloakSeen = new WeakMap();
+    for (var i = 0; i < CLOAK_WATCH.length; i++) {
+      var root = CLOAK_WATCH[i][0] === '' ? window : (chainTarget(CLOAK_WATCH[i][0] + '.x') || [null])[0];
+      if (!root) continue;
+      var ks = CLOAK_WATCH[i][1].split(' ');
+      for (var j = 0; j < ks.length; j++) cloakNote(root, ks[j]);
+    }
+    // the property chain a call names ("document.createElement", "Element.prototype.setAttribute", "atob")
+    if (calls) for (var c = 0; c < calls.length; c++) {
+      var a0 = calls[c][1];
+      if (typeof a0 !== 'string' || !/^[\w$]+(\.[\w$]+)*$/.test(a0)) continue;
+      var t = chainTarget(a0);
+      if (t) cloakNote(t[0], t[1]);
+    }
+  }
+  function sameDesc(a, b) {
+    return a.value === b.value && a.get === b.get && a.set === b.set && a.writable === b.writable &&
+      a.enumerable === b.enumerable && a.configurable === b.configurable;
+  }
+  function inherited(o, k) {
+    try {
+      for (var p = Object.getPrototypeOf(o); p; p = Object.getPrototypeOf(p)) {
+        var d = gOPD(p, k);
+        if (d) return {holder: p, desc: d};
+      }
+    } catch (e) {}
+    return null;
+  }
+  function cloakFix() {
+    var list = cloakList, later = [];
+    cloakList = null;
+    if (!list) return;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i][0], k = list[i][1], b = list[i][2], d;
+      try { d = gOPD(o, k); } catch (e) { continue; }
+      if (!d || (b && sameDesc(b, d))) continue;
+      try {
+        if (b) fixChanged(o, k, b, d);
+        else fixAdded(o, k, d, later);
+      } catch (e) {}
+    }
+    // own properties over inherited methods, once every holder has its final shell
+    for (var h = 0; h < later.length; h++) { try { fixOwn(later[h]); } catch (e) {} }
+  }
+  function asData(o, k, b, v) {
+    oDef(o, k, {value: v, writable: b.writable, enumerable: b.enumerable, configurable: b.configurable});
+  }
+  function fixChanged(o, k, b, d) {
+    var bf = 'value' in b && typeof b.value === 'function';
+    if (bf && 'value' in d) {
+      if (typeof d.value === 'function') asData(o, k, b, shell(b.value, d.value, o));
+      return;
+    }
+    if (bf && d.get) {
+      // a method turned into an accessor: a guard that always hands out the scriptlet's wrapper, or a trap that
+      // checks every read. Either way a plain method again, as the browser has it.
+      var v;
+      try { v = bApply(d.get, o, []); } catch (e) { v = undefined; }
+      if (typeof v === 'function' && v !== b.value) asData(o, k, b, shell(b.value, v, o));
+      else asData(o, k, b, shell(b.value, trapCall(d.get, o), o));
+      return;
+    }
+    if (b.get || b.set) {
+      if (!('get' in d)) return;
+      var g = d.get, st = d.set;
+      if (g && g !== b.get) g = b.get ? shell(b.get, g, o) : fakeShell('get', k, g);
+      if (st && st !== b.set) st = b.set ? shell(b.set, st, o, b.get) : fakeShell('set', k, st);
+      oDef(o, k, {get: g, set: st, enumerable: d.enumerable, configurable: d.configurable});
+      return;
+    }
+    // a value property turned into a trap (set-constant on an existing value)
+    if (d.get || d.set)
+      oDef(o, k, {get: d.get ? fakeShell('get', k, d.get) : undefined, set: d.set ? fakeShell('set', k, d.set) : undefined,
+        enumerable: d.enumerable, configurable: d.configurable});
+  }
+  function fixAdded(o, k, d, later) {
+    var inh = inherited(o, k);
+    if (inh && (('value' in inh.desc && typeof inh.desc.value === 'function') || inh.desc.get) && d.configurable &&
+        (typeof d.value === 'function' || d.get)) {
+      later.push({o: o, k: k, d: d, holder: inh.holder, orig: inh.desc.value});
+      return;
+    }
+    // a new trap (abort-on-property-read, set-constant ...) on a name the browser does not have
+    if (d.get || d.set)
+      oDef(o, k, {get: d.get ? fakeShell('get', k, d.get) : undefined, set: d.set ? fakeShell('set', k, d.set) : undefined,
+        enumerable: d.enumerable, configurable: d.configurable});
+  }
+  // an own method or accessor over an inherited method (document.write, document.createElement trap,
+  // window.addEventListener guard, HTMLScriptElement.prototype.setAttribute): the browser has none there, so it
+  // goes; what it did moves into the holder's method for this object (or its instances) only
+  function fixOwn(x) {
+    var o = x.o, k = x.k, d = x.d, hd = gOPD(x.holder, k);
+    if (!hd || !('value' in hd) || typeof hd.value !== 'function') {
+      if (d.get || d.set)
+        oDef(o, k, {get: d.get ? fakeShell('get', k, d.get) : undefined, set: d.set ? fakeShell('set', k, d.set) : undefined,
+          enumerable: d.enumerable, configurable: d.configurable});
+      return;
+    }
+    if (x.orig === undefined) x.orig = shellSrc(hd.value);
+    var cur = hd.value, own;
+    if (d.get) {
+      var v;
+      try { v = bApply(d.get, o, []); } catch (e) { v = undefined; }
+      // a guard handing out the scriptlet function behind the holder's shell: the holder already does it
+      if (shellCur.has(cur) && shellCur.get(cur) === v) { delete o[k]; return; }
+      // a trap (hands out the browser's method, checks on each read) or its own wrapper for this object
+      own = typeof v === 'function' && v !== x.orig && v !== cur ? v : trapCall(d.get, o);
+    } else own = d.value;
+    var mine = function (th) { return th === o || (th !== null && (typeof th === 'object' || typeof th === 'function') && isProtoOf(o, th)); };
+    var px = new ProxyC(cur, {
+      apply: function (t, th, a) { return natF(mine(th) ? own : cur, th, a); }
+    });
+    natives.set(px, shellSrc(cur));
+    delete o[k];
+    oDef(x.holder, k, {value: px, writable: hd.writable, enumerable: hd.enumerable, configurable: hd.configurable});
+  }
+  // the scriptlets lock what they define (configurable: false); the browser's own properties are configurable,
+  // and theirs must stay so for the reshaping above. The library sees this Object (see SL below).
+  // line of the caller in this script (to know where the scriptlet library sits)
+  function lineHere() {
+    var o = Error.prepareStackTrace, n = 0;
+    try {
+      Error.prepareStackTrace = function (e, f) { return f.length > 1 ? f[1].getLineNumber() : 0; };
+      n = new Error().stack;
+    } catch (e) {} finally { Error.prepareStackTrace = o; if (o === undefined) delete Error.prepareStackTrace; }
+    return typeof n === 'number' ? n : 0;
+  }
+  // a frame of our own wrappers (this script, outside the scriptlet library and the AdGuard JS rules)
+  function wrapperFrame(c) {
+    if (!ourFrame(c)) return false;
+    var n = c.getLineNumber();
+    return !(LIB0 && LIB1 && n > LIB0 && n < LIB1);
+  }
+  // The scriptlets read stacks (abort-on-stack-trace, "inlineScript" / "injectedScript" matching, json-prune
+  // with a stack argument ...). Their Error shows them the stack without our wrappers' frames, with room for
+  // those frames under the depth limit: what they would see without the shells.
+  function slError() {
+    var E = Error, px;
+    var make = function (a, nt) {
+      var dl = gOPD(E, 'stackTraceLimit'), dp = gOPD(E, 'prepareStackTrace');
+      var lim = dl && 'value' in dl ? dl.value : 10, prep = dp && dp.value;
+      var free = dl && dl.writable && typeof lim === 'number' && lim > 0 && lim !== Infinity && !(dp && !('value' in dp && dp.writable));
+      if (!free) return rConstruct(E, a, nt);
+      var e;
+      E.stackTraceLimit = lim + 64;
+      E.prepareStackTrace = function (err, frames) {
+        var out = [];
+        for (var i = 0; i < frames.length && out.length < lim; i++) if (!wrapperFrame(frames[i])) out.push(frames[i]);
+        if (typeof prep === 'function') return bApply(prep, E, [err, out]);
+        var st = errHead(err);
+        for (var j = 0; j < out.length; j++) st += '\n    at ' + out[j];
+        return st;
+      };
+      try { e = rConstruct(E, a, nt); void e.stack; }
+      finally { E.stackTraceLimit = lim; if (dp) E.prepareStackTrace = prep; else delete E.prepareStackTrace; }
+      return e;
+    };
+    px = new Proxy(E, {
+      construct: function (t, a, nt) { return make(a, nt === px ? E : nt); },
+      apply: function (t, th, a) { return make(a, E); }
+    });
+    return px;
+  }
+  // configurable unless the property already exists locked (then defineProperty must fail as it would)
+  function openDesc(o, k, d) {
+    try {
+      if (!d || typeof d !== 'object' || d.configurable === true) return d;
+      var ex = gOPD(o, k);
+      if (ex && !ex.configurable) return d;
+      var c = {};
+      for (var x in d) c[x] = d[x];
+      c.configurable = true;
+      return c;
+    } catch (e) { return d; }
+  }
+  function slObject() {
+    var def = function defineProperty(o, k, d) {
+      cloakNote(o, k);
+      d = openDesc(o, k, d);
+      return Object.defineProperty(o, k, d);
+    };
+    var defs = function defineProperties(o, ps) {
+      try {
+        var c = {}, ks = oKeys(Object(ps));
+        for (var i = 0; i < ks.length; i++) {
+          cloakNote(o, ks[i]);
+          c[ks[i]] = openDesc(o, ks[i], ps[ks[i]]);
+        }
+        ps = c;
+      } catch (e) {}
+      return Object.defineProperties(o, ps);
+    };
+    return new Proxy(Object, {get: function (t, k) {
+      if (k === 'defineProperty') return def;
+      if (k === 'defineProperties') return defs;
+      return t[k];
+    }});
+  }
+
   // battery: a plugged-in, full battery (the commonest reading); the real API object stays, so nothing
   // looks removed (used by privacy mode and instead of the lists' "getBattery = nothing" scriptlet)
   var batteryDone = false;
@@ -219,7 +566,9 @@
       var m = /^navigator\.([A-Za-z_$][\w$]*)$/.exec(a0);
       if (m && !(m[1] in navigator)) return false;
     }
-    if (/no-topics/.test(name) && !('browsingTopics' in document)) return false;
+    // Topics API: in this engine document.browsingTopics() already rejects ("deprecated and has been removed",
+    // measured 19-11-2026, WebView2 157); the scriptlet would put a resolving stand-in on every site instead
+    if (/no-topics/.test(name)) return false;
     if (/no-protected-audience/.test(name) && !('joinAdInterestGroup' in navigator) && !('runAdAuction' in navigator)) return false;
     return true;
   }
@@ -1109,29 +1458,44 @@
 
   var calls = null;
   try { calls = B.js(href); } catch (e) {}
-  if (calls && SL && DBG.indexOf('s') < 0) {
-    try { calls = JSON.parse(calls); } catch (e) { calls = null; }
+  var extra = '', ex = null;
+  try { extra = B.extra(href); } catch (e) {}
+  if (extra && DBG.indexOf('x') < 0) { try { ex = JSON.parse(extra); } catch (e) { ex = null; } }
+  try { calls = calls && SL && DBG.indexOf('s') < 0 ? JSON.parse(calls) : null; } catch (e) { calls = null; }
+  var rawIds = ex && RAWJS && ex.r && ex.r.length ? ex.r : null;
+  // only the calls that will run (the generic ones mostly do not apply here)
+  if (calls) {
+    var runs = [];
+    for (var q = 0; q < calls.length; q++) {
+      if (typeof SL[calls[q][0]] === 'function' && quietCall(calls[q][0], calls[q].slice(1))) runs.push(calls[q]);
+    }
+    calls = runs.length ? runs : null;
+  }
+  if (calls || rawIds) {
+    var cloakOn = DBG.indexOf('k') < 0, before = null;
+    var cloakT0 = DBG.indexOf('z') >= 0 ? performance.now() : 0;
+    if (cloakOn) try { cloakStart(calls); before = true; } catch (e) {}
+    var cloakT1 = DBG.indexOf('z') >= 0 ? performance.now() : 0;
     if (calls) for (var c = 0; c < calls.length; c++) {
-      var f = SL[calls[c][0]];
-      if (typeof f !== 'function') continue;
-      var args = calls[c].slice(1);
-      if (!quietCall(calls[c][0], args)) continue;
+      var f = SL[calls[c][0]], args = calls[c].slice(1);
       try {
         f({name: calls[c][0], args: args, engine: 'corelibs', version: '2.6.0', verbose: false,
            ruleText: ''}, args);
       } catch (e) {}
     }
+    // AdGuard JS rules for this site
+    if (rawIds) for (var r = 0; r < rawIds.length; r++) {
+      var fn = RAWJS[rawIds[r]];
+      if (typeof fn === 'function') try { fn(); } catch (e) {}
+    }
+    var cloakT2 = DBG.indexOf('z') >= 0 ? performance.now() : 0;
+    if (before) try { cloakFix(); } catch (e) {}
+    if (DBG.indexOf('z') >= 0) window.__gbcT = [cloakT1 - cloakT0, cloakT2 - cloakT1, performance.now() - cloakT2, calls ? calls.length : 0, rawIds ? rawIds.length : 0].join(' ');
+    if (DBG.indexOf('z') >= 0) window.__gbc = {natives: natives, srcOf: shellSrc, fts: fnToString, natF: natF, scrub: scrub, ourFrame: ourFrame, fi: function () { var o = Error.prepareStackTrace; Error.prepareStackTrace = function (e, f) { return f.map(function (c) { return [c.getFileName(), c.isEval(), c.getLineNumber(), String(c.getEvalOrigin()), c.getScriptNameOrSourceURL(), c.isNative(), c.isToplevel(), String(c)]; }); }; var s = new Error().stack; Error.prepareStackTrace = o; return JSON.stringify(s); }};
   }
-  // AdGuard JS rules and extended CSS (:has-text, :upward, :remove ...) for this site
-  var extra = '';
-  try { extra = B.extra(href); } catch (e) {}
-  if (extra && DBG.indexOf('x') < 0) {
+  // extended CSS (:has-text, :upward, :remove ...) for this site
+  if (ex) {
     try {
-      var ex = JSON.parse(extra);
-      if (RAWJS) for (var r = 0; r < ex.r.length; r++) {
-        var fn = RAWJS[ex.r[r]];
-        if (typeof fn === 'function') try { fn(); } catch (e) {}
-      }
       if (EXTCSS && ex.e.length) {
         var applyExt = function () { try { new EXTCSS({styleSheet: ex.e.join('\n')}).apply(); } catch (e) {} };
         if (document.documentElement) applyExt();
