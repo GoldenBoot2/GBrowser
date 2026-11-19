@@ -169,6 +169,20 @@ namespace GBrowser
         public int WindowW { get; set; } = 1200;
         public int WindowH { get; set; } = 800;
         public bool WindowMax { get; set; }
+        /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
+        public List<WindowSession> Windows { get; set; } = new List<WindowSession>();
+    }
+
+    public class WindowSession
+    {
+        public List<string> Tabs { get; set; } = new List<string>();
+        public int Index { get; set; }
+        public int Pinned { get; set; }
+        public int X { get; set; } = -1;
+        public int Y { get; set; } = -1;
+        public int W { get; set; } = 1200;
+        public int H { get; set; } = 800;
+        public bool Max { get; set; }
     }
 
     public class Bookmark

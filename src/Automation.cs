@@ -13,12 +13,13 @@ namespace GBrowser
     /// Release builds from GitHub Actions do not contain this class.</summary>
     internal static class Automation
     {
-        public static void Start(MainForm form)
+        /// <summary>Commands go to the active window (the last one used, or the newest).</summary>
+        public static void Start()
         {
             Task.Run(async () =>
             {
                 string name = "GBrowserTest-" + System.Diagnostics.Process.GetCurrentProcess().Id;
-                while (!form.IsDisposed)
+                while (true)
                 {
                     try
                     {
@@ -29,6 +30,8 @@ namespace GBrowser
                             var writer = new StreamWriter(pipe) { AutoFlush = true };
                             string line = await reader.ReadLineAsync();
                             var tcs = new TaskCompletionSource<string>();
+                            var form = App.Active;
+                            if (form == null || form.IsDisposed) { await writer.WriteLineAsync("no window"); continue; }
                             form.BeginInvoke((Action)(async () =>
                             {
                                 try { tcs.SetResult(await form.TestCommand(line ?? "")); }

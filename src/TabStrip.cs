@@ -23,6 +23,7 @@ namespace GBrowser
         public event Action TabSearchClicked;
         public event Action<int, Point> TabMenu;       // right-click on a tab (screen point)
         public event Action<int> TabMuteClicked;       // the speaker icon on a tab
+        public event Action<int, Point> TabDraggedOut; // a tab pulled out of the tab row (screen point)
 
         /// <summary>Window state for the caption buttons (set by the window).</summary>
         public bool WindowMaximized;
@@ -232,6 +233,15 @@ namespace GBrowser
             return -1;
         }
 
+        public Rectangle TabRectPublic(int i) => Tabs.Count == 0 ? Rectangle.Empty : TabRect(Math.Max(0, Math.Min(i, Tabs.Count - 1)));
+
+        /// <summary>Where a tab dropped at p goes (index between tabs).</summary>
+        public int IndexAt(Point p)
+        {
+            for (int i = 0; i < Tabs.Count; i++) { var r = TabRect(i); if (p.X < r.X + r.Width / 2) return i; }
+            return Tabs.Count;
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             if (dragIndex >= 0 && e.Button == MouseButtons.Left)
@@ -239,6 +249,14 @@ namespace GBrowser
                 if (!dragging && Math.Abs(e.X - dragStart.X) > S(6)) dragging = true;
                 if (dragging)
                 {
+                    // pulled away from the tab row (like Chrome): the tab leaves for its own window
+                    if (e.Y < -S(30) || e.Y > Height + S(30))
+                    {
+                        int i = dragIndex;
+                        dragIndex = -1; dragging = false; Capture = false;
+                        TabDraggedOut?.Invoke(i, PointToScreen(e.Location));
+                        return;
+                    }
                     int target = HitTab(new Point(e.X, TabRect(0).Y + S(4)));
                     if (target >= 0 && target != dragIndex)
                     {

@@ -38,8 +38,25 @@ namespace GBrowser
         bool uiDirty;
         long savedTotal;
 
-        public MainForm()
+        readonly List<string> startUrls;     // addresses this window opens with (new window, a second start)
+        readonly WindowSession restoreWs;    // a window of the last session to bring back
+        readonly bool isFirst;               // the window GBrowser starts with (restores the session)
+
+        public MainForm(List<string> urls, WindowSession ws)
         {
+            var prev = App.Active;
+            isFirst = App.Windows.Count == 0;
+            App.Windows.Add(this);
+            startUrls = urls ?? new List<string>();
+            var st0 = Store.Settings;
+            if (isFirst && ws == null)
+                ws = st0.Windows != null && st0.Windows.Count > 0 ? st0.Windows[0] : new WindowSession
+                {
+                    Tabs = st0.Session ?? new List<string>(), Index = st0.SessionIndex, Pinned = st0.SessionPinned,
+                    X = st0.WindowX, Y = st0.WindowY, W = st0.WindowW, H = st0.WindowH, Max = st0.WindowMax
+                };
+            restoreWs = ws;
+            Activated += (s, e) => App.Activated(this);
             FilterEngine.Preload();
             Theme.Update();
             Text = "GBrowser";
@@ -51,12 +68,27 @@ namespace GBrowser
             var st = Store.Settings;
             StartPosition = FormStartPosition.Manual;
             var wa = Screen.PrimaryScreen.WorkingArea;
-            var bounds = new Rectangle(st.WindowX, st.WindowY, Math.Max(600, st.WindowW), Math.Max(400, st.WindowH));
-            if (st.WindowX < 0 || !Screen.AllScreens.Any(s => s.WorkingArea.IntersectsWith(bounds)))
+            Rectangle bounds;
+            bool max = false;
+            if (ws != null)
+            {
+                bounds = new Rectangle(ws.X, ws.Y, Math.Max(600, ws.W), Math.Max(400, ws.H));
+                max = ws.Max;
+                if (ws.X < 0) bounds.X = -1;
+            }
+            else if (prev != null && !prev.IsDisposed)
+            {
+                // a new window opens a little below and right of the one it came from, like Chrome
+                var pb = prev.WindowState == FormWindowState.Normal ? prev.Bounds : prev.RestoreBounds;
+                bounds = new Rectangle(pb.X + 30, pb.Y + 30, pb.Width, pb.Height);
+                max = prev.WindowState == FormWindowState.Maximized;
+            }
+            else bounds = new Rectangle(-1, -1, 1200, 800);
+            if (bounds.X < 0 || !Screen.AllScreens.Any(s => s.WorkingArea.IntersectsWith(bounds)))
                 bounds = new Rectangle(wa.X + (wa.Width - Math.Min(1200, wa.Width)) / 2, wa.Y + (wa.Height - Math.Min(800, wa.Height)) / 2,
                     Math.Min(1200, wa.Width), Math.Min(800, wa.Height));
             Bounds = bounds;
-            if (st.WindowMax) WindowState = FormWindowState.Maximized;
+            if (max) WindowState = FormWindowState.Maximized;
 
             outer.Controls.Add(content);
             Controls.Add(outer);
@@ -80,6 +112,8 @@ namespace GBrowser
             strip.TabSearchClicked += ShowTabSearch;
             strip.TabMenu += ShowTabMenu;
             strip.TabMuteClicked += i => SetMuted(Tabs[i], !Tabs[i].Muted);
+            strip.TabDraggedOut += (i, pt) => MoveTabToNewWindow(i, pt, true);
+            ResizeEnd += (s, e) => DropDraggedWindow();
             frame = new WindowFrame(this, strip);
             strip.TabMoved += (from, to) =>
             {
@@ -144,9 +178,26 @@ namespace GBrowser
             sleepTimer.Start();
             Load += async (s, e) => await Start();
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
-#if AUTOMATION
-            Automation.Start(this);
-#endif
+        }
+
+        /// <summary>Restored or opened from another window / a second start: show it in front.</summary>
+        public void BringToFront2()
+        {
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate();
+        }
+
+        /// <summary>This window's part of the session (none when it has only private tabs).</summary>
+        internal WindowSession SessionState()
+        {
+            var tabs = Tabs.Where(t => !t.Private).Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
+            if (tabs.Count == 0) return null;
+            var b = WindowState == FormWindowState.Normal && !fullscreen ? Bounds : RestoreBounds;
+            return new WindowSession
+            {
+                Tabs = tabs, Index = Math.Max(0, Math.Min(strip.Selected, tabs.Count - 1)), Pinned = Tabs.TakeWhile(t => t.Pinned).Count(t => !t.Private),
+                X = b.X, Y = b.Y, W = b.Width, H = b.Height, Max = WindowState == FormWindowState.Maximized || fullscreen
+            };
         }
 
         // ---------- theme ----------
@@ -216,11 +267,11 @@ namespace GBrowser
                 }
                 case CoreWebView2ProcessFailedKind.BrowserProcessExited:
                 {
-                    if (engineAsked || restarting) return;
+                    if (engineAsked || App.RestartAfter) return;
                     engineAsked = true;
-                    MaterialDialog.Info(this, "GBrowser needs to restart", "The browser engine stopped. GBrowser will restart and open your tabs again.");
-                    restarting = true;
-                    Close();
+                    if (App.Windows.Count(w => w.engineAsked) == 1)
+                        MaterialDialog.Info(this, "GBrowser needs to restart", "The browser engine stopped. GBrowser will restart and open your tabs again.");
+                    App.Quit(true);
                     break;
                 }
             }
@@ -421,6 +472,15 @@ namespace GBrowser
             m.Add("Duplicate", IconData.Duplicate, null, () => DuplicateTab(t)).Enabled = !string.IsNullOrEmpty(t.Created ? t.View.CoreWebView2.Source : t.Url);
             m.Add(t.Pinned ? "Unpin" : "Pin", t.Pinned ? IconData.Unpin : IconData.Pin, null, () => SetPinned(t, !t.Pinned));
             m.Add(t.Muted ? "Unmute tab" : "Mute tab", t.Muted ? IconData.Volume : IconData.VolumeOff, null, () => SetMuted(t, !t.Muted));
+            m.Add("Move tab to new window", IconData.TabMove, null, () => MoveTabToNewWindow(Tabs.IndexOf(t), null, false)).Enabled = Tabs.Count > 1;
+            var others = App.Windows.Where(w => w != this).ToList();
+            for (int k = 0; k < others.Count && k < 4; k++)
+            {
+                var w = others[k];
+                string title = w.Current?.Title ?? "window";
+                if (title.Length > 32) title = title.Substring(0, 31) + "\u2026";
+                m.Add("Move tab to \u201c" + title + "\u201d", IconData.TabMove, null, () => MoveTabTo(t, w, -1));
+            }
             m.AddSeparator();
             m.Add("Close", IconData.Close, "Ctrl+W", () => CloseTab(Tabs.IndexOf(t)));
             m.Add("Close other tabs", null, null, () => { foreach (var x in Tabs.Where(x => x != t && !x.Pinned).ToList()) CloseTab(Tabs.IndexOf(x)); })
@@ -558,18 +618,23 @@ namespace GBrowser
                 // Secure DNS: the engine's own DoH preference, read when the engine starts (see Security.ApplySecureDnsPref)
                 // after a restart, the previous engine may still be shutting down: it would save its old settings over ours
                 // and the new window would join it, so wait until it is gone (max 15 s)
-                if (Environment.GetCommandLineArgs().Contains("--restarted")) await Task.Run(() => WaitForEngineExit(15000));
-                Security.ActiveSecureDns = Store.Settings.SecureDns ?? "off";
-                Security.ApplySecureDnsPref(Path.Combine(Store.WebDataDir, "EBWebView", "Local State"), Security.ActiveSecureDns);
-                var opts = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
-                env = await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
+                if (isFirst && Environment.GetCommandLineArgs().Contains("--restarted")) await Task.Run(() => WaitForEngineExit(15000));
+                env = await App.Env();   // one engine for all windows
                 Updater.Changed += OnUpdateChanged;
                 Downloads.Changed += OnDownloadsChanged;
                 reviewWatch.Tick += (s, e) => CheckReviews();
                 reviewWatch.Start();
                 downloadsSeen = Downloads.All.Any(d => d.State == "in_progress" || d.State == "paused");
                 OnDownloadsChanged();
-                Updater.Start();
+                if (isFirst) Updater.Start();
+#if !AUTOMATION
+                // registered as a browser from another folder that is gone (moved / reinstalled): point it here
+                if (isFirst)
+                {
+                    string reg = DefaultBrowser.RegisteredExe();
+                    if (reg != null && !File.Exists(reg)) try { DefaultBrowser.Register(Application.ExecutablePath); } catch { }
+                }
+#endif
             }
             catch (WebView2RuntimeNotFoundException)
             {
@@ -582,15 +647,22 @@ namespace GBrowser
             await FilterEngine.Preload();
             _ = Downloads.All.Count;   // loads (and if needed encrypts) the downloads list
             var st = Store.Settings;
-            var args = Environment.GetCommandLineArgs().Skip(1).Where(a => !a.StartsWith("--")).ToList();
+            var args = isFirst ? Environment.GetCommandLineArgs().Skip(1).Where(a => !a.StartsWith("--")).ToList() : new List<string>();
             bool restarted = Environment.GetCommandLineArgs().Contains("--restarted");
-            if ((st.RestoreTabs || restarted) && st.Session != null && st.Session.Count > 0)
+            // the first window brings back the last session (all its windows); a restored window its own tabs
+            bool restore = restoreWs != null && restoreWs.Tabs != null && restoreWs.Tabs.Count > 0 && (!isFirst || st.RestoreTabs || restarted);
+            if (restore)
             {
-                foreach (var u in st.Session) Tabs.Add(new BrowserTab(u, TitleFor(u)) { Pinned = Tabs.Count < st.SessionPinned });
-                int sel = Math.Max(0, Math.Min(st.SessionIndex, Tabs.Count - 1));
+                foreach (var u in restoreWs.Tabs) Tabs.Add(new BrowserTab(u, TitleFor(u)) { Pinned = Tabs.Count < restoreWs.Pinned });
+                int sel = Math.Max(0, Math.Min(restoreWs.Index, Tabs.Count - 1));
                 if (args.Count == 0) Select(sel);
             }
+            if (isFirst && (st.RestoreTabs || restarted) && st.Windows != null)
+                foreach (var w in st.Windows.Skip(1).ToList())
+                    if (w.Tabs != null && w.Tabs.Count > 0) new MainForm(null, w).Show();
             foreach (var a in args) NewTab(File.Exists(a) ? new Uri(Path.GetFullPath(a)).AbsoluteUri : Search.ToUrl(a));
+            if (pendingAdopt != null) { var pa = pendingAdopt; pendingAdopt = null; AdoptTab(pa, 0); }
+            foreach (var u in startUrls) NewTab(u);
             if (Tabs.Count == 0) NewTab(null);
             strip.RefreshTabs();
             // load extensions once at start so their background scripts run (profile is shared by all tabs)
@@ -627,6 +699,10 @@ namespace GBrowser
         }
 
         // ---------- tabs ----------
+
+        /// <summary>The window that holds this tab now.</summary>
+        static MainForm OwnerOf(BrowserTab t) => App.Windows.FirstOrDefault(w => w.Tabs.Contains(t));
+
 
         public BrowserTab NewTab(string url, bool select = true, int index = -1)
         {
@@ -674,6 +750,99 @@ namespace GBrowser
             strip.RefreshTabs();
         }
 
+        /// <summary>Where the default-browser registration goes: the real place, or (test builds) a test key that
+        /// changes nothing in Windows.</summary>
+#if AUTOMATION
+        internal const string DefaultRoot = @"Software\GoldenBoot\GBrowser-TestRegistration";
+#else
+        internal const string DefaultRoot = "Software";
+#endif
+
+        // ---------- tabs between windows ----------
+
+        BrowserTab pendingAdopt;    // a tab moved here from another window (adopted once the engine is ready)
+        bool dragWindow;            // this window was made by dragging a tab out and follows the mouse
+
+        /// <summary>Takes a tab out of this window without closing it (it moves to another window). The window
+        /// closes when it was the last tab.</summary>
+        void DetachTab(BrowserTab t)
+        {
+            int i = Tabs.IndexOf(t);
+            if (i < 0) return;
+            bool wasSel = i == strip.Selected;
+            devDock.CloseFor(t);
+            if (t.FindOpen) { try { t.View?.CoreWebView2?.Find.Stop(); } catch { } t.FindOpen = false; findBar.Visible = false; }
+            Tabs.RemoveAt(i);
+            if (t.View != null) content.Controls.Remove(t.View);
+            if (Tabs.Count == 0) { Close(); return; }
+            if (wasSel) { strip.Selected = -1; Select(Math.Min(i, Tabs.Count - 1)); }
+            else { if (strip.Selected > i) strip.Selected--; strip.RefreshTabs(); }
+        }
+
+        void AdoptTab(BrowserTab t, int index)
+        {
+            if (index < 0 || index > Tabs.Count) index = Tabs.Count;
+            if (!t.Pinned) index = Math.Max(index, Tabs.TakeWhile(x => x.Pinned).Count());
+            else index = Math.Min(index, Tabs.TakeWhile(x => x.Pinned).Count());
+            if (t.View != null) { t.View.Visible = false; content.Controls.Add(t.View); }
+            Tabs.Insert(index, t);
+            if (strip.Selected >= index) strip.Selected++;
+            Select(index);
+            if (t.Created) devDock.Attach((uint)t.View.CoreWebView2.BrowserProcessId);
+        }
+
+        /// <summary>Tab menu "Move tab to new window", or a tab dragged out of the tab row (the new window then
+        /// follows the mouse until it is let go, like Chrome; let go over another window's tab row = moved there).</summary>
+        void MoveTabToNewWindow(int i, Point? screen, bool follow)
+        {
+            if (i < 0 || i >= Tabs.Count) return;
+            var t = Tabs[i];
+            if (Tabs.Count == 1)
+            {
+                // the only tab: the window itself is moved
+                if (follow && WindowState == FormWindowState.Normal) { dragWindow = true; StartWindowMove(); }
+                return;
+            }
+            var b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            var at = screen ?? new Point(b.X + 60, b.Y + 60);
+            var ws = new WindowSession { X = at.X - strip.TabRectPublic(0).X - 60, Y = at.Y - strip.Height / 2, W = b.Width, H = b.Height };
+            DetachTab(t);
+            var w = new MainForm(null, ws) { pendingAdopt = t, dragWindow = follow };
+            w.Show();
+            if (follow) w.BeginInvoke((Action)w.StartWindowMove);
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ReleaseCapture();
+
+        /// <summary>Windows' own move loop (as if the title bar were held): follows the mouse while the button is down.</summary>
+        void StartWindowMove()
+        {
+            if ((MouseButtons & MouseButtons.Left) == 0) { DropDraggedWindow(); return; }
+            ReleaseCapture();
+            SendMessage(Handle, 0x00A1 /* WM_NCLBUTTONDOWN */, (IntPtr)2 /* HTCAPTION */, IntPtr.Zero);
+        }
+
+        /// <summary>A window made by dragging a tab out was let go: over another window's tab row, the tab joins
+        /// that window at that place and this window closes.</summary>
+        void DropDraggedWindow()
+        {
+            if (!dragWindow) return;
+            dragWindow = false;
+            var pos = Cursor.Position;
+            var target = App.Windows.FirstOrDefault(w => w != this && w.Visible && w.WindowState != FormWindowState.Minimized &&
+                                                         w.strip.RectangleToScreen(w.strip.ClientRectangle).Contains(pos));
+            if (target == null || Tabs.Count != 1) return;
+            MoveTabTo(Tabs[0], target, target.strip.IndexAt(target.strip.PointToClient(pos)));
+        }
+
+        void MoveTabTo(BrowserTab t, MainForm target, int index)
+        {
+            if (target == null || target == this || target.IsDisposed || !Tabs.Contains(t)) return;
+            DetachTab(t);
+            target.AdoptTab(t, index);
+            target.BringToFront2();
+        }
+
         void CloseTab(int i)
         {
             if (i < 0 || i >= Tabs.Count) return;
@@ -690,6 +859,8 @@ namespace GBrowser
 
         void SetupCore(BrowserTab t)
         {
+            // every handler acts in the window that holds the tab when the event comes (tabs can move between windows)
+            MainForm F() => OwnerOf(t) ?? this;
             var core = t.View.CoreWebView2;
             var s = core.Settings;
             s.AreDevToolsEnabled = true;
@@ -697,27 +868,27 @@ namespace GBrowser
             s.IsStatusBarEnabled = false;   // GBrowser's own, smaller bubble (StatusBubble)
             if (!t.Private) SessionCookies.Restore(core.CookieManager);   // session logins from last time, before any page loads
             // zoom is remembered per site (like Chrome): each site opens at its own zoom, others at 100%
-            t.View.ZoomFactorChanged += (o, e) => { if (!t.ApplyingZoom) SaveSiteZoom(t); };   // Ctrl + wheel, Ctrl +/-, pinch
-            core.SourceChanged += (o, e) => ApplySiteZoom(t);
-            devDock.Attach((uint)core.BrowserProcessId);   // DevTools windows of the engine get docked
-            core.StatusBarTextChanged += (o, e) => { if (t == Current) bubble.SetText(core.StatusBarText); };
+            t.View.ZoomFactorChanged += (o, e) => { if (!t.ApplyingZoom) F().SaveSiteZoom(t); };   // Ctrl + wheel, Ctrl +/-, pinch
+            core.SourceChanged += (o, e) => F().ApplySiteZoom(t);
+            F().devDock.Attach((uint)core.BrowserProcessId);   // DevTools windows of the engine get docked
+            core.StatusBarTextChanged += (o, e) => { if (t == F().Current) F().bubble.SetText(core.StatusBarText); };
             // GBrowser's own right-click menu (Material, Chrome's layout) instead of the engine's Edge menu
-            core.ContextMenuRequested += (o, e) => PageMenu.Show(t, core, e, pageMenuHost);
+            core.ContextMenuRequested += (o, e) => PageMenu.Show(t, core, e, F().pageMenuHost);
             // site permissions in GBrowser's own prompt (Chrome's three choices) instead of the engine's Edge prompt
-            core.ProcessFailed += (o, e) => OnProcessFailed(t, core, e);
-            core.ScriptDialogOpening += (o, e) => OnScriptDialog(t, e);
-            core.BasicAuthenticationRequested += (o, e) => OnBasicAuth(t, e);
-            core.LaunchingExternalUriScheme += (o, e) => OnExternalApp(t, e);
-            core.Find.MatchCountChanged += (o, e) => UpdateFindResult(t);
-            core.Find.ActiveMatchIndexChanged += (o, e) => UpdateFindResult(t);
-            core.PermissionRequested += (o, e) => PermissionPrompt.Ask(e, this, () => toolbar.RectangleToScreen(toolbar.PillRect));
+            core.ProcessFailed += (o, e) => F().OnProcessFailed(t, core, e);
+            core.ScriptDialogOpening += (o, e) => F().OnScriptDialog(t, e);
+            core.BasicAuthenticationRequested += (o, e) => F().OnBasicAuth(t, e);
+            core.LaunchingExternalUriScheme += (o, e) => F().OnExternalApp(t, e);
+            core.Find.MatchCountChanged += (o, e) => F().UpdateFindResult(t);
+            core.Find.ActiveMatchIndexChanged += (o, e) => F().UpdateFindResult(t);
+            core.PermissionRequested += (o, e) => PermissionPrompt.Ask(e, F(), () => F().toolbar.RectangleToScreen(F().toolbar.PillRect));
 #if AUTOMATION
             core.ContextMenuRequested += (o, e) =>
             {
                 string D(IList<CoreWebView2ContextMenuItem> items) => string.Join(", ", items.Select(i =>
                     i.Kind == CoreWebView2ContextMenuItemKind.Separator ? "|" : i.Name + "[" + i.Label + "]" + (i.Kind == CoreWebView2ContextMenuItemKind.Submenu ? "{" + D(i.Children) + "}" : "")));
                 var tg = e.ContextMenuTarget;
-                lastContextInfo = "target=" + tg.Kind + (tg.HasLinkUri ? " link" : "") + (tg.HasSourceUri ? " source" : "") + (tg.HasSelection ? " selection" : "") + (tg.IsEditable ? " editable" : "") + " :: " + D(e.MenuItems);
+                F().lastContextInfo = "target=" + tg.Kind + (tg.HasLinkUri ? " link" : "") + (tg.HasSourceUri ? " source" : "") + (tg.HasSelection ? " selection" : "") + (tg.IsEditable ? " editable" : "") + " :: " + D(e.MenuItems);
             };
 #endif
             s.AreDefaultContextMenusEnabled = true;
@@ -728,8 +899,8 @@ namespace GBrowser
             core.SetVirtualHostNameToFolderMapping(Pages.Host, Pages.Folder, CoreWebView2HostResourceAccessKind.Deny);
             ApplyColorScheme(core);
             ApplySecurity(core);
-            t.Blocking = new Blocking(t, env);
-            t.Blocking.Changed += () => uiDirty = true;
+            t.Blocking = new Blocking(t, F().env);
+            t.Blocking.Changed += () => F().uiDirty = true;
             t.Blocking.Attach(core);
             // The engine proposes download names already made unique against its default folder ("x (1).exe"),
             // which hid existing files from GBrowser's "If the file already exists" choice. Its default folder is an
@@ -739,20 +910,20 @@ namespace GBrowser
             Directory.CreateDirectory(names);
             core.Profile.DefaultDownloadFolderPath = names;
 
-            core.SourceChanged += (o, e) => { t.Url = core.Source; if (t == Current) UpdateUi(); };
+            core.SourceChanged += (o, e) => { t.Url = core.Source; if (t == F().Current) F().UpdateUi(); };
             core.DocumentTitleChanged += (o, e) =>
             {
                 // a crashed page keeps the page's own title on its tab, like Chrome
-                if (Pages.PageName(core.Source) == "crashed") { strip.RefreshTabs(); return; }
+                if (Pages.PageName(core.Source) == "crashed") { F().strip.RefreshTabs(); return; }
                 t.Title = string.IsNullOrEmpty(core.DocumentTitle) ? Pages.ToDisplay(core.Source) : core.DocumentTitle;
                 if (Pages.IsInternal(core.Source)) t.Title = BrowserTab.PageTitle(core.Source);
                 if (!t.Private) Store.UpdateHistoryTitle(core.Source, core.DocumentTitle);
-                strip.RefreshTabs();
-                if (t == Current) UpdateUi();
+                F().strip.RefreshTabs();
+                if (t == F().Current) F().UpdateUi();
             };
             core.NavigationStarting += (o, e) =>
             {
-                t.Loading = true; strip.RefreshTabs(); if (t == Current) UpdateUi();
+                t.Loading = true; F().strip.RefreshTabs(); if (t == F().Current) F().UpdateUi();
                 // the colour under the page: white for websites (as in Chrome), the theme colour for GBrowser's pages
                 var bg = PageBase(e.Uri);
                 if (t.View.DefaultBackgroundColor != bg) t.View.DefaultBackgroundColor = bg;
@@ -770,7 +941,7 @@ namespace GBrowser
                     // (core.Source is the failed address while the error page shows, so GBrowser's own flag is used)
                     // run after this event returns: a modal dialog inside a WebView2 event handler blocks the engine
                     string act = e.Uri;
-                    if (e.IsUserInitiated && errorShown) BeginInvoke((Action)(() => ErrorAction(act)));
+                    if (e.IsUserInitiated && errorShown) BeginInvoke((Action)(() => F().ErrorAction(act)));
                     return;
                 }
                 navTarget = e.Uri; errorShown = false;
@@ -791,7 +962,7 @@ namespace GBrowser
                     default: code = "ERR_CERT_INVALID"; break;
                 }
                 string target = e.RequestUri;
-                BeginInvoke((Action)(() => core.Navigate(Pages.Url("certerror") + "?u=" + Uri.EscapeDataString(target) + "&c=" + code)));
+                F().BeginInvoke((Action)(() => core.Navigate(Pages.Url("certerror") + "?u=" + Uri.EscapeDataString(target) + "&c=" + code)));
             };
             core.NavigationCompleted += (o, e) =>
             {
@@ -814,15 +985,15 @@ namespace GBrowser
                     }, TaskScheduler.FromCurrentSynchronizationContext());
                 }
                 if (e.IsSuccess && !t.Private) Store.AddHistory(core.Source, core.DocumentTitle);
-                strip.RefreshTabs();
-                if (t == Current) UpdateUi();
+                F().strip.RefreshTabs();
+                if (t == F().Current) F().UpdateUi();
             };
-            core.HistoryChanged += (o, e) => { if (t == Current) UpdateUi(); };
-            core.FaviconChanged += (o, e) => t.UpdateFavicon(() => { strip.RefreshTabs(); bookmarksBar.Invalidate(); });
-            core.IsDocumentPlayingAudioChanged += (o, e) => { t.PlayingAudio = core.IsDocumentPlayingAudio; strip.RefreshTabs(); };
+            core.HistoryChanged += (o, e) => { if (t == F().Current) F().UpdateUi(); };
+            core.FaviconChanged += (o, e) => t.UpdateFavicon(() => { F().strip.RefreshTabs(); F().bookmarksBar.Invalidate(); });
+            core.IsDocumentPlayingAudioChanged += (o, e) => { t.PlayingAudio = core.IsDocumentPlayingAudio; F().strip.RefreshTabs(); };
             if (t.Muted) core.IsMuted = true;
-            core.WindowCloseRequested += (o, e) => { int i = Tabs.IndexOf(t); if (i >= 0) CloseTab(i); };
-            core.ContainsFullScreenElementChanged += (o, e) => SetFullscreen(core.ContainsFullScreenElement);
+            core.WindowCloseRequested += (o, e) => { int i = F().Tabs.IndexOf(t); if (i >= 0) F().CloseTab(i); };
+            core.ContainsFullScreenElementChanged += (o, e) => F().SetFullscreen(core.ContainsFullScreenElement);
             core.NewWindowRequested += async (o, e) =>
             {
                 if (t.Blocking != null && t.Blocking.BlockPopup(e.Uri, e.IsUserInitiated))
@@ -834,19 +1005,19 @@ namespace GBrowser
                 try
                 {
                     var nt = new BrowserTab(e.Uri) { OpenedByPage = true, Private = t.Private };
-                    int idx = Tabs.IndexOf(t) + 1;
-                    Tabs.Insert(idx, nt);
-                    if (strip.Selected >= idx) strip.Selected++;
-                    await nt.EnsureCreated(env, content, SetupCore);
+                    int idx = F().Tabs.IndexOf(t) + 1;
+                    F().Tabs.Insert(idx, nt);
+                    if (F().strip.Selected >= idx) F().strip.Selected++;
+                    await nt.EnsureCreated(F().env, F().content, SetupCore);
                     e.NewWindow = nt.View.CoreWebView2;
                     e.Handled = true;
-                    Select(Tabs.IndexOf(nt));
+                    Select(F().Tabs.IndexOf(nt));
                 }
                 catch { e.Handled = false; }
                 finally { deferral.Complete(); }
             };
-            core.WebMessageReceived += (o, e) => OnPageMessage(t, e);
-            core.DownloadStarting += (o, e) => OnDownloadStarting(t, core, e);
+            core.WebMessageReceived += (o, e) => F().OnPageMessage(t, e);
+            core.DownloadStarting += (o, e) => F().OnDownloadStarting(t, core, e);
             if (!t.OpenedByPage && !string.IsNullOrEmpty(t.Url) && core.Source != t.Url && (core.Source == "about:blank" || string.IsNullOrEmpty(core.Source)))
                 t.Navigate(t.Url);
         }
@@ -982,6 +1153,7 @@ namespace GBrowser
                 m.AddSeparator();
             }
             m.Add("New tab", IconData.Tab, "Ctrl+T", () => NewTab(null));
+            m.Add("New window", IconData.NewWindow, "Ctrl+N", () => App.NewWindow(null));
             m.Add("New private tab", IconData.Private, "Ctrl+Shift+N", () => NewPrivateTab(null));
             m.Add("Reopen closed tab", IconData.Restore, "Ctrl+Shift+T", ReopenClosed).Enabled = closedTabs.Count > 0;
             m.AddSeparator();
@@ -1018,7 +1190,8 @@ namespace GBrowser
             m.AddSeparator();
             m.Add("Settings", IconData.Settings, null, () => OpenPage("settings"));
             m.Add("About GBrowser", IconData.Info, null, () => OpenPage("about"));
-            m.Add("Exit", IconData.Close, null, Close);
+            if (App.Windows.Count > 1) m.Add("Close window", IconData.Close, "Ctrl+Shift+W", Close);
+            m.Add("Exit", IconData.Logout, null, () => App.Quit());
             m.ShowAt(toolbar, toolbar.ButtonRect("menu"), true, "menu");
         }
 
@@ -1201,7 +1374,7 @@ namespace GBrowser
         /// <summary>Runs the verified new setup in update mode and closes (the setup starts GBrowser again; tabs come back).</summary>
         void RelaunchToUpdate()
         {
-            if (Updater.RunSetup()) Close();
+            if (Updater.RunSetup()) App.Quit();
         }
 
         void OnUpdateChanged()
@@ -1514,8 +1687,7 @@ namespace GBrowser
                     {
                         Store.Settings.SecureDns = "off";
                         Store.SaveSettings();
-                        restarting = true;
-                        Close();
+                        App.Quit(true);
                     }
                     break;
             }
@@ -1571,6 +1743,8 @@ namespace GBrowser
             switch (keyData)
             {
                 case Keys.Control | Keys.T: NewTab(null); return true;
+                case Keys.Control | Keys.N: App.NewWindow(null); return true;
+                case Keys.Control | Keys.Shift | Keys.W: Close(); return true;
                 case Keys.Control | Keys.F: ShowFind(); return true;
                 case Keys.F3:
                 case Keys.Control | Keys.G: FindStep(true); return true;
@@ -1715,6 +1889,19 @@ namespace GBrowser
                     Favicons.ClearExcept(Store.Bookmarks.Select(b => b.Url));
                     if (Profile != null) await Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.BrowsingHistory);
                     return null;
+                case "default.info":
+                    return new Dictionary<string, object>
+                    {
+                        { "isDefault", DefaultBrowser.IsDefault() },
+                        { "registered", string.Equals(DefaultBrowser.RegisteredExe(DefaultRoot), Application.ExecutablePath, StringComparison.OrdinalIgnoreCase) },
+                    };
+                case "default.make":
+                    // registers GBrowser as a browser for this Windows user and opens Settings > Default apps on its page
+                    DefaultBrowser.Register(Application.ExecutablePath, DefaultRoot);
+#if !AUTOMATION
+                    DefaultBrowser.OpenWindowsSettings();
+#endif
+                    return null;
                 case "settings.get":
                     return new Dictionary<string, object>
                     {
@@ -1832,7 +2019,7 @@ namespace GBrowser
                         { "providers", Security.DnsProviders.Select(p => new Dictionary<string, object> { { "id", p[0] }, { "name", p[1] } }).ToList() },
                     };
                 case "app.restart":
-                    BeginInvoke((Action)(() => { restarting = true; Close(); }));
+                    BeginInvoke((Action)(() => App.Quit(true)));
                     return null;
                 case "theme.info":
                 {
@@ -2072,6 +2259,14 @@ namespace GBrowser
                     return string.Join(" | ", Tabs.Select((x, i) => i + ":" + (x.Title ?? "").Split(' ')[0] + (x.Pinned ? " pinned" : "") + (x.Muted ? " muted" : "") +
                         (x.Created ? (x.View.CoreWebView2.IsMuted ? " engineMuted" : "") : " (not loaded)") + (i == strip.Selected ? " *" : "")));
                 case "dbg": Blocking.TestDbg = arg; return "ok";
+                case "wins":   // test: windows and their tabs (* = active)
+                    return string.Join(" || ", App.Windows.Select((w, i) => i + (w == App.Active ? "*" : "") + " " + w.Bounds + ": " +
+                        string.Join(", ", w.Tabs.Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url))));
+                case "movetab": MoveTabToNewWindow(int.Parse(arg), null, false); return "ok";
+                case "mergetab": MoveTabTo(Current, App.Windows[int.Parse(arg)], -1); return "ok";
+                case "winclose": { var w = App.Windows[int.Parse(arg)]; BeginInvoke((Action)w.Close); return "ok"; }
+                case "winactivate": App.Windows[int.Parse(arg)].Activate(); return "ok";
+                case "quit": BeginInvoke((Action)(() => App.Quit())); return "ok";
                 case "framesx": return await Current.Blocking.TestFramesExec(arg, false);
                 case "framesxa": return await Current.Blocking.TestFramesExec(arg, true);
                 case "slcases":   // test: file with one scriptlet call per line (JSON array), served to pages with slcase=<line>
@@ -2251,13 +2446,18 @@ namespace GBrowser
 
         // ---------- closing ----------
 
-        bool exitCleared, restarting;
+        bool exitCleared;
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             base.OnFormClosed(e);
+            App.Windows.Remove(this);
+            Updater.Changed -= OnUpdateChanged;
+            Downloads.Changed -= OnDownloadsChanged;
+            if (App.Windows.Count > 0) return;
             // restart for settings that apply only at engine start (Secure DNS); tabs come back via the saved session
-            if (restarting) try { Process.Start(Application.ExecutablePath, "--restarted"); } catch { }
+            if (App.RestartAfter) try { Process.Start(Application.ExecutablePath, "--restarted"); } catch { }
+            Application.ExitThread();
         }
 
         bool sessionSaved;
@@ -2265,9 +2465,10 @@ namespace GBrowser
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             devDock?.Shutdown();   // docked DevTools windows go back to the engine before the window closes
+            bool last = App.Windows.Count <= 1;   // GBrowser closes with this window
             // session logins (cookies without an expiry date) are kept for next time, like Chrome's session restore
             // (not after the engine itself stopped: it cannot be asked any more, and closing must never be blocked)
-            if (!sessionSaved && !Store.Settings.ClearOnExit && !engineAsked)
+            if (last && !sessionSaved && !Store.Settings.ClearOnExit && !engineAsked)
             {
                 sessionSaved = true;
                 try
@@ -2283,9 +2484,9 @@ namespace GBrowser
                 }
                 catch { }
             }
-            if (Store.Settings.ClearOnExit) SessionCookies.Forget();
+            if (last && Store.Settings.ClearOnExit) SessionCookies.Forget();
             // "Clear browsing data when GBrowser closes": cookies, site data, cache, history (passwords kept)
-            if (Store.Settings.ClearOnExit && !exitCleared && Profile != null)
+            if (last && Store.Settings.ClearOnExit && !exitCleared && Profile != null)
             {
                 e.Cancel = true;
                 exitCleared = true;
@@ -2299,13 +2500,9 @@ namespace GBrowser
                 return;
             }
             Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
-            var st = Store.Settings;
-            st.Session = Tabs.Where(t => !t.Private).Select(t => t.Created ? t.View.CoreWebView2.Source : t.Url).Where(u => !string.IsNullOrEmpty(u)).ToList();
-            st.SessionIndex = Math.Max(0, strip.Selected);
-            st.SessionPinned = Tabs.TakeWhile(t => t.Pinned).Count(t => !t.Private);
-            st.WindowMax = WindowState == FormWindowState.Maximized || fullscreen;
-            var b = WindowState == FormWindowState.Normal && !fullscreen ? Bounds : RestoreBounds;
-            st.WindowX = b.X; st.WindowY = b.Y; st.WindowW = b.Width; st.WindowH = b.Height;
+            // closing the last window keeps its tabs for next time (closing one of several does not, like Chrome);
+            // Exit already kept every window's
+            if (last) App.SaveSession(new List<MainForm> { this });
             Store.SaveSettings();
             Store.SaveHistory();
             base.OnFormClosing(e);

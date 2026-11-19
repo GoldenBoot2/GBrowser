@@ -183,9 +183,6 @@ namespace GBrowser
             }
             finally { cssFlushing = false; }
         }
-#if AUTOMATION
-        public static readonly List<string> TestLog = new List<string>();
-        public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
         PageBridge bridge;
 
         // ---------------------------------------------------------------- same-origin frames without the page script
@@ -225,6 +222,9 @@ namespace GBrowser
             }
             catch { }
         }
+#if AUTOMATION
+        public static readonly List<string> TestLog = new List<string>();
+        public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
 #if AUTOMATION
         public readonly List<CoreWebView2Frame> TestFrames = new List<CoreWebView2Frame>();
         public async Task<string> TestFramesExec(string js, bool readd)

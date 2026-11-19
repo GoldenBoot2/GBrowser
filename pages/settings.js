@@ -55,6 +55,20 @@
   engine.addEventListener('change', () => set('SearchEngine', engine.value));
   const home = el('input', { class: 'field', value: s.HomePage, spellcheck: 'false', 'aria-label': 'Home page' });
   home.addEventListener('change', () => set('HomePage', home.value));
+  // Default browser (Windows lets only the user choose: GBrowser registers itself and opens Default apps)
+  const defRow = el('div');
+  async function drawDefault() {
+    const d = await gb.send('default.info');
+    const btn = el('button', { class: 'btn tonal', text: 'Make default' });
+    btn.addEventListener('click', async () => { await gb.send('default.make'); snack('Choose GBrowser in Default apps'); });
+    defRow.textContent = '';
+    defRow.append(d.isDefault ? row('Public', 'GBrowser is your default browser', null, null)
+      : row('Public', 'Default browser', 'Make GBrowser the browser Windows opens links with', btn));
+  }
+  await drawDefault();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) drawDefault(); });
+  window.addEventListener('focus', drawDefault);
+  main.append(el('div', { class: 'card', id: 'default' }, el('h2', { text: 'Default browser' }), defRow));
   main.append(el('div', { class: 'card' }, el('h2', { text: 'Start and search' }),
     row('Search', 'Search engine', null, engine),
     row('Search', 'Search suggestions', 'What you type in the address bar is sent to the search engine', sw('SearchSuggestions')),

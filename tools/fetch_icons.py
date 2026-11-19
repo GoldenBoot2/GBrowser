@@ -35,6 +35,7 @@ ICONS = [
     ('Videocam', 'videocam', ''), ('Mic', 'mic', ''), ('Location', 'location_on', ''), ('Notifications', 'notifications', ''),
     ('VolumeOff', 'volume_off', ''), ('Pin', 'keep', ''), ('Unpin', 'keep_off', ''), ('Duplicate', 'tab_duplicate', ''),
     ('Sad', 'sentiment_dissatisfied', ''), ('ExpandLess', 'expand_less', ''),
+    ('NewWindow', 'new_window', ''), ('TabMove', 'tab_move', ''), ('Logout', 'logout', ''),
 ]
 
 import socket

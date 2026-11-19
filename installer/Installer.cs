@@ -184,6 +184,8 @@ namespace GBrowserSetup
                         k.SetValue("NoModify", 1, RegistryValueKind.DWord);
                         k.SetValue("NoRepair", 1, RegistryValueKind.DWord);
                     }
+                    // listed in Windows as a browser (Settings > Default apps), like Chrome after its install
+                    GBrowser.DefaultBrowser.Register(exe);
                 }
                 Step = "Done";
                 Progress = 1f;
@@ -275,7 +277,7 @@ namespace GBrowserSetup
                 Step = "Removing shortcuts";
                 if (StartShortcut) TryDelete(StartMenuLink);       // (tests run with --no-shortcuts)
                 if (DesktopShortcut) TryDelete(DesktopLink);
-                if (Register) Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
+                if (Register) { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); GBrowser.DefaultBrowser.Unregister(); }
                 Progress = 0.8f;
                 if (DeleteData && Directory.Exists(DataDir))
                 {

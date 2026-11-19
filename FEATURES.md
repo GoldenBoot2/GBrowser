@@ -6,7 +6,7 @@ Last full audit: 19-11-2026.
 
 ## Pending (build order, 19-11-2026)
 0. Undetectable page scripts, open part (user, 19-11-2026; in progress): AdGuard scriptlet audit (done 19-11-2026); same-origin navigated frames (site rules done 19-11-2026); ExtendedCss inline styles; $csp <meta> (with the cookie manager's response-header editing); Stealth read cost on heavy pages (25-28 ms); privacy wrappers (with Hide my identity). See "Undetectable page scripts" below.
-1. #7 New window (Ctrl+N, drag a tab out), set as default browser.
+1. #7 New window (Ctrl+N, drag a tab out), set as default browser (done 19-11-2026; drag with the real mouse to be tried by the user).
 2. #8 Import from Chrome / Edge, cookies and site data, passwords page, bookmark folders.
 3. Bookmarks (user, 19-11-2026): bar right-click menu (open, new tab, private, edit, delete, add), drag to reorder, drop links on the bar, reorder on the bookmarks page, empty-bar hint like Chrome.
 4. Ad blocking (user, 19-11-2026): built-in lists on / off, custom lists with trust check, user rules editor, element picker.
@@ -22,11 +22,13 @@ Last full audit: 19-11-2026.
 | Tab search (Ctrl+Shift+A) | Done |
 | Sleeping / unloaded background tabs, keep sites active | Done |
 | Private tabs (Ctrl+Shift+N) | Done |
-| Tab right-click menu (new tab to the right, reload, duplicate, pin, mute, close, close others / to the right) | Done (19-11-2026; "move to new window" comes with windows) |
+| Tab right-click menu (new tab to the right, reload, duplicate, pin, mute, move to new window / to another window, close, close others / to the right) | Done (19-11-2026) |
 | Pinned tabs (icon only, kept at the left, restored after restart) | Done (19-11-2026) |
 | Mute tab, click the speaker icon to mute / unmute | Done (19-11-2026) |
 | Tab groups | Missing |
-| New window (Ctrl+N), drag a tab out into its own window, multiple windows | Missing |
+| New window (Ctrl+N), close window (Ctrl+Shift+W), Exit, multiple windows in one process (one engine) | Done 19-11-2026: new windows open offset from the last one; Exit keeps every window's tabs, closing windows one by one keeps the last one's (like Chrome); restart brings all windows back |
+| Move a tab between windows (it keeps its page and state), drag a tab out of the tab row into its own window (follows the mouse), drop it on another window's tab row | Done 19-11-2026 (move / merge tested with the page state kept; the mouse drag itself not tried by me: needs the real mouse) |
+| One running GBrowser: a second start hands its addresses (links, files) to the running one as tabs; no address = a new window | Done 19-11-2026 |
 | Crashed tab page with Reload (keeps address and title), "Page unresponsive" Wait / Exit page, restart with tabs restored when the engine stops | Done (19-11-2026) |
 | Tab hover card (title + site) | Missing |
 | Tabs not loaded yet show the site's remembered icon | Done (19-11-2026) |
@@ -117,7 +119,7 @@ Last full audit: 19-11-2026.
 | Appearance: theme, colours, light / dark | Done |
 | Fonts and font size settings | Missing |
 | Languages, spell check | Missing (no spelling suggestions offered in text fields: to investigate) |
-| Default browser (register with Windows, open links from other apps) | Missing |
+| Default browser (register with Windows, open links from other apps) | Done 19-11-2026: registers like Chrome for the current user (StartMenuInternet, Capabilities, RegisteredApplications, ProgIds for http/https and .htm/.html/.svg/.webp/.pdf; installer registers, uninstall removes), Settings > Default browser > Make default opens Windows' Default apps on GBrowser's page (Windows lets only the user choose); links and files from other apps open as tabs in the running window |
 | Profiles (separate people) | Missing |
 | Sync | Not planned (no account service) |
 | Keyboard shortcuts as in Chrome (full list) | Partly |

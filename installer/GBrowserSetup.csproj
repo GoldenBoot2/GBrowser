@@ -25,6 +25,7 @@
   <ItemGroup>
     <Compile Include="..\src\Icons.cs" Link="Shared\Icons.cs" />
     <Compile Include="..\src\IconData.cs" Link="Shared\IconData.cs" />
+    <Compile Include="..\src\DefaultBrowser.cs" Link="Shared\DefaultBrowser.cs" />
     <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" />
     <EmbeddedResource Include="..\assets\gbrowser-256.png" LogicalName="logo.png" />
     <Reference Include="System.IO.Compression" />
