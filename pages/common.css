@@ -114,3 +114,10 @@ input[type="checkbox"] { accent-color: var(--primary); width: 18px; height: 18px
 
 /* the hidden attribute always wins over display rules (e.g. .btn is inline-flex) */
 [hidden] { display: none !important; }
+/* expandable group in a card (Settings > Customize fonts) */
+details.fonts > summary { list-style: none; cursor: pointer; }
+details.fonts > summary::-webkit-details-marker { display: none; }
+details.fonts > summary .chev { margin-left: auto; transition: transform .15s; }
+details.fonts[open] > summary .chev { transform: rotate(180deg); }
+details.fonts .sub-rows { padding-left: 36px; }
+details.fonts .sub-rows select { max-width: 260px; }

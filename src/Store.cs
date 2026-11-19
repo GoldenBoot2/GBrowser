@@ -155,6 +155,11 @@ namespace GBrowser
         public Dictionary<string, bool> ExternalAllowed { get; set; } = new Dictionary<string, bool>();   // "origin|scheme": open app links without asking
         public Dictionary<string, double> SiteZoom { get; set; } = new Dictionary<string, double>();   // host -> zoom, like Chrome
         public double DefaultZoom { get; set; } = 1.0;
+        public int FontSize { get; set; } = 16;            // Settings > Appearance > Font size (Fonts.cs)
+        public string FontStandard { get; set; }           // null = Chrome's default font
+        public string FontSerif { get; set; }
+        public string FontSans { get; set; }
+        public string FontFixed { get; set; }
         public List<string> AutoOpenTypes { get; set; } = new List<string>();   // ".pdf" ...: "Always open files of this type"   // Settings > Appearance > Page zoom (sites without their own zoom)
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();

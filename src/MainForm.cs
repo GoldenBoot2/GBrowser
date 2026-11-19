@@ -1119,6 +1119,7 @@ namespace GBrowser
             core.FaviconChanged += (o, e) => t.UpdateFavicon(() => { F().strip.RefreshTabs(); F().bookmarksBar.Invalidate(); });
             core.IsDocumentPlayingAudioChanged += (o, e) => { t.PlayingAudio = core.IsDocumentPlayingAudio; F().strip.RefreshTabs(); };
             if (t.Muted) core.IsMuted = true;
+            _ = Fonts.Apply(core);   // Settings > Appearance > fonts (nothing sent while they are Chrome's defaults)
             // site settings: JavaScript off for a site (the engine's own switch, set for each new page), sound muted
             core.NavigationStarting += (o, e) =>
             {
@@ -2429,6 +2430,23 @@ namespace GBrowser
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
                         case "HostListUpdates": st.HostListUpdates = v is bool hu && hu; break;
+                        case "FontSize":
+                        case "FontStandard":
+                        case "FontSerif":
+                        case "FontSans":
+                        case "FontFixed":
+                        {
+                            if (key == "FontSize") { int fs = Convert.ToInt32(v); if (fs >= 6 && fs <= 72) st.FontSize = fs; }
+                            else
+                            {
+                                string fv = v as string;
+                                if (string.IsNullOrWhiteSpace(fv)) fv = null;
+                                if (key == "FontStandard") st.FontStandard = fv; else if (key == "FontSerif") st.FontSerif = fv;
+                                else if (key == "FontSans") st.FontSans = fv; else st.FontFixed = fv;
+                            }
+                            foreach (var w in App.Windows) foreach (var x in w.Tabs) if (x.Created) _ = Fonts.Apply(x.View.CoreWebView2, true);
+                            break;
+                        }
                         case "DefaultZoom":
                             if (double.TryParse(Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture), System.Globalization.NumberStyles.Float,
                                     System.Globalization.CultureInfo.InvariantCulture, out var dzv) && dzv >= 0.25 && dzv <= 5)
@@ -2820,6 +2838,8 @@ namespace GBrowser
                     };
                 }
                 case "tasks.list": return await TaskList();
+                case "fonts.list": return Fonts.Installed();
+                case "fonts.state": return new Dictionary<string, object> { { "restart", Fonts.Families != Fonts.ActiveFamilies } };
                 case "tasks.end":
                 {
                     // like Chrome's End process: only engine processes that serve pages, frames, GPU or utilities

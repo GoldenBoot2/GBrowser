@@ -117,7 +117,7 @@ Last full audit: 19-11-2026.
 | Startup: continue where you left off / new tab / specific pages | Partly (restore on/off) |
 | Home button / home page | Done |
 | Appearance: theme, colours, light / dark | Done |
-| Fonts and font size settings | Missing |
+| Fonts and font size settings | Done 19-11-2026 (Settings > Appearance: Font size, Chrome's five steps, applies at once; Customize fonts: standard / serif / sans-serif / fixed-width from the installed fonts, after a restart (notice + Restart button). Stored where Chrome keeps them, the profile's webkit.webprefs, written before the engine starts; nothing written at the defaults. Minimum font size: no engine method, not offered. Tested: live size, fonts after restart, back to defaults) |
 | Languages, spell check | Missing (no spelling suggestions offered in text fields: to investigate) |
 | Default browser (register with Windows, open links from other apps) | Done 19-11-2026: registers like Chrome for the current user (StartMenuInternet, Capabilities, RegisteredApplications, ProgIds for http/https and .htm/.html/.svg/.webp/.pdf; installer registers, uninstall removes), Settings > Default browser > Make default opens Windows' Default apps on GBrowser's page (Windows lets only the user choose); links and files from other apps open as tabs in the running window |
 | Profiles (separate people) | Missing |

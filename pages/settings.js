@@ -46,6 +46,18 @@
     swatches.append(cb);
   }
   drawSwatches();
+  // font size, Chrome's five steps
+  const fsSel = el('select', { 'aria-label': 'Font size' }, [[9, 'Very small'], [12, 'Small'], [16, 'Medium (recommended)'], [20, 'Large'], [24, 'Very large']]
+    .map(([v, t]) => el('option', { value: String(v), text: t, selected: v === (s.FontSize || 16) })));
+  fsSel.addEventListener('change', () => set('FontSize', +fsSel.value));
+  const fontSizeRow = row('TextFields', 'Font size', null, fsSel);
+  const fontsBox = el('div', { class: 'sub-rows' });
+  const fontRestartRow = el('div', { class: 'row' }, icon('Restore'), el('div', { class: 'text' },
+    el('div', { class: 'title', text: 'Restart GBrowser to use the new fonts' })),
+    el('button', { class: 'btn', onclick: () => gb.send('app.restart') }, icon('Refresh'), 'Restart'));
+  async function fontRestart() { const st = await gb.send('fonts.state'); fontRestartRow.style.display = st.restart ? '' : 'none'; }
+  fontRestart();
+  const fontsRow = el('details', { class: 'fonts' }, el('summary', { class: 'row' }, icon('FontDownload'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Customize fonts' })), icon('ArrowDrop', 's20 chev')), fontsBox, fontRestartRow);
   // page zoom for sites without their own zoom (Chrome's list)
   const dz = Math.round((s.DefaultZoom || 1) * 100);
   const zoomSel = el('select', { 'aria-label': 'Page zoom' }, [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500]
@@ -53,7 +65,18 @@
   zoomSel.addEventListener('change', () => set('DefaultZoom', +zoomSel.value / 100));
   main.append(el('div', { class: 'card', id: 'appearance' }, el('h2', { text: 'Appearance' }), row('Tune', 'Theme', null, themeSel),
     el('div', { class: 'row' }, icon('Palette'), el('div', { class: 'text' }, el('div', { class: 'title', text: 'Colour' }), swatches)),
-    row('ZoomIn', 'Page zoom', null, zoomSel)));
+    row('ZoomIn', 'Page zoom', null, zoomSel), fontSizeRow, fontsRow));
+  // fonts, like Chrome's Customize fonts (empty = the default font)
+  gb.send('fonts.list').then(list => {
+    for (const [key, label, def] of [['FontStandard', 'Standard font', 'Times New Roman'], ['FontSerif', 'Serif font', 'Times New Roman'],
+                                      ['FontSans', 'Sans-serif font', 'Arial'], ['FontFixed', 'Fixed-width font', 'Consolas']]) {
+      const sel = el('select', { 'aria-label': label }, el('option', { value: '', text: def + ' (default)' }),
+        ...list.filter(f => f !== def).map(f => el('option', { value: f, text: f, selected: f === s[key] })));
+      sel.style.fontFamily = s[key] || def;
+      sel.addEventListener('change', async () => { await set(key, sel.value); sel.style.fontFamily = sel.value || def; fontRestart(); });
+      fontsBox.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'title', text: label })), sel));
+    }
+  });
   if (location.hash === '#appearance') document.getElementById('appearance').scrollIntoView();
 
   // Start and search
