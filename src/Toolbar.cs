@@ -65,11 +65,11 @@ namespace GBrowser
             Address.GotFocus += (s, e) =>
             {
                 Address.BackColor = Theme.Field;
-                // edit the full address; the part that was shown stays in place (a double-click selects the word under it)
+                // Chrome: focus keeps the short address (selected); the full one appears when the user edits
                 if (Address.Text == ShownUrl && FullUrl.Length > 0)
                 {
-                    int at = ShownUrl.Length > 0 ? FullUrl.IndexOf(ShownUrl.TrimEnd('/'), StringComparison.Ordinal) : -1;
-                    if (at > 0) Address.ReplaceKeepingPlace(FullUrl, at); else Address.Text = FullUrl;
+                    Address.SetElided(FullUrl);
+                    if (!Address.Elided) Address.Text = FullUrl;   // the short form is not part of the full one
                 }
                 LayoutNow();
                 // keyboard focus (Ctrl+L, F6, new tab) selects the address; a click is handled by the field itself
@@ -331,13 +331,15 @@ namespace GBrowser
             {
                 e.SuppressKeyPress = true;
                 if (Omni != null && Omni.Enter(e.Alt)) return;
-                Go?.Invoke(Address.Text);
+                Go?.Invoke(Address.FullText);
             }
             else if (e.KeyCode == Keys.Escape)
             {
                 e.SuppressKeyPress = true;
                 if (Omni != null && Omni.Escape()) return;
-                Address.Text = FullUrl.Length > 0 ? FullUrl : ShownUrl;
+                // back to the page's address, short form selected (Chrome)
+                Address.Text = ShownUrl;
+                Address.SetElided(FullUrl);
                 Address.SelectAll();
             }
         }
@@ -355,8 +357,7 @@ namespace GBrowser
             // focused but not typed in (still the old address or empty): show the new one, like Chrome; typed text stays
             else if (text.Length == 0 || text == oldFull || text == oldShown)
             {
-                string now = FullUrl.Length > 0 ? FullUrl : ShownUrl;
-                if (text != now) { Address.Text = now; Address.SelectAll(); }
+                if (text != ShownUrl) { Address.Text = ShownUrl; Address.SetElided(FullUrl); Address.SelectAll(); }
             }
             LayoutNow();
         }

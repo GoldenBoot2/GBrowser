@@ -51,6 +51,7 @@ namespace GBrowser
             {
                 value = (value ?? "").Replace("\r", "").Replace("\n", " ");
                 if (value == text) return;
+                elidedFull = null; elidedAt = -1;   // a new text from the owner ends the short form
                 text = value;
                 caret = anchor = Math.Min(caret, text.Length);
                 undo.Clear(); redo.Clear();
@@ -117,7 +118,10 @@ namespace GBrowser
                     using (var b = new SolidBrush(Theme.PrimaryContainer)) g.FillRectangle(b, r);
                     var st = g.Save();
                     g.SetClip(r);
-                    TextRenderer.DrawText(g, Shown, Font, new Point(-scroll, y), Theme.OnPrimaryContainer, Theme.PrimaryContainer, f);
+                    // TextRenderer (GDI) ignores the Graphics clip unless told to keep it: without the flag every partial
+                    // selection (a double-clicked word, a dragged range) was drawn as if all the text were selected
+                    TextRenderer.DrawText(g, Shown, Font, new Point(-scroll, y), Theme.OnPrimaryContainer, Theme.PrimaryContainer,
+                        f | TextFormatFlags.PreserveGraphicsClipping);
                     g.Restore(st);
                 }
             }
@@ -128,33 +132,53 @@ namespace GBrowser
 
         void InvalidateCaret() => Invalidate(new Rectangle(pos[Clamp(caret)] - scroll - 2, 0, 6, Height));
 
-        bool pinScroll;   // ReplaceKeepingPlace: keep the old text where it was while the caret stays in view
-
-        /// <summary>Replaces the text with a longer one that contains the old text at <paramref name="at"/> (e.g. the
-        /// address bar showing the full address on focus) without moving the old text on screen: the new part goes
-        /// off to the left, so a double-click still lands on the word that was under the pointer.</summary>
-        public void ReplaceKeepingPlace(string full, int at)
+        // ---- a short form of a longer text (the address bar: "example.com/test/" for "https://example.com/test/").
+        // Like Chrome's address bar (measured on Chrome 158, 19-11-2026): focus and a single click select the short
+        // form; the full text appears only when the user edits: a double-click (the word under the pointer is
+        // selected in the full text), a click that places the caret, caret keys, typing. Copy / cut of everything
+        // give the full text.
+        string elidedFull; int elidedAt = -1;
+        /// <summary>The shown text is a short form of <paramref name="full"/> (found inside it), or null to end it.</summary>
+        public void SetElided(string full)
         {
-            Text = full;
-            scroll = pos[Math.Max(0, Math.Min(at, text.Length))];
-            pinScroll = true;
-            Invalidate();
-            // only for a double-click's time: a single click (everything selected) then shows the whole address
-            var tm = new Timer { Interval = SystemInformation.DoubleClickTime + 50 };
-            tm.Tick += (s, e) =>
+            elidedFull = null; elidedAt = -1;
+            if (string.IsNullOrEmpty(full) || full == text || text.Length == 0) return;
+            int at = full.IndexOf(text.TrimEnd('/'), StringComparison.Ordinal);
+            if (at < 0) return;
+            elidedFull = full; elidedAt = at;
+        }
+        public bool Elided => elidedFull != null;
+        /// <summary>The full text when the box shows its short form, else the text.</summary>
+        public string FullText => elidedFull ?? text;
+        Timer unelideTimer;
+        /// <summary>The full text once a double-click can no longer follow (a second click maps its word itself).</summary>
+        void UnelideLater()
+        {
+            if (unelideTimer == null)
             {
-                tm.Stop(); tm.Dispose();
-                if (!pinScroll || IsDisposed || SelectionLength != text.Length) return;
-                pinScroll = false; scroll = 0; ScrollToCaret(); Invalidate();
-            };
-            tm.Start();
+                unelideTimer = new Timer { Interval = SystemInformation.DoubleClickTime + 30 };
+                unelideTimer.Tick += (o, e) => { unelideTimer.Stop(); if (Elided && Focused && !mouseSelecting) Unelide(); };
+            }
+            unelideTimer.Stop(); unelideTimer.Start();
+        }
+
+        /// <summary>Switches to the full text; selection and caret keep pointing at the same characters.</summary>
+        void Unelide()
+        {
+            if (elidedFull == null) return;
+            string full = elidedFull; int at = elidedAt;
+            bool all = SelectionLength == text.Length && text.Length > 0;
+            int a = anchor + at, c = caret + at;
+            elidedFull = null; elidedAt = -1;
+            text = full;
+            if (all) { anchor = 0; caret = text.Length; }
+            else { anchor = Math.Min(a, text.Length); caret = Math.Min(c, text.Length); }
+            Changed(false);
         }
 
         void ScrollToCaret()
         {
             int x = pos[caret], w = Math.Max(10, Width - 4);
-            if (pinScroll && x - scroll >= 0 && x - scroll <= w) { ImePosition(); return; }
-            pinScroll = false;
             if (x - scroll > w) scroll = x - w;
             if (x - scroll < 0) scroll = Math.Max(0, x - w / 3);
             int max = Math.Max(0, pos[text.Length] - w);
@@ -164,7 +188,6 @@ namespace GBrowser
 
         void Changed(bool fromUser)
         {
-            if (fromUser) pinScroll = false;
             Measure();
             ScrollToCaret();
             RestartBlink();
@@ -223,7 +246,13 @@ namespace GBrowser
             Changed(true);
         }
 
-        void Copy() { if (SelectionLength > 0 && !Password) try { Clipboard.SetText(SelectedText); } catch { } }
+        void Copy()
+        {
+            if (SelectionLength == 0 || Password) return;
+            // everything selected in the short form: the full text (Chrome copies https://...)
+            string t = Elided && SelectionLength == text.Length ? elidedFull : SelectedText;
+            try { Clipboard.SetText(t); } catch { }
+        }
         void Cut() { Copy(); DeleteSelection(); }
         void Paste() { try { if (Clipboard.ContainsText()) Insert(Clipboard.GetText()); } catch { } }
 
@@ -264,6 +293,11 @@ namespace GBrowser
         {
             base.OnKeyDown(e);
             if (e.Handled || e.SuppressKeyPress) return;
+            // editing or moving the caret shows the full text (copy, select all, Tab and lone modifiers keep the short form)
+            if (Elided && !(e.Control && (e.KeyCode == Keys.C || e.KeyCode == Keys.A || e.KeyCode == Keys.Insert)) &&
+                e.KeyCode != Keys.Tab && e.KeyCode != Keys.ShiftKey && e.KeyCode != Keys.ControlKey && e.KeyCode != Keys.Menu &&
+                e.KeyCode != Keys.LWin && e.KeyCode != Keys.RWin && e.KeyCode != Keys.Apps)
+                Unelide();
             bool shift = e.Shift, ctrl = e.Control;
             bool handled = true;
             switch (e.KeyCode)
@@ -336,6 +370,7 @@ namespace GBrowser
         /// being edited, else the selection); the owner starts the drag. Null = no dragging out.</summary>
         public Action<string, bool> DragOut;   // text, whole (not focused)
         Point? dragFrom; bool dragWhole;
+        int pendingHit = -1;
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -346,6 +381,11 @@ namespace GBrowser
                          Math.Abs(e.X - lastClickPt.X) < 4 && Math.Abs(e.Y - lastClickPt.Y) < 4 ? clicks + 1 : 1;
                 lastClick = now; lastClickPt = e.Location;
             }
+#if AUTOMATION
+            TLog("DOWN x=" + e.X + " y=" + e.Y + " winClicks=" + e.Clicks + " clicks=" + clicks);
+#endif
+            // a second / third click shows the full text first; the hit point keeps its character
+            if (e.Button == MouseButtons.Left && clicks >= 2 && Elided) { int at = elidedAt, keepHit = Hit(e.X); Unelide(); pendingHit = keepHit + at; }
             // a single press may start dragging the address out; a double / triple click selects a word / everything
             if (e.Button == MouseButtons.Left && clicks == 1 && DragOut != null && text.Length > 0)
             {
@@ -360,7 +400,12 @@ namespace GBrowser
             if (!wasFocused) { selectAllOnClick = true; Focus(); }
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
-            int i = Hit(e.X);
+            int i = pendingHit >= 0 ? pendingHit : Hit(e.X);
+            pendingHit = -1;
+            // a click that places the caret in the short form: the full text, caret at the same character
+            // a click that places the caret in the short form: the full text comes after a double-click's time (an
+            // immediate switch moved the text before the second click of a double-click, which then hit another word)
+            if (clicks == 1 && wasFocused && Elided && (ModifierKeys & Keys.Shift) == 0) UnelideLater();
             if (clicks == 2)
             {
                 int a = i, b = i;
@@ -374,6 +419,13 @@ namespace GBrowser
             Capture = true;
         }
 
+#if AUTOMATION
+        void TLog(string w)
+        {
+            Blocking.TestLog.Add("ADDR " + DateTime.Now.ToString("HH:mm:ss.fff") + " " + w + " focused=" + Focused + " elided=" + Elided +
+                " text='" + text + "' sel=" + SelectionStart + "+" + SelectionLength);
+        }
+#endif
         protected override void OnMouseMove(MouseEventArgs e)
         {
             if (dragFrom.HasValue)
@@ -397,11 +449,15 @@ namespace GBrowser
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+#if AUTOMATION
+            TLog("UP x=" + e.X + " drag=" + dragFrom.HasValue);
+#endif
             if (dragFrom.HasValue && e.Button == MouseButtons.Left)
             {
                 // no drag: the click it was
                 dragFrom = null; Capture = false;
                 if (dragWhole) { selectAllOnClick = true; Focus(); if (SelectionLength == 0) SelectAll(); selectAllOnClick = false; }
+                else if (Elided) { MoveTo(Hit(e.X), false); UnelideLater(); }   // caret placed: the full text a moment later
                 else MoveTo(Hit(e.X), false);
                 base.OnMouseUp(e);
                 return;
@@ -413,6 +469,7 @@ namespace GBrowser
                 Capture = false;
                 // first click into the field selects the whole address (like Chrome)
                 if (selectAllOnClick && SelectionLength == 0) SelectAll();
+                else if (Elided && clicks == 1 && !selectAllOnClick) UnelideLater();   // a caret click / drag-select in the short form
                 selectAllOnClick = false;
             }
             else if (e.Button == MouseButtons.Right) ShowMenu(e.Location);
@@ -444,6 +501,9 @@ namespace GBrowser
         protected override void OnGotFocus(EventArgs e)
         {
             base.OnGotFocus(e);
+#if AUTOMATION
+            TLog("GOTFOCUS");
+#endif
             RestartBlink();
             Invalidate();
         }
