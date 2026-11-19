@@ -175,12 +175,12 @@ Engine route: CoreWebView2CookieManager + DevTools protocol (Storage.getCookies 
 
 | Masked cookie-consent records (OneTrust / Cookiebot) | Missing |
 | IP-lookup masking | Missing (no VPN / proxy without approval) |
-| Block tracker pages (strict) | Missing (compare with "Block pages of ad sites") |
-| Per-page request log: Blocked / Allowed / Cookies | Missing |
-| Ad-block Tests page (blocking + detection tests) | Missing |
-| Stats: rules, filter lists, blocked total with Reset | Missing (total shown in shield menu only) |
-| Daily host-list update + "Update host lists" button | Missing |
-| Element hiding switch | To verify ("Hide ad leftovers" may be the same) |
+| Block tracker pages (strict) | Done 19-11-2026: "Block pages of ad and tracker sites" uses every list in use, tracker lists included (tested: google-analytics.com shows the block page) |
+| Per-page request log: Blocked / Allowed / Cookies | Done 19-11-2026: shield menu > Request log (last 500 requests of the tab: allowed / blocked / replaced, type, live, search, filter, Cookies button) |
+| Ad-block Tests page (blocking + detection tests) | Done 19-11-2026: shield menu > Blocking tests (ad-block, detection and privacy test pages) |
+| Stats: rules, filter lists, blocked total with Reset | Done 19-11-2026 (Settings > Ad blocking > Statistics) |
+| Daily host-list update + "Update host lists" button | Done 19-11-2026: 9 host-style built-in lists downloaded daily (Settings > Filter lists > Update host lists daily / Update now); their hosts join the compiled lists under the same list bit (574,000 hosts, about 7 MB); lists' exceptions still apply |
+| Element hiding switch | Done: "Hide ad leftovers" (shield menu and Settings) switches all element hiding off / on |
 
 ## Undetectable page scripts (user 19-11-2026: "make all our scripts non detectable by any sites but it should work on those sites without compromising our protections")
 | Item | Status |

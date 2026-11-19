@@ -403,6 +403,12 @@ namespace GBrowser
                 int dot = host.IndexOf('.', start);
                 if (dot < 0) break;
                 long hh = Fnv64(start == 0 ? host : host.Substring(start));
+                var xh = extraHash; var xm = extraMask;
+                if (xh.Length > 0 && xm.Length == xh.Length)
+                {
+                    int xi = Array.BinarySearch(xh, hh);
+                    if (xi >= 0 && (groups & xm[xi]) != 0 && (type & 0xFFF) != 0) st.Block = true;   // a block of that list
+                }
                 int idx = HostFirst(hh);
                 if (idx >= 0)
                 {

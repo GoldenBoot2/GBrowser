@@ -30,6 +30,8 @@ namespace GBrowser
         public bool Private;
         public DateTime HiddenSince = DateTime.UtcNow;
         public bool Created => View?.CoreWebView2 != null;
+        static int nextId;
+        public readonly int Id = System.Threading.Interlocked.Increment(ref nextId);   // for the request log page
         Task creating;
 
         public BrowserTab(string url, string title = null)
@@ -53,6 +55,8 @@ namespace GBrowser
                 case "about": return "About GBrowser";
                 case "downloads": return "Downloads";
                 case "cookies": return "Cookies and site data";
+                case "log": return "Request log";
+                case "tests": return "Blocking tests";
                 case "insecure": return "Not secure";
                 case "certerror": return "Privacy error";
                 default: return "New tab";

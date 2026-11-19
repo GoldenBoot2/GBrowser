@@ -81,11 +81,12 @@
   const ab = await gb.send('adblock.info').catch(() => null);
   const abCard = el('div', { class: 'card' }, el('h2', { text: 'Ad blocking' }),
     row('Shield', 'Ad blocking', ab ? (ab.total.toLocaleString() + ' blocked in total') : null, sw('AdblockEnabled')),
+    (() => { const b = el('button', { class: 'btn text', text: 'Reset count' }); b.addEventListener('click', async () => { await gb.send('stats.reset'); snack('Count reset'); }); return row('Speed', 'Statistics', ab ? ab.rules.toLocaleString() + ' rules from ' + ab.lists.length + ' lists' + (ab.lists.some(l => l.on === false) ? ' (' + ab.lists.filter(l => l.on !== false).length + ' on)' : '') : null, b); })(),
     row('Block', 'Annoyances', 'Cookie notices, popups, app banners', sw('BlockAnnoyances')),
     row('Cookie', 'Trackers', 'Also removes tracking codes from links', sw('BlockTrackers')),
     row('Tune', 'Hide ad leftovers', null, sw('HideAdLeftovers')),
     row('Verified', 'Stealth mode', 'Sites cannot see hidden ads are gone', sw('Stealth')),
-    row('Lock', 'Block pages of ad sites', null, sw('BlockAdSitePages')),
+    row('Lock', 'Block pages of ad and tracker sites', null, sw('BlockAdSitePages')),
     row('Person', 'Do Not Track', null, sw('DoNotTrack')));
   main.append(abCard);
   if (ab) {
@@ -119,6 +120,18 @@
           el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (l.version && !l.version.startsWith('%') ? ' - ' + l.version : '') })), b));
       }
     }
+    // daily host-list update
+    const hs = await gb.send('hosts.state');
+    const upd = el('button', { class: 'btn text', text: 'Update now' });
+    const hsub = () => hs.state || (hs.updated ? 'Updated ' + new Date(hs.updated).toLocaleString('en-GB') + ', ' + hs.hosts.toLocaleString() + ' hosts' : 'Not updated yet');
+    const hrow = row('Download', 'Update host lists daily', hsub(), el('div', { class: 'actions' }, upd, sw('HostListUpdates')));
+    upd.addEventListener('click', async () => {
+      upd.disabled = true; upd.textContent = 'Updating...';
+      try { await gb.send('hosts.update'); Object.assign(hs, await gb.send('hosts.state')); hrow.querySelector('.sub').textContent = hsub(); snack('Host lists updated'); }
+      catch (e) { snack(e.message); }
+      upd.disabled = false; upd.textContent = 'Update now';
+    });
+    lists.insertBefore(hrow, lists.children[2] || null);
     main.append(lists);
   }
 

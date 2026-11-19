@@ -52,6 +52,18 @@ namespace GBrowser
         }
         const int T_ALLTYPES = 0xFFF & ~T_POPUP;   // a rule without types: everything but popups (like the lists)
 
+        // hosts of the built-in lists downloaded again today (HostUpdates): sorted hashes + list masks
+        static volatile long[] extraHash = new long[0];
+        static volatile int[] extraMask = new int[0];
+        public static void SetExtraHosts(Dictionary<long, int> map)
+        {
+            var k = map.Keys.ToArray(); Array.Sort(k);
+            var m = new int[k.Length];
+            for (int i = 0; i < k.Length; i++) m[i] = map[k[i]];
+            extraMask = m; extraHash = k;
+        }
+        public static int ExtraHostCount => extraHash.Length;
+
         static volatile UserRules user;
         static int userVersion;
         public static UserRules User => user;

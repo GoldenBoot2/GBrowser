@@ -298,6 +298,26 @@ namespace GBrowser
             catch { return null; }
         }
 
+        // ---------------------------------------------------------------- request log (shield menu > Request log)
+        public sealed class LogEntry { public long Time; public string Url, Type, Result, Page; }
+        readonly LinkedList<LogEntry> log = new LinkedList<LogEntry>();
+        public List<LogEntry> LogSnapshot() { lock (log) return log.ToList(); }
+        void Record(string url, int type, string result)
+        {
+            var e = new LogEntry { Time = Store.Now(), Url = url, Type = TypeName(type), Result = result, Page = PageHost };
+            lock (log) { log.AddLast(e); while (log.Count > 500) log.RemoveFirst(); }
+        }
+        static string TypeName(int t)
+        {
+            switch (t)
+            {
+                case FilterEngine.T_SCRIPT: return "script"; case FilterEngine.T_IMAGE: return "image"; case FilterEngine.T_CSS: return "stylesheet";
+                case FilterEngine.T_XHR: return "xhr / fetch"; case FilterEngine.T_MEDIA: return "media"; case FilterEngine.T_FONT: return "font";
+                case FilterEngine.T_SUBDOC: return "frame"; case FilterEngine.T_WEBSOCKET: return "websocket"; case FilterEngine.T_PING: return "ping";
+                case FilterEngine.T_DOCUMENT: return "page"; case FilterEngine.T_POPUP: return "popup"; default: return "other";
+            }
+        }
+
         void Count()
         {
             tab.Blocked++;
@@ -351,6 +371,7 @@ namespace GBrowser
             string decision = eng.Match(url, host, PageHost, FilterEngine.T_SUBDOC, Groups());
             if (decision == null || (decision.Length > 0 && eng.Redirect(decision) != null)) return;
             e.Cancel = true;
+            Record(url, FilterEngine.T_SUBDOC, "blocked");
             Count();
         }
 
@@ -436,6 +457,8 @@ namespace GBrowser
             PageUrl = core.Source;
             PageHost = HostOf(core.Source);
             tab.Blocked = 0;
+            // a new page: its own log (the request for the page itself stays)
+            lock (log) { var keep = log.LastOrDefault(x => x.Type == "page"); log.Clear(); if (keep != null && keep.Url == PageUrl) log.AddLast(keep); }
             Changed?.Invoke();
         }
 
@@ -540,14 +563,15 @@ namespace GBrowser
             if (!main && (type == FilterEngine.T_XHR || type == FilterEngine.T_OTHER))
                 type = GuessType(e.Request, type);
             string decision = eng.Match(url, host, main ? null : PageHost, type, Groups());
-            if (decision == null) return;
-            if (main) { e.Response = BlockPage(url, host); return; }
+            if (decision == null) { Record(url, type, "allowed"); return; }
+            if (main) { Record(url, type, "page blocked"); e.Response = BlockPage(url, host); return; }
             Count();
             if (decision.Length > 0)
             {
                 var res = eng.Redirect(decision);
-                if (res != null) { e.Response = Stub(res); return; }
+                if (res != null) { Record(url, type, "replaced (" + decision + ")"); e.Response = Stub(res); return; }
             }
+            Record(url, type, "blocked");
             e.Response = type == FilterEngine.T_SUBDOC ? EmptyFrame() : Fail();
         }
 

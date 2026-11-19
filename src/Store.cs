@@ -175,7 +175,9 @@ namespace GBrowser
         public bool CookieAutoDelete { get; set; } = false;                                  // a site's cookies go after its last tab closes
         public List<string> CookieKeep { get; set; } = new List<string>();                   // sites auto-delete keeps
         public int CookieMaxDays { get; set; } = 0;                                         // cap cookie lifetime (0 = off)
-        public bool BlockThirdPartyCookies { get; set; } = false;   // where the star puts new bookmarks (the last folder chosen)
+        public bool BlockThirdPartyCookies { get; set; } = false;
+        public bool HostListUpdates { get; set; } = true;       // host lists downloaded again each day
+        public long HostListsUpdated { get; set; }   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
         public List<WindowSession> Windows { get; set; } = new List<WindowSession>();
     }

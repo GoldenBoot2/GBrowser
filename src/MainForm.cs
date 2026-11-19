@@ -676,7 +676,7 @@ namespace GBrowser
             if (Tabs.Count == 0) NewTab(null);
             strip.RefreshTabs();
             // load extensions once at start so their background scripts run (profile is shared by all tabs)
-            if (isFirst) CustomLists.Start();   // your rules + custom lists (rebuilt in the background)
+            if (isFirst) { CustomLists.Start(); HostUpdates.Start(); }   // your rules + custom lists; daily host lists
             await LoadExtensionsOnce();
         }
 
@@ -757,6 +757,8 @@ namespace GBrowser
             bubble.SetText(t.Created ? t.View.CoreWebView2.StatusBarText : "");
             SyncFind(t);
             devDock.Show(t);
+            // another tab: what was typed in the address bar belongs to the old one (Chrome moves focus to the page)
+            if (old != null && old != t && toolbar.Address.Focused) { if (t.View != null && t.View.Visible) t.View.Focus(); else content.Focus(); }
             UpdateUi();
             strip.RefreshTabs();
         }
@@ -1797,10 +1799,12 @@ namespace GBrowser
             Toggle("Trackers", st.BlockTrackers, v => st.BlockTrackers = v, st.AdblockEnabled);
             Toggle("Hide ad leftovers", st.HideAdLeftovers, v => st.HideAdLeftovers = v, st.AdblockEnabled);
             Toggle("Stealth mode", st.Stealth, v => st.Stealth = v, st.AdblockEnabled);
-            Toggle("Block pages of ad sites", st.BlockAdSitePages, v => st.BlockAdSitePages = v, st.AdblockEnabled);
+            Toggle("Block pages of ad and tracker sites", st.BlockAdSitePages, v => st.BlockAdSitePages = v, st.AdblockEnabled);
             m.AddSeparator();
             m.AddNote("Total blocked: " + st.TotalBlocked.ToString("N0"));
             if (site != null && st.AdblockEnabled) m.Add("Hide an element on this page", IconData.Block, null, () => PickElement(null));
+            if (t != null) m.Add("Request log", IconData.Find, null, () => NewTab(Pages.Url("log") + "?tab=" + t.Id));
+            m.Add("Blocking tests", IconData.Verified, null, () => OpenPage("tests"));
             m.Add("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings"));
             m.ShowAt(toolbar, toolbar.ButtonRect("shield"), true, "shield");
         }
@@ -2152,6 +2156,7 @@ namespace GBrowser
                         case "DoNotTrack": st.DoNotTrack = v is bool a7 && a7; break;
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
+                        case "HostListUpdates": st.HostListUpdates = v is bool hu && hu; break;
                         case "AskWhereToSave": st.AskWhereToSave = v is bool aw && aw; break;
                         case "SearchSuggestions": st.SearchSuggestions = v is bool ss && ss; break;
                         case "DownloadConnections": st.DownloadConnections = Math.Max(1, Math.Min(16, Convert.ToInt32(v))); break;
@@ -2481,6 +2486,24 @@ namespace GBrowser
                     await tab.View.CoreWebView2.CallDevToolsProtocolMethodAsync("Storage.clearDataForOrigin", Store.ToJson(new Dictionary<string, object> { { "origin", origin }, { "storageTypes", types } }));
                     return null;
                 }
+                case "log.get":
+                {
+                    int id = (int)Lng(m, "tab", 0);
+                    var target = App.Windows.SelectMany(w => w.Tabs).FirstOrDefault(x => x.Id == id);
+                    if (target == null) throw new Exception("The tab was closed");
+                    string page = target.Created ? target.View.CoreWebView2.Source : target.Url;
+                    var entries = target.Blocking?.LogSnapshot() ?? new List<Blocking.LogEntry>();
+                    return new Dictionary<string, object>
+                    {
+                        { "page", page }, { "title", target.Title }, { "blocked", target.Blocked },
+                        { "entries", entries.Select(x => new Dictionary<string, object> { { "t", x.Time }, { "u", x.Url }, { "y", x.Type }, { "r", x.Result } }).ToList() },
+                    };
+                }
+                case "hosts.update": { string err = await HostUpdates.Update(); if (err != null) throw new Exception(err); return HostUpdates.State; }
+                case "hosts.state":
+                    return new Dictionary<string, object> { { "on", st.HostListUpdates }, { "state", HostUpdates.State },
+                        { "updated", st.HostListsUpdated }, { "hosts", FilterEngine.ExtraHostCount } };
+                case "stats.reset": st.TotalBlocked = 0; Store.SaveSettings(); return null;
                 case "lists.set":
                 {
                     string file = Str(m, "file");
