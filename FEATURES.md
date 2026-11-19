@@ -101,7 +101,7 @@ Last full audit: 19-11-2026.
 | Cookies and site data page (see / delete per site) | Done 19-11-2026 (gbrowser://cookies, see Cookie manager) |
 | Password manager (save prompt, list, edit, delete, export) | Engine UI (save prompt) / list Missing |
 | Autofill addresses / payment | Engine UI |
-| Certificate viewer | Missing |
+| Certificate viewer | Done 19-11-2026 (site info > Certificate is valid: issued to / by, validity dd-MM-yyyy, SHA-256 in a Material dialog; Details = Windows' certificate viewer; chain read from the engine over DevTools (Security domain, no reload); tested on bbc.com. The Details button was not clicked in the test) |
 | Password leak warnings | Not possible yet (needs a breach service; ask first) |
 
 ## Data and settings

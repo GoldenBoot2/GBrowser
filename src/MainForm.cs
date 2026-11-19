@@ -1917,6 +1917,8 @@ namespace GBrowser
             bool secure = u.Scheme == "https" && Pages.PageName(url) != "insecure" && Pages.PageName(url) != "certerror";
             m.AddHeader(host, secure ? IconData.Lock : IconData.Warning);
             m.AddNote(secure ? "Connection is secure" : "Connection is not secure");
+            if (u.Scheme == "https" && t?.Created == true && !standIn)
+                m.Add(secure ? "Certificate is valid" : "Certificate", IconData.Verified, null, () => CertViewer.Show(this, t.View.CoreWebView2, origin));
             if (t?.Blocking != null && (t.Blocking.Camera > 0 || t.Blocking.Microphone > 0))
                 m.AddNote(t.Blocking.Camera > 0 && t.Blocking.Microphone > 0 ? "Using your camera and microphone"
                     : t.Blocking.Camera > 0 ? "Using your camera" : "Using your microphone");
