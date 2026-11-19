@@ -83,7 +83,10 @@ namespace GBrowser
                         await core.CallDevToolsProtocolMethodForSessionAsync(sid, "Network.setUserAgentOverride", json);
                         // the same time-zone names as pages (assets/tzworker.js), before the worker's own code runs
                         string w = WorkerScript();
-                        if (w != null && Blocking.TestDbg.IndexOf('o') < 0)
+#if AUTOMATION
+                        if (Blocking.TestDbg.IndexOf('o') >= 0) w = null;   // test switch: page-script letter 'o' off
+#endif
+                        if (w != null)
                             await core.CallDevToolsProtocolMethodForSessionAsync(sid, "Runtime.evaluate",
                                 Store.ToJson(new Dictionary<string, object> { { "expression", w }, { "silent", true } }));
                     }
