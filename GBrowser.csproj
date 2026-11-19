@@ -52,7 +52,7 @@
   <ItemGroup>
     <None Include="pages\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="pages" />
     <None Include="assets\gbrowser.ico" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="assets\gbab.js;assets\extcss.js;assets\picker.js;assets\idprobe.js" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="assets\gbab.js;assets\extcss.js;assets\picker.js;assets\idprobe.js;assets\tzfix.js;assets\tzworker.js" CopyToOutputDirectory="PreserveNewest" />
     <!-- compiled filter lists (tools/build_filters.py) -->
     <None Include="filters\*" CopyToOutputDirectory="PreserveNewest" LinkBase="filters" />
   </ItemGroup>

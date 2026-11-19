@@ -671,7 +671,10 @@ namespace GBrowser
                 string gbab = File.ReadAllText(Path.Combine(dir, "gbab.js"), Encoding.UTF8);
                 string ec = File.ReadAllText(Path.Combine(dir, "extcss.js"), Encoding.UTF8);
                 string lib = QuietLib(eng?.Scriptlets ?? ""), raw = eng?.RawJs ?? "";
-                gbab = gbab.Replace("/*SCRIPTLETS*/null", lib.Length == 0 ? "null" : lib)
+                string tz = "";
+                try { tz = File.ReadAllText(Path.Combine(dir, "tzfix.js"), Encoding.UTF8); } catch { }
+                gbab = gbab.Replace("/*TZFIX*/", tz)
+                           .Replace("/*SCRIPTLETS*/null", lib.Length == 0 ? "null" : lib)
                            .Replace("/*RAWJS*/null", raw.Length == 0 ? "null" : raw)
                            .Replace("/*EXTCSS*/null", ec.Length == 0 ? "null" : "(function(){" + ec + "\n;return ExtendedCss;})()");
                 // WebView2's bridge looks up window.chrome.webview at every call, and HideWebView deletes it after this

@@ -78,7 +78,15 @@ namespace GBrowser
                         // its own frames and workers too
                         await core.CallDevToolsProtocolMethodForSessionAsync(sid, "Target.setAutoAttach", AutoAttach);
                     }
-                    else await core.CallDevToolsProtocolMethodForSessionAsync(sid, "Network.setUserAgentOverride", json);
+                    else
+                    {
+                        await core.CallDevToolsProtocolMethodForSessionAsync(sid, "Network.setUserAgentOverride", json);
+                        // the same time-zone names as pages (assets/tzworker.js), before the worker's own code runs
+                        string w = WorkerScript();
+                        if (w != null && Blocking.TestDbg.IndexOf('o') < 0)
+                            await core.CallDevToolsProtocolMethodForSessionAsync(sid, "Runtime.evaluate",
+                                Store.ToJson(new Dictionary<string, object> { { "expression", w }, { "silent", true } }));
+                    }
                 }
                 catch { }
                 finally
@@ -89,6 +97,38 @@ namespace GBrowser
             };
             await core.CallDevToolsProtocolMethodAsync("Emulation.setUserAgentOverride", json);
             await core.CallDevToolsProtocolMethodAsync("Target.setAutoAttach", AutoAttach);
+            // shared workers are not children of a page, so auto-attach never reaches them: attach as soon as one is
+            // created (its script still has to load) and the handler above sets them up like other workers
+            var created = core.GetDevToolsProtocolEventReceiver("Target.targetCreated");
+            created.DevToolsProtocolEventReceived += async (s, e) =>
+            {
+                try
+                {
+                    var ti = Store.FromJson<Dictionary<string, object>>(e.ParameterObjectAsJson)["targetInfo"] as Dictionary<string, object>;
+                    if (ti == null || ti["type"] as string != "shared_worker" || (ti.TryGetValue("attached", out var at) && at is bool ab && ab)) return;
+                    string id = ti["targetId"] as string;
+                    lock (sharedSeen) { if (!sharedSeen.Add(id)) return; }
+                    await core.CallDevToolsProtocolMethodAsync("Target.attachToTarget", "{\"targetId\":\"" + id + "\",\"flatten\":true}");
+                }
+                catch { }
+            };
+            await core.CallDevToolsProtocolMethodAsync("Target.setDiscoverTargets", "{\"discover\":true}");
+        }
+
+        static readonly HashSet<string> sharedSeen = new HashSet<string>();
+
+        static string workerScript;
+        static string WorkerScript()
+        {
+            if (workerScript != null) return workerScript.Length == 0 ? null : workerScript;
+            try
+            {
+                string dir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets");
+                workerScript = "(function(){" + System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "tzfix.js")) + "\n" +
+                               System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "tzworker.js")) + "\n})();";
+            }
+            catch { workerScript = ""; }
+            return workerScript.Length == 0 ? null : workerScript;
         }
 
         const string AutoAttach = "{\"autoAttach\":true,\"waitForDebuggerOnStart\":true,\"flatten\":true}";

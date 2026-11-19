@@ -176,6 +176,51 @@
     realmHooks.push(function (w) { try { frameHooks(w); } catch (e) {} });
   } catch (e) {}
 
+  // ---- time-zone names as IP-location services write them (assets/tzfix.js: "Asia/Kolkata", not ICU's old
+  // "Asia/Calcutta"; BrowserScan took 10 % off for the mismatch). Same zone and offset; every place a page reads the
+  // name: Intl, its list of zones, Temporal; in every frame realm (workers: UaOverride.cs) ----
+  /*TZFIX*/
+  function tzHooks(W) {
+    if (typeof TZ_NAMES === 'undefined') return;
+    var own = function (f) { if (W !== window) try { Object.setPrototypeOf(f, W.Function.prototype); } catch (e) {} return f; };
+    var fix = function (z) { return typeof z === 'string' && Object.prototype.hasOwnProperty.call(TZ_NAMES, z) ? TZ_NAMES[z] : z; };
+    var brk = function (s) { return typeof s === 'string' ? s.replace(/\[([A-Za-z_\/+-]+)\]/g, function (m, z) { return '[' + fix(z) + ']'; }) : s; };
+    function rv(o, n, mk) {
+      try {
+        var d = o && Object.getOwnPropertyDescriptor(o, n);
+        if (!d || typeof d.value !== 'function') return;
+        Object.defineProperty(o, n, {value: own(asNative(mk(d.value), d.value)), writable: d.writable, enumerable: d.enumerable, configurable: d.configurable});
+      } catch (e) {}
+    }
+    function rg(o, n, mk) {
+      try {
+        var d = o && Object.getOwnPropertyDescriptor(o, n);
+        if (!d || typeof d.get !== 'function') return;
+        Object.defineProperty(o, n, {get: own(asNative(mk(d.get), d.get)), set: d.set, enumerable: d.enumerable, configurable: d.configurable});
+      } catch (e) {}
+    }
+    var I = W.Intl;
+    rv(I && I.DateTimeFormat && I.DateTimeFormat.prototype, 'resolvedOptions', function (f) {
+      return {resolvedOptions() { var r = nat(f, this, arguments, 1); try { if (r && typeof r.timeZone === 'string') r.timeZone = fix(r.timeZone); } catch (e) {} return r; }}.resolvedOptions;
+    });
+    rv(I, 'supportedValuesOf', function (f) {
+      return {supportedValuesOf(k) {
+        var r = nat(f, this, arguments, 1);
+        try { if (k === 'timeZone') { for (var i = 0; i < r.length; i++) r[i] = fix(r[i]); r.sort(); } } catch (e) {}
+        return r;
+      }}.supportedValuesOf;
+    });
+    var T = W.Temporal;
+    if (T) {
+      rv(T.Now, 'timeZoneId', function (f) { return {timeZoneId() { return fix(nat(f, this, arguments, 1)); }}.timeZoneId; });
+      var ZP = T.ZonedDateTime && T.ZonedDateTime.prototype;
+      rg(ZP, 'timeZoneId', function (g) { return {get timeZoneId() { return fix(nat(g, this, [], 1)); }}.__lookupGetter__('timeZoneId'); });
+      rv(ZP, 'toString', function (f) { return {toString() { return brk(nat(f, this, arguments, 1)); }}.toString; });
+      rv(ZP, 'toJSON', function (f) { return {toJSON() { return brk(nat(f, this, arguments, 1)); }}.toJSON; });
+    }
+  }
+  if (DBG.indexOf('o') < 0) try { tzHooks(window); realmHooks.push(function (w) { try { tzHooks(w); } catch (e) {} }); } catch (e) {}
+
   // ---- privacy mode: hide who the user is (device, app, fingerprints) ----
   function getterOn(proto, name, value) {
     try {
