@@ -182,36 +182,92 @@
     row('Star', 'Bookmarks bar', null, sw('ShowBookmarksBar')),
     row('Home', 'Show home button', null, sw('ShowHomeButton'))));
 
-  // Ad blocking
+  // Ad blocking (Chrome-style: a short main page; the long lists and the rules editor are sub-pages)
   const ab = await gb.send('adblock.info').catch(() => null);
-  const abCard = el('div', { class: 'card' }, el('h2', { text: 'Ad blocking' }),
-    row('Shield', 'Ad blocking', ab ? (ab.total.toLocaleString() + ' blocked in total') : null, sw('AdblockEnabled')),
-    (() => { const b = el('button', { class: 'btn text', text: 'Reset count' }); b.addEventListener('click', async () => { await gb.send('stats.reset'); snack('Count reset'); }); return row('Speed', 'Statistics', ab ? ab.rules.toLocaleString() + ' rules from ' + ab.lists.length + ' lists' + (ab.lists.some(l => l.on === false) ? ' (' + ab.lists.filter(l => l.on !== false).length + ' on)' : '') : null, b); })(),
-    row('Block', 'Annoyances', 'Cookie notices, popups, app banners', sw('BlockAnnoyances')),
-    row('Cookie', 'Trackers', 'Also removes tracking codes from links', sw('BlockTrackers')),
-    row('Tune', 'Hide ad leftovers', null, sw('HideAdLeftovers')),
-    row('Verified', 'Stealth mode', 'Sites cannot see hidden ads are gone', sw('Stealth')),
-    row('Lock', 'Block pages of ad and tracker sites', null, sw('BlockAdSitePages')),
+  const abSecCards = [];
+  const abMain = row('Shield', 'Ad blocking', 'Ads, pop-ups and harmful sites, on every site', sw('AdblockEnabled'));
+  const resetBtn = el('button', { class: 'btn text', text: 'Reset' });
+  const countRow = ab ? row('Speed', ab.total.toLocaleString() + ' blocked', 'Ads, trackers and annoyances so far', resetBtn) : null;
+  resetBtn.addEventListener('click', async () => { await gb.send('stats.reset'); countRow.querySelector('.title').textContent = '0 blocked'; snack('Count reset'); });
+  // the Do Not Track row is moved to Privacy > Third-party cookies below
+  const abc = el('div', { class: 'card' }, el('h2', { text: 'Ad blocking' }), abMain, countRow,
     row('Person', 'Do Not Track', null, sw('DoNotTrack')));
-  main.append(abCard);
+  main.append(abc);
+  abSecCards.push(abc);
+  const blockCard = el('div', { class: 'card' }, el('h2', { text: 'Also block' }),
+    row('Block', 'Annoyances', 'Cookie notices, pop-ups, app banners', sw('BlockAnnoyances')),
+    row('Cookie', 'Trackers', 'Also removes tracking codes from links', sw('BlockTrackers')),
+    row('Lock', 'Ad and tracker sites', 'Pages of these sites do not open', sw('BlockAdSitePages')));
+  const hideCard = el('div', { class: 'card' }, el('h2', { text: 'Page cleanup' }),
+    row('Tune', 'Hide ad leftovers', 'Removes empty spaces where ads were', sw('HideAdLeftovers')),
+    row('Verified', 'Stealth mode', 'Sites cannot see that ads are hidden', sw('Stealth')));
+  main.append(blockCard, hideCard);
+  abSecCards.push(blockCard, hideCard);
+
+  // a row that opens a sub-page of its section (Chrome's arrow rows)
+  function subLink(iconName, title, sub, target) {
+    const r = row(iconName, title, sub, icon('ChevronRight'));
+    r.classList.add('link');
+    r.tabIndex = 0;
+    const go = () => { history.pushState({ sub: true }, '', '#' + target); show(target); };
+    r.addEventListener('click', go);
+    r.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    return r;
+  }
+  // a sub-page: back arrow + title, then its cards
+  function subPage(id, title, ...kids) {
+    const back = iconButton('Back', 'Back', () => { if (history.state && history.state.sub) history.back(); else { history.pushState(null, '', '#' + id.split('-')[0]); show(id.split('-')[0]); } });
+    return el('div', { class: 'subpage', id }, el('div', { class: 'subpage-head' }, back, el('h2', { class: 'section-title', text: title })), ...kids);
+  }
+
   if (ab) {
+    const listsOn = ab.lists.filter(l => l.on !== false).length;
+    const linkCard = el('div', { class: 'card' });
+    const ruleCountSub = n => n === 1 ? '1 rule' : n + ' rules';
+    const urLink = subLink('Edit', 'Your rules', 'Rules you write yourself', 'adblock-rules');
+    linkCard.append(
+      subLink('Shield', 'Filter lists', listsOn + ' of ' + ab.lists.length + ' lists on, ' + ab.rules.toLocaleString() + ' rules', 'adblock-lists'),
+      urLink);
+    main.append(linkCard);
+    abSecCards.push(linkCard);
+
+    // sites where blocking is off (added from the shield in the toolbar)
     const allowed = el('div', { class: 'card' }, el('h2', { text: 'Sites without blocking' }));
-    if (!ab.allowed.length) allowed.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: 'None' })));
-    for (const site of ab.allowed) {
-      const r = el('div', { class: 'row' }, letter('https://' + site), el('div', { class: 'text' }, el('div', { class: 'title', text: site })),
-        iconButton('Delete', 'Remove', async () => { await gb.send('allow.remove', { site }); r.remove(); }));
-      allowed.append(r);
-    }
+    const drawAllowed = () => {
+      [...allowed.querySelectorAll('.row')].forEach(r => r.remove());
+      if (!ab.allowed.length) allowed.append(el('div', { class: 'row' }, icon('Public'), el('div', { class: 'text' }, el('div', { class: 'sub', text: 'No sites added' }))));
+      for (const site of ab.allowed) {
+        const r = el('div', { class: 'row' }, letter('https://' + site), el('div', { class: 'text' }, el('div', { class: 'title', text: site })),
+          iconButton('Delete', 'Remove', async () => { await gb.send('allow.remove', { site }); ab.allowed = ab.allowed.filter(x => x !== site); drawAllowed(); }));
+        allowed.append(r);
+      }
+    };
+    drawAllowed();
     main.append(allowed);
-    const lists = el('div', { class: 'card' }, el('h2', { text: 'Filter lists' }),
-      row('Shield', ab.ready ? ab.rules.toLocaleString() + ' rules' : (ab.error || 'Loading'),
-        ab.ready ? 'Built ' + (/^\d{4}-\d{2}-\d{2}$/.test(ab.built || '') ? new Date(ab.built + 'T00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : fmtIsoDate(ab.built)) + ', loaded in ' + ab.loadMs + ' ms' : null, null));
-    // each list on / off (applies to pages loaded after the change); grouped like the switches above
-    const groupName = ['Ads', 'Annoyances', 'Trackers'];
-    for (const g of ['0', '1', '2']) {
+    abSecCards.push(allowed);
+
+    // ---- sub-page: Filter lists ----
+    const hs = await gb.send('hosts.state');
+    const upd = el('button', { class: 'btn tonal' }, icon('Refresh'), 'Update now');
+    const hsub = () => hs.state || (hs.updated ? 'Last update ' + fmtDT(new Date(hs.updated)) + (hs.hosts ? ', ' + hs.hosts.toLocaleString() + ' new hosts' : ', built-in lists are newer') : 'Not updated yet');
+    const lastRow = row('Restore', 'Host lists', hsub(), upd);
+    upd.addEventListener('click', async () => {
+      upd.disabled = true;
+      try { await gb.send('hosts.update'); Object.assign(hs, await gb.send('hosts.state')); lastRow.querySelector('.sub').textContent = hsub(); snack('Host lists updated'); }
+      catch (e) { snack(e.message); }
+      upd.disabled = false;
+    });
+    const builtDate = /^\d{4}-\d{2}-\d{2}$/.test(ab.built || '') ? new Date(ab.built + 'T00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : fmtIsoDate(ab.built);
+    const updCard = el('div', { class: 'card', id: 'filterlists' }, el('h2', { text: 'Updates' }),
+      row('Shield', ab.ready ? ab.rules.toLocaleString() + ' rules in use' : (ab.error || 'Loading'), ab.ready ? 'Built ' + builtDate + ', loaded in ' + ab.loadMs + ' ms' : null, null),
+      row('Download', 'Update host lists daily', null, sw('HostListUpdates')),
+      lastRow);
+    // the built-in lists, one card per group (the groups are the switches on the main page)
+    const groupCards = [];
+    [['0', 'Ads'], ['1', 'Annoyances'], ['2', 'Trackers']].forEach(([g, name]) => {
       const of = ab.lists.filter(l => (l.group || '0') === g);
-      if (!of.length) continue;
-      lists.append(el('div', { class: 'group indent', text: groupName[+g] }));
+      if (!of.length) return;
+      const c = el('div', { class: 'card' }, el('h2', { text: name }));
       for (const l of of) {
         const b = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(l.on !== false), 'aria-label': l.name });
         b.addEventListener('click', async () => {
@@ -221,65 +277,29 @@
           catch (e) { snack(e.message); }
         });
         if (!l.file) b.disabled = true;
-        lists.append(el('div', { class: 'row indent' }, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }),
-          el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (fmtVersion(l.version) ? ', ' + fmtVersion(l.version) : '') })), b));
+        const v = fmtVersion(l.version);
+        c.append(row('Shield', l.name, (+l.rules).toLocaleString() + ' rules' + (v ? ', ' + v : ''), b));
       }
-    }
-    // daily host-list update
-    const hs = await gb.send('hosts.state');
-    const upd = el('button', { class: 'btn text', text: 'Update now' });
-    const hsub = () => hs.state || (hs.updated ? 'Updated ' + fmtDT(new Date(hs.updated)) + (hs.hosts ? ', ' + hs.hosts.toLocaleString() + ' new hosts' : ', built-in lists are newer') : 'Not updated yet');
-    const hrow = row('Download', 'Update host lists daily', hsub(), el('div', { class: 'actions' }, upd, sw('HostListUpdates')));
-    upd.addEventListener('click', async () => {
-      upd.disabled = true; upd.textContent = 'Updating...';
-      try { await gb.send('hosts.update'); Object.assign(hs, await gb.send('hosts.state')); hrow.querySelector('.sub').textContent = hsub(); snack('Host lists updated'); }
-      catch (e) { snack(e.message); }
-      upd.disabled = false; upd.textContent = 'Update now';
+      groupCards.push(c);
     });
-    lists.insertBefore(hrow, lists.children[2] || null);
-    main.append(lists);
-  }
 
-  // Your rules (trusted) and custom filter lists (trust check like AdGuard: unknown sources cannot use trusted-*
-  // scriptlets or CSS rules unless you trust them)
-  if (ab) {
-    const ur = await gb.send('userrules.get');
-    const ta = el('textarea', { class: 'field', spellcheck: 'false', 'aria-label': 'Your rules', placeholder: '||ads.example.com^\nexample.com##.banner\n@@||example.org^' });
-    ta.value = ur.text;
-    const probs = el('div', { class: 'rows' });
-    const count = el('div', { class: 'sub' });
-    const showProblems = (list, n) => {
-      probs.textContent = '';
-      count.textContent = n + (n === 1 ? ' rule in use' : ' rules in use') + (list.length ? ', ' + list.length + ' not used' : '');
-      for (const p of list.slice(0, 50))
-        probs.append(el('div', { class: 'row' }, icon('Warning'), el('div', { class: 'text' },
-          el('div', { class: 'title', text: 'Line ' + p.line + ': ' + p.text }), el('div', { class: 'sub', text: p.reason }))));
-    };
-    showProblems(ur.problems, ur.rules);
-    const save = el('button', { class: 'btn tonal', text: 'Save' });
-    save.addEventListener('click', async () => {
-      try { const r = await gb.send('userrules.set', { text: ta.value }); showProblems(r.problems, r.rules); snack('Saved: applies to pages you open now'); }
-      catch (e) { snack(e.message); }
-    });
-    const help = el('div', { class: 'sub', text: 'Block: ||host^  or an address pattern.  Allow: @@||host^.  Hide: site.com##selector (or ##selector everywhere).  Scriptlets: site.com#%#//scriptlet(\'name\', \'arg\').' });
-    const pad = el('div', { class: 'row' }, el('div', { class: 'text' }, ta, help));
-    pad.style.display = 'block';
-    main.append(el('div', { class: 'card', id: 'userrules' }, el('h2', { text: 'Your rules' }), pad, el('div', { class: 'row' }, el('div', { class: 'text' }, count), save), probs));
-
-    const cl = el('div', { class: 'card', id: 'customlists' }, el('h2', { text: 'Custom filter lists' }));
-    const listRows = el('div');
-    const url = el('input', { class: 'field', placeholder: 'https://... list address', 'aria-label': 'List address' });
+    // your own lists by address (trust check like AdGuard: unknown sources cannot use trusted-* scriptlets or
+    // CSS rules unless you trust them); the address box at the top (the list can be long)
+    const cl = el('div', { class: 'card', id: 'customlists' });
+    const listRows = el('div', { class: 'rows' });
+    const url = el('input', { class: 'field', placeholder: 'List address, e.g. https://example.com/list.txt', 'aria-label': 'List address' });
     url.style.flex = '1';
-    const addBtn = el('button', { class: 'btn tonal', text: 'Add' });
-    const upd = el('button', { class: 'btn text', text: 'Update all' });
+    const addBtn = el('button', { class: 'btn tonal' }, icon('Add'), 'Add');
+    const updAll = el('button', { class: 'btn text', text: 'Update all' });
     async function drawLists() {
       const ls = await gb.send('lists.custom');
       listRows.textContent = '';
-      if (!ls.length) listRows.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: 'None. Add a list by its address.' })));
+      updAll.hidden = !ls.length;
+      if (!ls.length) listRows.append(el('div', { class: 'row' }, icon('Shield'), el('div', { class: 'text' }, el('div', { class: 'sub', text: 'No lists added' }))));
       for (const l of ls) {
         const on = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(l.on), 'aria-label': 'Use ' + l.title });
         on.addEventListener('click', async () => { l.on = !l.on; on.setAttribute('aria-checked', String(l.on)); await gb.send('lists.toggle', { url: l.url, on: l.on }); });
-        const trust = el('span', { class: 'chip' + (l.trusted ? '' : ' warn'), text: l.known ? 'Known source' : l.trusted ? 'Trusted by you' : 'Not trusted' });
+        const trust = el('span', { class: 'chip' + (l.trusted ? '' : ' warn'), text: l.known ? 'Known source' : l.trusted ? 'Trusted' : 'Not trusted' });
         const acts = el('div', { class: 'actions' });
         if (!l.known) acts.append(iconButton(l.trusted ? 'ShieldLock' : 'Shield', l.trusted ? 'Stop trusting' : 'Trust this list (allows trusted scriptlets and CSS rules)', async () => {
           if (!l.trusted && !confirm('Trust "' + l.title + '"? A trusted list may run trusted scriptlets and change page styles. Only trust lists from makers you know.')) return;
@@ -289,20 +309,57 @@
         const when = l.updated ? fmtDT(new Date(l.updated)) : 'never';
         listRows.append(el('div', { class: 'row' }, icon('Shield'), el('div', { class: 'text' },
           el('div', { class: 'title', text: l.title }),
-          el('div', { class: 'sub', text: l.rules.toLocaleString() + ' rules - updated ' + when + (l.error ? ' - ' + l.error : '') + ' - ' + l.url })), trust, acts, on));
+          el('div', { class: 'sub', text: l.rules.toLocaleString() + ' rules, updated ' + when + (l.error ? ', ' + l.error : '') }),
+          el('div', { class: 'sub', text: l.url })), trust, acts, on));
       }
     }
     addBtn.addEventListener('click', async () => {
-      const u = url.value.trim(); if (!u) return;
-      addBtn.disabled = true; addBtn.textContent = 'Adding...';
+      const u = url.value.trim(); if (!u) { url.focus(); return; }
+      addBtn.disabled = true;
       try { await gb.send('lists.add', { url: u }); url.value = ''; snack('Added'); } catch (e) { snack(e.message); }
-      addBtn.disabled = false; addBtn.textContent = 'Add';
+      addBtn.disabled = false;
       setTimeout(drawLists, 300);
     });
-    upd.addEventListener('click', async () => { upd.disabled = true; try { await gb.send('lists.update'); snack('Updated'); } catch (e) { snack(e.message); } upd.disabled = false; drawLists(); });
-    cl.append(el('div', { class: 'row' }, url, addBtn, upd), listRows);
-    main.append(cl);
+    url.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn.click(); });
+    updAll.addEventListener('click', async () => { updAll.disabled = true; try { await gb.send('lists.update'); snack('Updated'); } catch (e) { snack(e.message); } updAll.disabled = false; drawLists(); });
+    cl.append(el('div', { class: 'card-head' }, el('h2', { text: 'Your lists' }), updAll), el('div', { class: 'row' }, url, addBtn), listRows);
     drawLists();
+    const listsPage = subPage('adblock-lists', 'Filter lists', updCard, ...groupCards, cl);
+
+    // ---- sub-page: Your rules ----
+    const ur = await gb.send('userrules.get');
+    const ta = el('textarea', { class: 'field', spellcheck: 'false', 'aria-label': 'Your rules', placeholder: '||ads.example.com^\nexample.com##.banner\n@@||example.org^' });
+    ta.value = ur.text;
+    const probs = el('div', { class: 'rows' });
+    const count = el('div', { class: 'sub' });
+    const showProblems = (list, n) => {
+      probs.textContent = '';
+      count.textContent = n + (n === 1 ? ' rule in use' : ' rules in use') + (list.length ? ', ' + list.length + ' not used' : '');
+      urLink.querySelector('.sub').textContent = ruleCountSub(n);
+      for (const p of list.slice(0, 50))
+        probs.append(el('div', { class: 'row' }, icon('Warning'), el('div', { class: 'text' },
+          el('div', { class: 'title', text: 'Line ' + p.line + ': ' + p.text }), el('div', { class: 'sub', text: p.reason }))));
+    };
+    showProblems(ur.problems, ur.rules);
+    const save = el('button', { class: 'btn' }, icon('Check'), 'Save');
+    save.addEventListener('click', async () => {
+      try { const r = await gb.send('userrules.set', { text: ta.value }); showProblems(r.problems, r.rules); snack('Saved: applies to pages you open now'); }
+      catch (e) { snack(e.message); }
+    });
+    // the rule kinds as a small table: what it does, how it is written
+    const syntax = el('div', { class: 'syntax' }, ...[
+      ['Block a site', '||ads.example.com^'],
+      ['Allow a site', '@@||example.org^'],
+      ['Hide on a site', 'example.com##.banner'],
+      ['Hide everywhere', '##.banner'],
+      ['Scriptlet', "example.com#%#//scriptlet('name', 'arg')"],
+    ].map(([what, how]) => el('div', { class: 'syntax-row' }, el('span', { class: 'sub', text: what }), el('code', { text: how }))));
+    const edit = el('div', { class: 'row editor' }, ta);
+    const rulesCard = el('div', { class: 'card', id: 'userrules' }, el('h2', { text: 'Rules' }), edit,
+      el('div', { class: 'row' }, el('div', { class: 'text' }, count), save), probs);
+    const helpCard = el('div', { class: 'card' }, el('h2', { text: 'How to write rules' }), syntax);
+    const rulesPage = subPage('adblock-rules', 'Your rules', rulesCard, helpCard);
+    abSecCards.push(listsPage, rulesPage);
   }
 
   // Memory
@@ -475,7 +532,7 @@
   const cardOf = t => cards.find(c => c.classList.contains('card') && c.querySelector(':scope > h2')?.textContent === t);
   const rowOf = (card, t) => card && [...card.children].find(r => r.querySelector('.title')?.textContent === t);
   const card = (title, id, ...kids) => el('div', { class: 'card', id: id || null }, el('h2', { text: title }), ...kids.filter(Boolean));
-  const start = cardOf('Start and search'), priv = cardOf('Privacy and security'), abc = cardOf('Ad blocking');
+  const start = cardOf('Start and search'), priv = cardOf('Privacy and security');
   // Appearance: home button with its page and the bookmarks bar, before the font settings (Chrome's order)
   const appear = cardOf('Appearance');
   const fontAnchor = appear && [...appear.children].find(r => r.querySelector('.title')?.textContent === 'Font size');
@@ -493,7 +550,7 @@
     rowOf(priv, 'Tracking prevention'), dnsBox, rowOf(priv, 'Your data is encrypted'));
   const SECTIONS = [
     ['privacy', 'Privacy and security', 'Lock', [delCard, cookieCard, secCard, cardOf('Site settings'), cardOf('Hide my identity')]],
-    ['adblock', 'Ad blocking', 'Shield', [abc, cardOf('Sites without blocking'), cardOf('Filter lists'), cardOf('Your rules'), cardOf('Custom filter lists')]],
+    ['adblock', 'Ad blocking', 'Shield', abSecCards],
     ['performance', 'Performance', 'Speed', [cardOf('Memory'), cardOf('Always keep these sites active')]],
     ['appearance-sec', 'Appearance', 'Palette', [appear]],
     ['search-sec', 'Search engine', 'Search', [searchCard]],
@@ -525,13 +582,18 @@
   page.append(nav, content);
   // one section at a time: the one chosen in the sidebar (the address keeps it, so Back / Forward and links work)
   function show(target) {
-    let secId = SECTIONS[0][0], card = null;
+    let secId = SECTIONS[0][0], card = null, sub = null;
     const t = target && document.getElementById(target);
     if (t) {
       const sec = t.closest('.settings-section');
-      if (sec) { secId = sec.id; if (t !== sec) card = t; }
+      if (sec) { secId = sec.id; sub = t.closest('.subpage'); if (t !== sec && t !== sub) card = t; }
     }
-    for (const sec of content.children) sec.hidden = sec.id !== secId;
+    for (const sec of content.children) {
+      sec.hidden = sec.id !== secId;
+      // a sub-page (e.g. Ad blocking > Filter lists) replaces its section's main page
+      sec.classList.toggle('in-sub', !!sub && sec.id === secId);
+      for (const p of sec.querySelectorAll(':scope > .subpage')) p.classList.toggle('on', p === sub);
+    }
     loadEmbed(document.getElementById(secId));
     for (const k in links) links[k].classList.toggle('on', k === secId);
     if (card) setTimeout(() => card.scrollIntoView({ block: 'start' }), 30);

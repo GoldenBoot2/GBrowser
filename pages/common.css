@@ -134,3 +134,7 @@ details.fonts .sub-rows select { max-width: 260px; }
 html { scrollbar-gutter: stable; }
 /* rows without an icon that belong under an icon row: text lined up with the text above */
 .card .row.indent, .card .group.indent { padding-left: 60px; }
+/* hints inside empty boxes are easy to read (the engine's default is a faint grey) */
+input::placeholder, textarea::placeholder { color: var(--on-surface-variant); opacity: 1; }
+/* a text button at the end of a row lines its text up with the switches and icons above it */
+.row > .btn.text:last-child { margin-right: -12px; }

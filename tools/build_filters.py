@@ -133,6 +133,8 @@ BAD_TOKENS = {'http', 'https', 'www', 'com', 'net', 'org', 'js', 'html', 'php', 
               'api', 'img', 'images', 'assets', 'css', 'json', 'png', 'jpg', 'gif'}
 
 stats = defaultdict(int)
+USED_KINDS = ('scriptlet rules', 'js rules', 'extended css rules', 'css injection', 'cosmetic exception',
+              'cosmetic specific', 'cosmetic generic', 'removeparam rules', 'response rules')
 
 
 def fnv64(s):
@@ -691,6 +693,9 @@ def main():
             text = fetch(name, url)
         n0 = len(nets)
         own_hosts = 0   # host rules of this list (also those another list has too)
+        # every rule kind the list contributes counts in Settings (blocking rules alone left link-cleaning lists
+        # such as AdGuard URL Tracking at "0 rules")
+        used0 = sum(stats[k] for k in USED_KINDS)
         version = ''
         m = re.search(r'^! (?:Version|Last modified|TimeUpdated):\s*(.+)$', text, re.M)
         if m:
@@ -861,7 +866,8 @@ def main():
                 continue
             r.raw = line
             nets.append(r)
-        info.append('%s\t%s\t%d\t%d\t%s' % (title, version, len(nets) - n0 + own_hosts, group, name))
+        used = sum(stats[k] for k in USED_KINDS) - used0
+        info.append('%s\t%s\t%d\t%d\t%s' % (title, version, len(nets) - n0 + own_hosts + used, group, name))
         print('%-28s group %d  %s' % (title, group, version))
 
     # badfilter

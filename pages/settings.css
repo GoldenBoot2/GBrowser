@@ -26,3 +26,18 @@ main.settings-layout { max-width: 1240px; display: grid; grid-template-columns: 
 .dialog .pick-list label.row { cursor: pointer; min-height: 48px; padding: 6px 24px; }
 .dialog .pick-list label.row:hover { background: var(--hover); }
 .dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 24px; }
+/* sub-pages of a section (Ad blocking > Filter lists, Your rules): shown instead of the section's main page */
+.settings-section .subpage { display: none; }
+.settings-section .subpage.on { display: block; }
+.settings-section.in-sub > :not(.subpage) { display: none; }
+.subpage-head { display: flex; align-items: center; gap: 4px; margin: 0 0 14px -4px; }
+.subpage-head .section-title { margin: 0; }
+.settings-section .row.link .icon:last-child { color: var(--on-surface-variant); }
+/* a card heading with a button on its right (e.g. Your lists + Update all) */
+.card-head { display: flex; align-items: center; padding-right: 12px; }
+.card-head h2 { flex: 1; }
+/* the rules editor fills its card */
+.row.editor { display: block; }
+.syntax { display: grid; gap: 10px; padding: 8px 20px 18px; }
+.syntax-row { display: grid; grid-template-columns: 150px 1fr; align-items: baseline; gap: 16px; }
+.syntax code { font: 13px/1.4 Consolas, 'Cascadia Mono', monospace; color: var(--on-surface); }
