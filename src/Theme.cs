@@ -30,6 +30,12 @@ namespace GBrowser
         public static Color Frame => R("frame");
         public static Color ToolbarBack => R("toolbar");
         public static Color Omnibox => R("omnibox");
+        // selected text: in text boxes (Chrome's textfield-selection) and in the address bar, which Chrome highlights
+        // with the accent itself (omnibox-selection, measured on Chrome 158: #A8C7FA + black text dark, #0B57D0 + white light)
+        public static Color TextSelection => R("selection");
+        public static Color OnTextSelection => R("on-selection");
+        public static Color AddressSelection => Primary;
+        public static Color OnAddressSelection => Dark ? Color.Black : Color.White;
         /// <summary>Focused address box (white in light mode).</summary>
         public static Color Field => R("field");
         public static Color OnSurface => R("on-surface");

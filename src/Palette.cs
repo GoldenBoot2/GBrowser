@@ -35,7 +35,9 @@ namespace GBrowser
             // window: tab strip (header), toolbar / active tab / new tab page (base), address box (omnibox-container)
             s["frame"] = Color.FromArgb(dark ? 0x1F2020 : 0xD3E3FD); s["toolbar"] = Color.FromArgb(dark ? 0x3C3C3C : 0xFFFFFF);
             s["omnibox"] = Color.FromArgb(dark ? 0x282828 : 0xEDF2FA);
-            foreach (var k in new[] { "frame", "toolbar", "omnibox" }) s[k] = Color.FromArgb(255, s[k]);
+            // selected text in text boxes (Chrome's textfield-selection colours)
+            s["selection"] = Color.FromArgb(dark ? 0x004A77 : 0xD3E3FD); s["on-selection"] = Color.FromArgb(dark ? 0xFFFFFF : 0x202124);
+            foreach (var k in new[] { "frame", "toolbar", "omnibox", "selection", "on-selection" }) s[k] = Color.FromArgb(255, s[k]);
             return s;
         }
 
@@ -68,6 +70,12 @@ namespace GBrowser
         {
             var seed = SeedOf(setting);
             var s = seed != null ? FromSeed(seed.Value, dark) : Chrome(dark);
+            if (!s.ContainsKey("selection"))
+            {
+                // other colours: a soft container behind selected text, like Chrome's textfield selection
+                s["selection"] = s["primary-container"];
+                s["on-selection"] = s["on-primary-container"];
+            }
             if (s.ContainsKey("frame")) return s;
             // the window parts, like Chrome: light = darker tab strip, toolbar in the page colour; dark (measured on
             // Chrome 158, 19-11-2026): tab strip L* 12, toolbar / active tab / new tab page L* 25, address box L* 16

@@ -62,6 +62,7 @@ namespace GBrowser
             Address.BackColor = Theme.Omnibox;
             Address.ForeColor = Theme.OnSurface;
             Address.KeyDown += Address_KeyDown;
+            Address.AddressStyle = true;
             Address.GotFocus += (s, e) =>
             {
                 Address.BackColor = Theme.Field;

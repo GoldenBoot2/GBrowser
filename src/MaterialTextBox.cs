@@ -115,13 +115,13 @@ namespace GBrowser
                 {
                     int x1 = pos[SelectionStart] - scroll, x2 = pos[SelectionStart + SelectionLength] - scroll;
                     var r = new Rectangle(x1, y - 1, Math.Max(1, x2 - x1), Font.Height + 2);
-                    using (var b = new SolidBrush(Theme.PrimaryContainer)) g.FillRectangle(b, r);
+                    Color sbg = AddressStyle ? Theme.AddressSelection : Theme.TextSelection, sfg = AddressStyle ? Theme.OnAddressSelection : Theme.OnTextSelection;
+                    using (var b = new SolidBrush(sbg)) g.FillRectangle(b, r);
                     var st = g.Save();
                     g.SetClip(r);
                     // TextRenderer (GDI) ignores the Graphics clip unless told to keep it: without the flag every partial
                     // selection (a double-clicked word, a dragged range) was drawn as if all the text were selected
-                    TextRenderer.DrawText(g, Shown, Font, new Point(-scroll, y), Theme.OnPrimaryContainer, Theme.PrimaryContainer,
-                        f | TextFormatFlags.PreserveGraphicsClipping);
+                    TextRenderer.DrawText(g, Shown, Font, new Point(-scroll, y), sfg, sbg, f | TextFormatFlags.PreserveGraphicsClipping);
                     g.Restore(st);
                 }
             }
@@ -369,6 +369,8 @@ namespace GBrowser
         /// <summary>Set by the owner (the address bar): text dragged out of the box (the whole text when the box was not
         /// being edited, else the selection); the owner starts the drag. Null = no dragging out.</summary>
         public Action<string, bool> DragOut;   // text, whole (not focused)
+        /// <summary>The address bar's selection colours (Chrome highlights it with the accent), else a text box's.</summary>
+        public bool AddressStyle;
         Point? dragFrom; bool dragWhole;
         int pendingHit = -1;
 
