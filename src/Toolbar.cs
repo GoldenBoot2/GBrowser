@@ -65,7 +65,12 @@ namespace GBrowser
             Address.GotFocus += (s, e) =>
             {
                 Address.BackColor = Theme.Field;
-                if (Address.Text == ShownUrl && FullUrl.Length > 0) Address.Text = FullUrl;   // edit the full address
+                // edit the full address; the part that was shown stays in place (a double-click selects the word under it)
+                if (Address.Text == ShownUrl && FullUrl.Length > 0)
+                {
+                    int at = ShownUrl.Length > 0 ? FullUrl.IndexOf(ShownUrl.TrimEnd('/'), StringComparison.Ordinal) : -1;
+                    if (at > 0) Address.ReplaceKeepingPlace(FullUrl, at); else Address.Text = FullUrl;
+                }
                 LayoutNow();
                 // keyboard focus (Ctrl+L, F6, new tab) selects the address; a click is handled by the field itself
                 if (MouseButtons == MouseButtons.None) BeginInvoke((Action)(() => Address.SelectAll()));

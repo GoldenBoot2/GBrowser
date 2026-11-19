@@ -3501,6 +3501,24 @@ namespace GBrowser
                     await Task.Delay(50);
                     return toolbar.Address.Text + " | sel " + toolbar.Address.SelectionStart + "+" + toolbar.Address.SelectionLength;
                 }
+                case "addrxof": return toolbar.Address.TestXOf(arg).ToString();
+                case "addrclick":
+                {
+                    // test: n real left clicks (WM_LBUTTONDOWN / UP) at client x of the address box, quick like a double-click
+                    var a2 = arg.Split(' ');
+                    int x = int.Parse(a2[0]), n = a2.Length > 1 ? int.Parse(a2[1]) : 1, y = toolbar.Address.Height / 2;
+                    IntPtr lp = (IntPtr)((y << 16) | (x & 0xFFFF));
+                    for (int k = 0; k < n; k++)
+                    {
+                        SendMessage(toolbar.Address.Handle, 0x0201, (IntPtr)1, lp);
+                        Application.DoEvents();
+                        SendMessage(toolbar.Address.Handle, 0x0202, IntPtr.Zero, lp);
+                        Application.DoEvents();
+                        await Task.Delay(60);
+                    }
+                    await Task.Delay(150);
+                    return "sel='" + toolbar.Address.SelectedText + "' text='" + toolbar.Address.Text + "' x now=" + toolbar.Address.TestXOf(toolbar.Address.SelectedText.Length > 0 ? toolbar.Address.SelectedText : "test");
+                }
                 case "addrmenu": toolbar.Address.ShowMenu(new Point(40, toolbar.Address.Height)); await Task.Delay(300); return MaterialMenu.Current?.Handle.ToString() ?? "none";
                 case "addrselect": { var p = arg.Split(' '); toolbar.Address.Focus(); toolbar.Address.Select(int.Parse(p[0]), int.Parse(p[1])); return "ok"; }
                 case "newprivate": NewPrivateTab(arg.Length == 0 ? null : Search.ToUrl(arg)); return "ok";

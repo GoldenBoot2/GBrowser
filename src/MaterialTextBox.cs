@@ -64,6 +64,8 @@ namespace GBrowser
         /// <summary>Test builds: types like the keyboard (one character at a time, same code path).</summary>
         public void TypeForTest(string s) { foreach (char c in s) Insert(c.ToString()); }
         public void KeyForTest(Keys k) => OnKeyDown(new KeyEventArgs(k));
+        /// <summary>Test builds: client x of the middle of the first <paramref name="sub"/> as shown now (-1 if absent).</summary>
+        public int TestXOf(string sub) { int i = text.IndexOf(sub, StringComparison.Ordinal); return i < 0 ? -1 : (pos[i] + pos[i + sub.Length]) / 2 - scroll; }
 #endif
         public int SelectionStart => Math.Min(caret, anchor);
         public int SelectionLength => Math.Abs(caret - anchor);
@@ -126,9 +128,33 @@ namespace GBrowser
 
         void InvalidateCaret() => Invalidate(new Rectangle(pos[Clamp(caret)] - scroll - 2, 0, 6, Height));
 
+        bool pinScroll;   // ReplaceKeepingPlace: keep the old text where it was while the caret stays in view
+
+        /// <summary>Replaces the text with a longer one that contains the old text at <paramref name="at"/> (e.g. the
+        /// address bar showing the full address on focus) without moving the old text on screen: the new part goes
+        /// off to the left, so a double-click still lands on the word that was under the pointer.</summary>
+        public void ReplaceKeepingPlace(string full, int at)
+        {
+            Text = full;
+            scroll = pos[Math.Max(0, Math.Min(at, text.Length))];
+            pinScroll = true;
+            Invalidate();
+            // only for a double-click's time: a single click (everything selected) then shows the whole address
+            var tm = new Timer { Interval = SystemInformation.DoubleClickTime + 50 };
+            tm.Tick += (s, e) =>
+            {
+                tm.Stop(); tm.Dispose();
+                if (!pinScroll || IsDisposed || SelectionLength != text.Length) return;
+                pinScroll = false; scroll = 0; ScrollToCaret(); Invalidate();
+            };
+            tm.Start();
+        }
+
         void ScrollToCaret()
         {
             int x = pos[caret], w = Math.Max(10, Width - 4);
+            if (pinScroll && x - scroll >= 0 && x - scroll <= w) { ImePosition(); return; }
+            pinScroll = false;
             if (x - scroll > w) scroll = x - w;
             if (x - scroll < 0) scroll = Math.Max(0, x - w / 3);
             int max = Math.Max(0, pos[text.Length] - w);
@@ -138,6 +164,7 @@ namespace GBrowser
 
         void Changed(bool fromUser)
         {
+            if (fromUser) pinScroll = false;
             Measure();
             ScrollToCaret();
             RestartBlink();
@@ -312,7 +339,15 @@ namespace GBrowser
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left && DragOut != null && text.Length > 0)
+            if (e.Button == MouseButtons.Left)
+            {
+                var now = DateTime.UtcNow;
+                clicks = (now - lastClick).TotalMilliseconds < SystemInformation.DoubleClickTime &&
+                         Math.Abs(e.X - lastClickPt.X) < 4 && Math.Abs(e.Y - lastClickPt.Y) < 4 ? clicks + 1 : 1;
+                lastClick = now; lastClickPt = e.Location;
+            }
+            // a single press may start dragging the address out; a double / triple click selects a word / everything
+            if (e.Button == MouseButtons.Left && clicks == 1 && DragOut != null && text.Length > 0)
             {
                 // not being edited: a press may start a drag of the whole address; a click focuses on release
                 if (!Focused) { dragFrom = e.Location; dragWhole = true; Capture = true; return; }
@@ -325,10 +360,6 @@ namespace GBrowser
             if (!wasFocused) { selectAllOnClick = true; Focus(); }
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
-            var now = DateTime.UtcNow;
-            clicks = (now - lastClick).TotalMilliseconds < SystemInformation.DoubleClickTime &&
-                     Math.Abs(e.X - lastClickPt.X) < 4 && Math.Abs(e.Y - lastClickPt.Y) < 4 ? clicks + 1 : 1;
-            lastClick = now; lastClickPt = e.Location;
             int i = Hit(e.X);
             if (clicks == 2)
             {
