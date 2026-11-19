@@ -13,7 +13,7 @@ namespace GBrowser
     internal sealed class BrowserTab
     {
         public WebView2 View;
-        public string Url;            // real URL (internal pages: https://gbrowser.local/...)
+        public string Url;            // real URL (internal pages: https://gbrowser.invalid/...)
         public string Title = "New tab";
         public Image Favicon;
         public bool ApplyingZoom;   // GBrowser is setting the site's saved zoom (not the user zooming)
@@ -37,7 +37,7 @@ namespace GBrowser
 
         public BrowserTab(string url, string title = null)
         {
-            Url = url;
+            Url = url = Pages.Upgrade(url);
             if (!string.IsNullOrEmpty(title)) Title = title;
             else if (Pages.IsInternal(url)) Title = PageTitle(url);
             else if (!string.IsNullOrEmpty(url)) Title = url;

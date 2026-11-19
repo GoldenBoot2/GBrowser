@@ -29,7 +29,7 @@
     main.append(el('div', { class: 'card' }, el('div', { class: 'row' }, el('div', { class: 'text' },
       el('div', { class: 'title', text: r.title || r.site }),
       el('div', { class: 'sub', text: r.on ? 'Hide my identity on, identity ' + r.id + (r.noise ? ', fingerprint noise on' : '') : 'Hide my identity off: the site sees your real values' })),
-      again, r.on ? newId : el('button', { class: 'btn tonal', text: 'Settings', onclick: () => openUrl('https://gbrowser.local/settings.html#identity') }))));
+      again, r.on ? newId : el('button', { class: 'btn tonal', text: 'Settings', onclick: () => openUrl(location.origin + '/settings.html#identity') }))));
     const card = el('div', { class: 'card' }, el('h2', { text: 'What ' + r.site + ' can read' }));
     for (const [k, label, kind] of SIGNALS) {
       const v = r.values[k];

@@ -27,7 +27,7 @@
     const head = el('div', { class: 'card' }, el('div', { class: 'row' }, el('div', { class: 'text' },
       el('div', { class: 'title', text: data.title || data.page }),
       el('div', { class: 'sub', text: data.entries.length + ' requests, ' + blocked.length + ' blocked or replaced' })), sel, pause,
-      site ? el('button', { class: 'btn tonal', text: 'Cookies', onclick: () => openUrl('https://gbrowser.local/cookies.html?site=' + encodeURIComponent(site), { ctrlKey: true }) }) : null));
+      site ? el('button', { class: 'btn tonal', text: 'Cookies', onclick: () => openUrl(location.origin + '/cookies.html?site=' + encodeURIComponent(site), { ctrlKey: true }) }) : null));
     main.append(head);
     const list = el('div', { class: 'card' });
     const rows = data.entries.slice().reverse().filter(x => (show === 'all' || (show === 'allowed' ? x.r === 'allowed' : x.r !== 'allowed')) && (!q || x.u.toLowerCase().includes(q)));

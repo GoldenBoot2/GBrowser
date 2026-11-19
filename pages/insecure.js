@@ -10,7 +10,7 @@
     el('p', {}, el('span', { class: 'host', text: host }), ' has no secure (HTTPS) version.'),
     el('p', { text: 'Others on your network can see or change what you send and receive there.' }),
     el('div', { class: 'actions' },
-      el('button', { class: 'btn', onclick: () => history.length > 1 ? history.back() : gb.send('open', { url: 'https://gbrowser.local/newtab.html' }) },
+      el('button', { class: 'btn', onclick: () => history.length > 1 ? history.back() : gb.send('open', { url: location.origin + '/newtab.html' }) },
         icon('Back'), 'Go back'),
       el('button', { class: 'btn text', onclick: () => gb.send('insecure.allow', { url }) }, 'Continue to site')));
 })();

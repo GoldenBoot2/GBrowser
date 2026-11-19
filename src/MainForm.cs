@@ -1176,6 +1176,14 @@ namespace GBrowser
                     if (e.IsUserInitiated && errorShown) BeginInvoke((Action)(() => F().ErrorAction(act)));
                     return;
                 }
+                // GBrowser's pages under their old name (bookmarks, history, links from before 0.1.7): the new address
+                if (Pages.IsOld(e.Uri))
+                {
+                    e.Cancel = true;
+                    string to = Pages.Upgrade(e.Uri);
+                    BeginInvoke((Action)(() => core.Navigate(to)));
+                    return;
+                }
                 navTarget = e.Uri; errorShown = false;
             };
             // certificate problems: never proceed; cancel so the load fails like any other and GBrowser's page shows

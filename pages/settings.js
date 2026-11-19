@@ -1,6 +1,8 @@
 'use strict';
 (async () => {
-  const main = document.getElementById('main');
+  // The cards are built off-screen and shown only once they are sorted into sections: built in place, the first
+  // cards (Appearance) were shown while the rest loaded, then the page jumped to the chosen section.
+  const main = document.createElement('div');
   header('Settings', 'Settings');
   const { settings: s, engines } = await gb.send('settings.get');
   const set = (key, value) => gb.send('settings.set', { key, value }).catch(e => snack(e.message));
@@ -453,7 +455,7 @@
     row('Policy', 'Tracking prevention', 'Microsoft Edge tracking prevention, on top of ad blocking', tp),
     dnsRow,
     row('Delete', 'Clear data when GBrowser closes', 'Cookies, site data, cache and history (passwords kept)', sw('ClearOnExit')),
-    (() => { const r = row('Cookie', 'Cookies and site data', 'See, edit, block and export cookies; third-party cookies; auto-delete', icon('OpenNew')); r.classList.add('link'); r.addEventListener('click', () => openUrl('https://gbrowser.local/cookies.html')); return r; })(),
+    (() => { const r = row('Cookie', 'Cookies and site data', 'See, edit, block and export cookies; third-party cookies; auto-delete', icon('OpenNew')); r.classList.add('link'); r.addEventListener('click', () => openUrl(location.origin + '/cookies.html')); return r; })(),
     row('Verified', 'Your data is encrypted', 'History, bookmarks, tabs and settings: only your Windows account can read them', null)));
 
   // Clear browsing data
@@ -497,7 +499,7 @@
     ['search-sec', 'Search engine', 'Search', [searchCard]],
     ['default-sec', 'Default browser', 'Public', [cardOf('Default browser')]],
     ['startup-sec', 'On startup', 'Restore', [startupCard]],
-    ['languages-sec', 'Languages', 'Language', [document.getElementById('languages')]],
+    ['languages-sec', 'Languages', 'Language', [main.querySelector('#languages')]],
     ['downloads-sec', 'Downloads', 'Download', [cardOf('Downloads')]],
     // shown here, not in a new tab: their pages' scripts draw into these boxes (loaded when the section is first opened)
     ['extensions-sec', 'Extensions', 'Extension', [el('div', { class: 'embed', 'data-script': 'extensions.js' })]],
@@ -518,9 +520,9 @@
     links[id] = a;
     nav.append(a);
   }
-  main.textContent = '';
-  main.classList.add('settings-layout');
-  main.append(nav, content);
+  const page = document.getElementById('main');
+  page.classList.add('settings-layout');
+  page.append(nav, content);
   // one section at a time: the one chosen in the sidebar (the address keeps it, so Back / Forward and links work)
   function show(target) {
     let secId = SECTIONS[0][0], card = null;
@@ -547,4 +549,5 @@
   }
   window.addEventListener('popstate', () => show(location.hash.slice(1)));
   show(location.hash.slice(1));
+  window.__gbReady = performance.now();   // for timing checks
 })();

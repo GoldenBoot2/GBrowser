@@ -14,7 +14,7 @@
       ' (for example passwords, messages or cards). Its security certificate is not valid.'),
     el('p', { class: 'code', text: 'NET::' + code }),
     el('div', { class: 'actions' },
-      el('button', { class: 'btn', onclick: () => history.length > 1 ? history.back() : gb.send('open', { url: 'https://gbrowser.local/newtab.html' }) },
+      el('button', { class: 'btn', onclick: () => history.length > 1 ? history.back() : gb.send('open', { url: location.origin + '/newtab.html' }) },
         icon('Back'), 'Go back'),
       el('button', { class: 'btn text', onclick: () => gb.send('open', { url }) }, icon('Refresh'), 'Reload')));
 })();
