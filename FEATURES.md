@@ -123,7 +123,7 @@ Last full audit: 19-11-2026.
 | Profiles (separate people) | Missing |
 | Sync | Not planned (no account service) |
 | Keyboard shortcuts as in Chrome (full list) | Partly |
-| Task manager (Shift+Esc) | Missing |
+| Task manager (Shift+Esc) | Done 19-11-2026 (Shift+Esc / main menu: GBrowser, Browser, GPU, utility, each tab, other-site frames, extensions, spare renderer, matched by frame ID; memory = private bytes, CPU % of one core, process ID; sortable; End process (not for GBrowser / Browser): tested, the tab shows the crashed page; double-click a tab row switches to it) |
 | Extensions (Chrome Web Store) | Done |
 | DevTools docked / separate | Done (19-11-2026) |
 | Updates from GitHub, About page | Done |

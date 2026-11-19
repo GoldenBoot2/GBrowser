@@ -1,0 +1,10 @@
+table.tasks { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.tasks th { text-align: left; font-weight: 600; color: var(--on-surface-variant); padding: 8px 12px; cursor: pointer; user-select: none; white-space: nowrap; }
+table.tasks th .icon { vertical-align: middle; }
+table.tasks th.up .icon { transform: rotate(180deg); }
+table.tasks th.num, table.tasks td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.tasks td { padding: 6px 12px; border-top: 1px solid var(--outline-variant); }
+table.tasks tr.sel td { background: var(--primary-container); color: var(--on-primary-container); }
+table.tasks tbody tr { cursor: default; }
+table.tasks .task { display: inline-flex; align-items: center; gap: 10px; }
+.total { padding: 10px 12px 0; }

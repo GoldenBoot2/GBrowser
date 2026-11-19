@@ -1394,6 +1394,7 @@ namespace GBrowser
             m.Add("Create QR code", IconData.QrCode, null, () => NewTab(Pages.Url("qr") + "?u=" + Uri.EscapeDataString(WebUrl ?? ""))).Enabled = web;
             m.Add("View page source", IconData.Code, "Ctrl+U", ViewSource).Enabled = web;
             m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
+            m.Add("Task manager", IconData.Memory, "Shift+Esc", () => OpenPage("tasks"));
             m.Add("Developer tools", IconData.Code, "F12", () =>
             {
                 // like Chrome: toggles this tab's DevTools (it docks itself when it opens)
@@ -1653,6 +1654,86 @@ namespace GBrowser
         }
 
         void OpenDownloads() => OpenPage("downloads");
+
+        // ---------- task manager (Shift+Esc) ----------
+
+        static readonly Dictionary<int, Tuple<TimeSpan, DateTime>> cpuSamples = new Dictionary<int, Tuple<TimeSpan, DateTime>>();
+
+        /// <summary>Memory (private bytes) and CPU (% of one core since the last read) of a process; -1 = unknown.</summary>
+        static Tuple<long, double> Usage(int pid)
+        {
+            try
+            {
+                using (var p = Process.GetProcessById(pid))
+                {
+                    long mem = p.PrivateMemorySize64;
+                    var now = DateTime.UtcNow; var cpu = p.TotalProcessorTime;
+                    double pct = -1;
+                    lock (cpuSamples)
+                    {
+                        if (cpuSamples.TryGetValue(pid, out var last) && (now - last.Item2).TotalMilliseconds > 200)
+                            pct = Math.Max(0, (cpu - last.Item1).TotalMilliseconds / (now - last.Item2).TotalMilliseconds * 100);
+                        cpuSamples[pid] = Tuple.Create(cpu, now);
+                    }
+                    return Tuple.Create(mem, pct);
+                }
+            }
+            catch { return Tuple.Create(-1L, -1.0); }
+        }
+
+        /// <summary>Chrome's task manager rows: GBrowser, the engine's processes, and for each page process the tabs,
+        /// frames of other sites and extensions it serves (matched by frame ID).</summary>
+        async Task<List<Dictionary<string, object>>> TaskList()
+        {
+            var rows = new List<Dictionary<string, object>>();
+            var tabsByFrame = new Dictionary<uint, BrowserTab>();
+            foreach (var w in App.Windows)
+                foreach (var x in w.Tabs)
+                    if (x.Created) try { tabsByFrame[x.View.CoreWebView2.FrameId] = x; } catch { }
+            void Add(string kind, string task, int pid, int tab, bool canEnd)
+            {
+                var u = Usage(pid);
+                rows.Add(new Dictionary<string, object> { { "kind", kind }, { "task", task }, { "pid", pid }, { "mem", u.Item1 },
+                    { "cpu", Math.Round(u.Item2, 1) }, { "tab", tab }, { "canEnd", canEnd } });
+            }
+            Add("app", "GBrowser", Process.GetCurrentProcess().Id, 0, false);
+            IReadOnlyList<CoreWebView2ProcessExtendedInfo> infos;
+            try { infos = await env.GetProcessExtendedInfosAsync(); } catch { return rows; }
+            foreach (var info in infos.OrderBy(i => i.ProcessInfo.Kind))
+            {
+                int pid = info.ProcessInfo.ProcessId;
+                switch (info.ProcessInfo.Kind)
+                {
+                    case CoreWebView2ProcessKind.Browser: Add("browser", "Browser", pid, 0, false); break;
+                    case CoreWebView2ProcessKind.Gpu: Add("gpu", "GPU process", pid, 0, true); break;
+                    case CoreWebView2ProcessKind.Utility: Add("utility", "Utility process", pid, 0, true); break;
+                    case CoreWebView2ProcessKind.Renderer:
+                    {
+                        var frames = info.AssociatedFrameInfos ?? new List<CoreWebView2FrameInfo>();
+                        var tabs = frames.Where(f => f.ParentFrameInfo == null && tabsByFrame.ContainsKey(f.FrameId))
+                                         .Select(f => tabsByFrame[f.FrameId]).Distinct().ToList();
+                        if (tabs.Count > 0)
+                            foreach (var tb in tabs) Add("tab", (tb.Private ? "Private tab: " : "Tab: ") + (tb.Title ?? "New tab"), pid, tb.Id, true);
+                        else
+                        {
+                            string src = frames.Select(f => f.Source).FirstOrDefault(s => !string.IsNullOrEmpty(s) && s != "about:blank") ?? "";
+                            if (src.StartsWith("chrome-extension://") || src.StartsWith("extension://"))
+                            {
+                                string extId = src.Split('/')[2];
+                                string extName = null;
+                                try { extName = (await Profile.GetBrowserExtensionsAsync()).FirstOrDefault(x => x.Id == extId)?.Name; } catch { }
+                                Add("extension", "Extension: " + (extName ?? extId), pid, 0, true);
+                            }
+                            else if (src.Length > 0) Add("frame", "Subframe: " + (Blocking.SiteOf(src) ?? Blocking.HostOf(src) ?? src), pid, 0, true);
+                            else Add("spare", "Spare renderer", pid, 0, true);
+                        }
+                        break;
+                    }
+                    default: Add("other", info.ProcessInfo.Kind.ToString(), pid, 0, true); break;
+                }
+            }
+            return rows;
+        }
 
         // ---------- download bubble (the toolbar's download button, like Chrome's) ----------
 
@@ -2118,6 +2199,7 @@ namespace GBrowser
                 case Keys.Control | Keys.J: OpenDownloads(); return true;
                 case Keys.Control | Keys.S: SavePageAs(); return true;
                 case Keys.Control | Keys.U: ViewSource(); return true;
+                case Keys.Shift | Keys.Escape: OpenPage("tasks"); return true;
                 case Keys.Alt | Keys.Left: toolbar_Back(); return true;
                 case Keys.Alt | Keys.Right: toolbar_Forward(); return true;
                 case Keys.Alt | Keys.Home: Current?.Navigate(Search.ToUrl(Store.Settings.HomePage) ?? Pages.Url("newtab")); return true;
@@ -2734,6 +2816,27 @@ namespace GBrowser
                         { "on", st.HideIdentity }, { "noise", st.IdentityNoise }, { "id", Identity.Id },
                         { "values", Store.FromJson<Dictionary<string, object>>(json) },
                     };
+                }
+                case "tasks.list": return await TaskList();
+                case "tasks.end":
+                {
+                    // like Chrome's End process: only engine processes that serve pages, frames, GPU or utilities
+                    int pid = (int)Lng(m, "pid", 0);
+                    var infos = env.GetProcessInfos();
+                    var pi = infos.FirstOrDefault(x => x.ProcessId == pid);
+                    if (pi == null || pi.Kind == CoreWebView2ProcessKind.Browser) throw new Exception("Cannot end this process");
+                    try { Process.GetProcessById(pid).Kill(); } catch (Exception ex) { throw new Exception(ex.Message); }
+                    return null;
+                }
+                case "tasks.show":
+                {
+                    int id = (int)Lng(m, "tab", 0);
+                    foreach (var w in App.Windows)
+                    {
+                        int i = w.Tabs.FindIndex(x => x.Id == id);
+                        if (i >= 0) { w.Select(i); w.Activate(); break; }
+                    }
+                    return null;
                 }
                 case "log.get":
                 {

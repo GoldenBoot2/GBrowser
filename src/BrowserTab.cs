@@ -59,6 +59,7 @@ namespace GBrowser
                 case "tests": return "Blocking tests";
                 case "identity": return "Identity check";
                 case "qr": return "QR code";
+                case "tasks": return "Task manager";
                 case "insecure": return "Not secure";
                 case "certerror": return "Privacy error";
                 default: return "New tab";
