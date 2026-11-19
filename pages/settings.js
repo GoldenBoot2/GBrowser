@@ -100,9 +100,25 @@
     const lists = el('div', { class: 'card' }, el('h2', { text: 'Filter lists' }),
       row('Shield', ab.ready ? ab.rules.toLocaleString() + ' rules' : (ab.error || 'Loading'),
         ab.ready ? 'Built ' + fmtIsoDate(ab.built) + ', loaded in ' + ab.loadMs + ' ms' : null, null));
-    for (const l of ab.lists)
-      lists.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }),
-        el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (l.version && !l.version.startsWith('%') ? ' - ' + l.version : '') }))));
+    // each list on / off (applies to pages loaded after the change); grouped like the switches above
+    const groupName = ['Ads', 'Annoyances', 'Trackers'];
+    for (const g of ['0', '1', '2']) {
+      const of = ab.lists.filter(l => (l.group || '0') === g);
+      if (!of.length) continue;
+      lists.append(el('div', { class: 'row' }, el('div', { class: 'sub', text: groupName[+g] })));
+      for (const l of of) {
+        const b = el('button', { class: 'switch', role: 'switch', 'aria-checked': String(l.on !== false), 'aria-label': l.name });
+        b.addEventListener('click', async () => {
+          l.on = !(l.on !== false);
+          b.setAttribute('aria-checked', String(l.on));
+          try { await gb.send('lists.set', { file: l.file, on: l.on }); snack(l.on ? 'On for pages you open now' : 'Off for pages you open now'); }
+          catch (e) { snack(e.message); }
+        });
+        if (!l.file) b.disabled = true;
+        lists.append(el('div', { class: 'row' }, el('div', { class: 'text' }, el('div', { class: 'title', text: l.name }),
+          el('div', { class: 'sub', text: (+l.rules).toLocaleString() + ' rules' + (l.version && !l.version.startsWith('%') ? ' - ' + l.version : '') })), b));
+      }
+    }
     main.append(lists);
   }
 

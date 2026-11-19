@@ -3,9 +3,11 @@ r"""Compiles ad-block filter lists into the compact assets the app loads at star
 
 Usage:  python -I tools/build_filters.py [--offline]
   Downloads every list in LISTS into tools/lists/ (unless --offline), then writes:
-    hosts0.bin / hosts1.bin  sorted FNV-1a 64 hashes of hosts blocked with plain "||host^" (group 0 / 1)
+    hosts.bin                sorted FNV-1a 64 hashes, meta (types, flags), source-list mask of host rules
     hostexc.bin              hashes of "@@||host^" exception hosts
-    net.txt                  other network rules: group flags types token regex domains denyallow
+    net.txt                  other network rules: lists flags types token regex domains denyallow
+                             ("lists" everywhere = bit mask of the LISTS entries a rule comes from: bit i =
+                             LISTS[i]; the app turns lists on / off by that mask)
     page.txt                 page-level exception rules ($document, $elemhide, $generichide ...)
     cosm.txt                 cosmetic rules (generic keyed / unkeyed, per-domain, exceptions, CSS)
     psl.txt                  public suffix list (rules only) for first/third-party checks
@@ -23,10 +25,10 @@ import json, os, re, struct, sys, time, urllib.request
 from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LIST_DIR = os.path.join(ROOT, 'tools', 'lists')
+LIST_DIR = os.environ.get('GB_LIST_DIR') or os.path.join(ROOT, 'tools', 'lists')
 # GBrowser: same compiler as the WebView Adblocker Android app; output goes to GBrowser/filters
 # (built fresh on every GitHub Actions run, git-ignored).
-OUT = os.path.join(ROOT, 'filters')
+OUT = os.environ.get('GB_FILTER_OUT') or os.path.join(ROOT, 'filters')
 AG = 'https://filters.adtidy.org/extension/chromium/filters/%d.txt'
 HZ = 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/%s.txt'
 UBO = 'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/%s.txt'
@@ -612,9 +614,18 @@ def write_redirects():
             f.write('%s\t%s\t%s\n' % (r['title'], ct, b64))
 
 
-def meta(group, flags, types):
-    """Host table entry: bits 0-11 types, 12-16 flags, 20 group (matches FilterEngine.java)."""
-    return (types & 0xFFF) | ((flags & 0x1F) << 12) | ((group & 3) << 20)
+def meta(flags, types):
+    """Host table entry: bits 0-11 types, 12-16 flags (the source lists are in their own array)."""
+    return (types & 0xFFF) | ((flags & 0x1F) << 12)
+
+
+def addm(d, key, bit):
+    d[key] = d.get(key, 0) | bit
+
+
+def groups_of(mask):
+    """The groups (0 ads, 1 annoyances, 2 trackers) of the lists in mask, lowest first."""
+    return sorted({LISTS[i][1] for i in range(len(LISTS)) if mask >> i & 1})
 
 
 def idna(rule):
@@ -629,27 +640,30 @@ def idna(rule):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    host_block = [set(), set(), set()]
-    host_exc = set()
+    assert len(LISTS) <= 32, 'list masks are 32 bits'
+    host_block = {}                      # host -> lists
+    host_exc = {}
     nets = []
     badfilters = set()
-    generic = [dict(), dict(), dict()]   # selector -> group (keyed later)
+    generic = {}                         # selector -> lists (keyed later)
     params = []                          # removeparam rules
     resp = []                            # response-rewriting rules
-    ext_css = defaultdict(set)           # (domain or '*', group) -> extended CSS rules
-    raw_js = defaultdict(set)            # (domain, group) -> AdGuard #%# JavaScript
+    ext_css = defaultdict(dict)          # domain or '*' -> {extended CSS rule: lists}
+    raw_js = defaultdict(dict)           # domain -> {AdGuard #%# JavaScript: lists}
     raw_js_exc = defaultdict(set)
     generic_exc = set()                  # #@#sel (no domains): drop the generic selector
-    specific = defaultdict(set)          # (domain, group) -> selectors
+    specific = defaultdict(dict)         # domain -> {selector: lists}
     specific_exc = defaultdict(set)      # domain -> selectors (also for generic ones)
-    css_inject = defaultdict(set)        # (domain, group) -> 'selector { style }'
-    scriptlets = defaultdict(set)        # (domain or '*', group) -> JSON calls
+    css_inject = defaultdict(dict)       # domain -> {'selector { style }': lists}
+    scriptlets = defaultdict(dict)       # domain or '*' -> {JSON call: lists}
     sl_exc = defaultdict(set)            # domain or '*' -> JSON calls switched off there
     info = []
     extra_path = os.path.join(ROOT, 'tools', 'extra_rules.txt')
-    for name, group, url, title in LISTS:
+    for li, (name, group, url, title) in enumerate(LISTS):
+        bit = 1 << li
         text = open(extra_path, encoding='utf-8').read() if name == 'extra' else fetch(name, url)
-        n0 = len(nets) + sum(len(s) for s in host_block)
+        n0 = len(nets)
+        own_hosts = 0   # host rules of this list (also those another list has too)
         version = ''
         m = re.search(r'^! (?:Version|Last modified|TimeUpdated):\s*(.+)$', text, re.M)
         if m:
@@ -667,7 +681,8 @@ def main():
                     line = '0.0.0.0 ' + line
                 m = HOSTS_LINE.match(line)
                 if m and m.group(1) not in NOT_HOSTS:
-                    host_block[group].add(m.group(1))
+                    addm(host_block, m.group(1), bit)
+                    own_hosts += 1
                 else:
                     stats['skip hosts line'] += 1
                 continue
@@ -698,7 +713,7 @@ def main():
                             sl_exc[d].add(text)
                     else:
                         for d in pos or ['*']:
-                            scriptlets[(d, group)].add(text)
+                            addm(scriptlets[d], text, bit)
                         for d in neg:
                             sl_exc[d].add(text)
                         SL_USED.add(call[0])
@@ -713,7 +728,10 @@ def main():
                         stats['skip #%# generic js'] += 1
                         continue
                     for d in pos:
-                        (raw_js_exc if '@' in sep else raw_js)[(d, group) if '@' not in sep else d].add(sel)
+                        if '@' in sep:
+                            raw_js_exc[d].add(sel)
+                        else:
+                            addm(raw_js[d], sel, bit)
                     stats['js rules'] += 1
                     continue
                 if sep in ('$$', '$@$'):
@@ -736,7 +754,7 @@ def main():
                     if '\x1f' in rule:
                         continue
                     for d in pos or ['*']:
-                        ext_css[(d, group)].add(rule)
+                        addm(ext_css[d], rule, bit)
                     stats['extended css rules'] += 1
                     continue
                 pos, neg = parse_domains(doms, ',')
@@ -747,7 +765,7 @@ def main():
                         continue
                     rule = '%s{%s}' % (mm.group(1).strip(), mm.group(2).strip())
                     for d in pos:
-                        css_inject[(d, group)].add(rule)
+                        addm(css_inject[d], rule, bit)
                     stats['css injection'] += 1
                     continue
                 if exc:
@@ -760,10 +778,10 @@ def main():
                     continue
                 if pos:
                     for d in pos:
-                        specific[(d, group)].add(sel)
+                        addm(specific[d], sel, bit)
                     stats['cosmetic specific'] += 1
                 else:
-                    generic[group].setdefault(sel, group)
+                    addm(generic, sel, bit)
                     for d in neg:
                         specific_exc[d].add(sel)
                     stats['cosmetic generic'] += 1
@@ -773,11 +791,13 @@ def main():
                 continue
             m = HOSTS_LINE.match(line.lower())
             if m:
-                host_block[group].add(m.group(1))
+                addm(host_block, m.group(1), bit)
+                own_hosts += 1
                 continue
             m = HOST_RULE.match(line)
             if m:
-                host_block[group].add(m.group(1))
+                addm(host_block, m.group(1), bit)
+                own_hosts += 1
                 continue
             if line.startswith('@@'):
                 m = HOST_RULE.match(line[2:])
@@ -785,11 +805,11 @@ def main():
                     # The DNS filter's "@@||host^|" entries keep hosts reachable for DNS users
                     # (app links, CMPs); merged here they would cancel every other list's block.
                     if name not in DNS_LISTS:
-                        host_exc.add(m.group(1))
+                        addm(host_exc, m.group(1), bit)
                     else:
                         stats['skip DNS-list host exception'] += 1
                     continue
-            r = parse_network(line, group)
+            r = parse_network(line, bit)
             if r is None:
                 continue
             if isinstance(r, tuple):
@@ -799,7 +819,7 @@ def main():
                     rx = '' if pat in ('', '*', '|', '||') else (pat[1:-1] if is_rx else to_regex(pat, False))
                     if '\t' in val or '\n' in val:
                         continue
-                    resp.append('%d\t%d\t%d\t%s\t%s\t%s\t%s' % (group, rr.flags & (F_EXC | F_IMPORTANT | F_THIRD | F_FIRST),
+                    resp.append('%d\t%d\t%d\t%s\t%s\t%s\t%s' % (bit, rr.flags & (F_EXC | F_IMPORTANT | F_THIRD | F_FIRST),
                                 rr.types, rx, rr.domains, kind, val))
                     stats['response rules'] += 1
                     continue
@@ -807,14 +827,14 @@ def main():
                     rr, is_rx = r[1], r[2]
                     pat = rr.pattern
                     rx = '' if pat in ('', '*', '|', '||') else (pat[1:-1] if is_rx else to_regex(pat, False))
-                    params.append('%d\t%d\t%s\t%s\t%s' % (group, rr.flags & F_EXC, rx, rr.domains, rr.removeparam))
+                    params.append('%d\t%d\t%s\t%s\t%s' % (bit, rr.flags & F_EXC, rx, rr.domains, rr.removeparam))
                     stats['removeparam rules'] += 1
                     continue
                 badfilters.add(r[1])
                 continue
             r.raw = line
             nets.append(r)
-        info.append('%s\t%s\t%d' % (title, version, len(nets) + sum(len(s) for s in host_block) - n0))
+        info.append('%s\t%s\t%d\t%d\t%s' % (title, version, len(nets) - n0 + own_hosts, group, name))
         print('%-28s group %d  %s' % (title, group, version))
 
     # badfilter
@@ -824,17 +844,14 @@ def main():
         for b in badfilters:
             m = HOST_RULE.match(b)
             if m:
-                for s in host_block:
-                    s.discard(m.group(1))
+                host_block.pop(m.group(1), None)
         stats['removed by $badfilter'] += before - len(nets)
-    host_block[1] -= host_block[0]
-    host_block[2] -= host_block[0]
 
     # page-level rules apart; host-shaped rules ("||host^$opts" without $domain) into the host
     # table; tokens for the rest
     page_rules = [r for r in nets if r.page]
     nets = [r for r in nets if not r.page]
-    host_table = set()   # (hash, meta)
+    host_table = {}      # (hash, meta) -> lists
     rest = []
     for r in nets:
         # bare "host.tld$image" rules (hundreds of thousands in Tracking Protection) are host rules too
@@ -845,20 +862,21 @@ def main():
                 m = None
         if (m and not r.domains and not r.denyallow and not (r.flags & (F_MATCHCASE | F_REGEX))
                 and not r.redirect and not (r.types & T['popup'])):
-            host_table.add((fnv64(m.group(1)), meta(r.group, r.flags, r.types)))
+            addm(host_table, (fnv64(m.group(1)), meta(r.flags, r.types)), r.group)
         else:
             rest.append(r)
     nets = rest
-    for g in (0, 1, 2):
-        for h in host_block[g]:
-            host_table.add((fnv64(h), meta(g, 0, T_ALL)))
-    for h in host_exc:
-        host_table.add((fnv64(h), meta(0, F_EXC, T_ALL)))
-    ht = sorted(host_table)
+    for h, mask in host_block.items():
+        addm(host_table, (fnv64(h), meta(0, T_ALL)), mask)
+    for h, mask in host_exc.items():
+        addm(host_table, (fnv64(h), meta(F_EXC, T_ALL)), mask)
+    ht = sorted(host_table.items())
+    # count, hashes (sorted), metas, list masks (unsigned)
     with open(os.path.join(OUT, 'hosts.bin'), 'wb') as f:
         f.write(struct.pack('>i', len(ht)))
-        f.write(struct.pack('>%dq' % len(ht), *[h for h, _ in ht]))
-        f.write(struct.pack('>%di' % len(ht), *[x for _, x in ht]))
+        f.write(struct.pack('>%dq' % len(ht), *[k[0] for k, _ in ht]))
+        f.write(struct.pack('>%di' % len(ht), *[k[1] for k, _ in ht]))
+        f.write(struct.pack('>%dI' % len(ht), *[v for _, v in ht]))
     stats['host table entries'] = len(ht)
     for fn in ('hosts0.bin', 'hosts1.bin', 'hostexc.bin'):
         if os.path.exists(os.path.join(OUT, fn)):
@@ -870,20 +888,22 @@ def main():
         toks_of.append(t)
         for x in set(t):
             freq[x] += 1
-    seen = set()
-    lines = []
+    seen = {}
+    rows = []
     untok = 0
     for r, toks in zip(nets, toks_of):
         good = [t for t in toks if t not in BAD_TOKENS] or toks
         tok = min(good, key=lambda t: (freq[t], -len(t))) if good else ''
         if not tok:
             untok += 1
-        key = (r.group, r.flags, r.types, r.regex, r.domains, r.denyallow, r.redirect)
+        key = (r.flags, r.types, r.regex, r.domains, r.denyallow, r.redirect)
         if key in seen:
+            rows[seen[key]][0] |= r.group
             continue
-        seen.add(key)
-        lines.append('%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s' % (r.group, r.flags, r.types,
-                     jhash(tok) if tok else '', r.regex, r.domains, r.denyallow, literal(r), r.redirect))
+        seen[key] = len(rows)
+        rows.append([r.group, '%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s' % (r.flags, r.types,
+                     jhash(tok) if tok else '', r.regex, r.domains, r.denyallow, literal(r), r.redirect)])
+    lines = ['%d\t%s' % (m, t) for m, t in rows]
     stats['network rules'] = len(lines)
     stats['network rules without token'] = untok
     with open(os.path.join(OUT, 'net.txt'), 'w', encoding='utf-8', newline='\n') as f:
@@ -896,45 +916,54 @@ def main():
     # cosmetic
     out = []
     keyed = unkeyed = 0
-    for g in (0, 1, 2):
-        for sel in sorted(generic[g]):
-            if sel in generic_exc or (g > 0 and sel in generic[0]):
-                continue
-            for part in top_level_split(sel):
-                k = selector_key(part)
-                if k:
-                    out.append('k\t%d\t%s\t%s' % (g, k, part))
-                    keyed += 1
-                else:
-                    out.append('u\t%d\t%s' % (g, part))
-                    unkeyed += 1
-    for (d, g), sels in sorted(specific.items()):
-        sels = sorted(s for s in sels if s not in specific_exc.get(d, ()))
-        if sels:
-            out.append('s\t%d\t%s\t%s' % (g, d, '\x1f'.join(sels)))
+    for sel in sorted(generic):
+        if sel in generic_exc:
+            continue
+        for part in top_level_split(sel):
+            k = selector_key(part)
+            if k:
+                out.append('k\t%d\t%s\t%s' % (generic[sel], k, part))
+                keyed += 1
+            else:
+                out.append('u\t%d\t%s' % (generic[sel], part))
+                unkeyed += 1
+
+    def by_lists(items, drop=()):
+        # one line per (domain, list mask)
+        inv = defaultdict(list)
+        for x, mask in items.items():
+            if x not in drop:
+                inv[mask].append(x)
+        return sorted((m, sorted(v)) for m, v in inv.items())
+
+    for d in sorted(specific):
+        for mask, sels in by_lists(specific[d], specific_exc.get(d, ())):
+            out.append('s\t%d\t%s\t%s' % (mask, d, '\x1f'.join(sels)))
     for d, sels in sorted(specific_exc.items()):
         out.append('x\t0\t%s\t%s' % (d, '\x1f'.join(sorted(sels))))
-    for (d, g), rules in sorted(css_inject.items()):
-        out.append('c\t%d\t%s\t%s' % (g, d, '\x1f'.join(sorted(rules))))
-    for (d, g), calls in sorted(scriptlets.items()):
-        calls = sorted(c for c in calls if c not in sl_exc.get(d, ()))
-        if calls:
-            out.append('j\t%d\t%s\t%s' % (g, d, '\x1f'.join(calls)))
+    for d in sorted(css_inject):
+        for mask, rules in by_lists(css_inject[d]):
+            out.append('c\t%d\t%s\t%s' % (mask, d, '\x1f'.join(rules)))
+    for d in sorted(scriptlets):
+        for mask, calls in by_lists(scriptlets[d], sl_exc.get(d, ())):
+            out.append('j\t%d\t%s\t%s' % (mask, d, '\x1f'.join(calls)))
     for d, calls in sorted(sl_exc.items()):
         out.append('y\t0\t%s\t%s' % (d, '\x1f'.join(sorted(calls))))
-    for (d, g), rules in sorted(ext_css.items()):
-        out.append('e\t%d\t%s\t%s' % (g, d, '\x1f'.join(sorted(rules))))
+    for d in sorted(ext_css):
+        for mask, rules in by_lists(ext_css[d]):
+            out.append('e\t%d\t%s\t%s' % (mask, d, '\x1f'.join(rules)))
     js_ids = {}
-    for (d, g), codes in sorted(raw_js.items()):
-        ids = []
-        for code in sorted(codes):
-            if code in raw_js_exc.get(d, ()):
-                continue
-            if code not in js_ids:
-                js_ids[code] = len(js_ids)
-            ids.append(str(js_ids[code]))
-        if ids:
-            out.append('r\t%d\t%s\t%s' % (g, d, '\x1f'.join(ids)))
+    # ids in the order the group-based builds gave them (domain, then group, then code)
+    for d in sorted(raw_js):
+        for g in (0, 1, 2):
+            for code in sorted(c for c, mask in raw_js[d].items() if g in groups_of(mask)):
+                if code not in raw_js_exc.get(d, ()) and code not in js_ids:
+                    js_ids[code] = len(js_ids)
+    for d in sorted(raw_js):
+        for mask, codes in by_lists(raw_js[d], raw_js_exc.get(d, ())):
+            ids = [str(js_ids[c]) for c in codes]
+            if ids:
+                out.append('r\t%d\t%s\t%s' % (mask, d, '\x1f'.join(ids)))
     write_raw_js(js_ids)
     with open(os.path.join(OUT, 'resp.txt'), 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(resp) + '\n')

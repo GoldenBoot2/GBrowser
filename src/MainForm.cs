@@ -2197,7 +2197,9 @@ namespace GBrowser
                     var eng = FilterEngine.Instance;
                     var rows = (eng?.ListInfo ?? "").Split('\n').Select(l => l.Split('\t')).ToList();
                     var lists = rows.Where(p => p.Length >= 3 && p[0] != "built")
-                        .Select(p => new Dictionary<string, object> { { "name", p[0] }, { "version", p[1] }, { "rules", p[2] } }).ToList();
+                        .Select(p => new Dictionary<string, object> { { "name", p[0] }, { "version", p[1] }, { "rules", p[2] },
+                            { "group", p.Length > 3 ? p[3] : "0" }, { "file", p.Length > 4 ? p[4].Trim() : "" },
+                            { "on", p.Length <= 4 || !st.DisabledLists.Contains(p[4].Trim()) } }).ToList();
                     string built = rows.FirstOrDefault(p => p.Length >= 2 && p[0] == "built")?[1] ?? "";
                     return new Dictionary<string, object>
                     {
@@ -2205,6 +2207,15 @@ namespace GBrowser
                         { "loadMs", FilterEngine.LoadMs }, { "built", built }, { "lists", lists },
                         { "total", st.TotalBlocked }, { "allowed", st.AllowedSites },
                     };
+                }
+                case "lists.set":
+                {
+                    string file = Str(m, "file");
+                    bool on = m.TryGetValue("on", out var ov) && ov is bool ob && ob;
+                    st.DisabledLists.Remove(file);
+                    if (!on && !string.IsNullOrEmpty(file)) st.DisabledLists.Add(file);
+                    Store.SaveSettings();
+                    return null;
                 }
                 case "insecure.allow":
                 {

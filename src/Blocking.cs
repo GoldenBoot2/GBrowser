@@ -254,13 +254,19 @@ namespace GBrowser
 
         static Settings S => Store.Settings;
 
+        /// <summary>The filter lists in use, as the engine's list mask: the switched-on groups' lists minus the ones
+        /// turned off in Settings > Filter lists.</summary>
         public static int Groups()
         {
             int g = FilterEngine.G_ADS;
             if (S.BlockAnnoyances) g |= FilterEngine.G_ANNOY;
             if (S.BlockTrackers) g |= FilterEngine.G_TRACK;
-            return g;
+            var e = FilterEngine.Instance;
+            return e == null ? 0 : e.Mask(g, S.DisabledLists);
         }
+
+        /// <summary>Tracker lists (for cleaning tracking codes from links opened from other apps, always on).</summary>
+        public static int TrackerLists() => FilterEngine.Instance?.Mask(FilterEngine.G_TRACK, S.DisabledLists) ?? 0;
 
         public static bool OnFor(string host)
         {
@@ -388,7 +394,7 @@ namespace GBrowser
             string host = HostOf(uri);
             if (eng != null && host != null && OnFor(host) && S.BlockTrackers && !e.IsRedirected)
             {
-                string clean = eng.CleanUrl(uri, null, Groups() | FilterEngine.G_TRACK);
+                string clean = eng.CleanUrl(uri, null, Groups() | TrackerLists());
                 if (clean != uri)
                 {
                     e.Cancel = true;

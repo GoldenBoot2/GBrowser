@@ -54,22 +54,37 @@ namespace GBrowser
         MappedFile net; int[] ruleOff, ruleLen, ruleMeta; Rule[] ruleCache; int[] untokenized;
         int[] tokKeys, tokStart, tokIds;   // sorted URL tokens -> rule ids tokIds[tokStart[k] .. tokStart[k+1])
         PageRule[] pageRules;
-        readonly Dictionary<string, string[]>[] keyed = new Dictionary<string, string[]>[3];
-        readonly string[][] unkeyed = new string[3][];
-        readonly string[] unkeyedCss = new string[3];
-        MappedFile cosm; long[] specHash; int[] specOff, specLen; byte[] specKind, specGroup;
+        // "groups" in the API below = the bit mask of enabled lists (bit i = the i-th list of info.txt); every rule
+        // carries the mask of the lists it comes from and applies when the two share a bit
+        struct Sel { public string S; public int Lists; }
+        readonly Dictionary<string, Sel[]> keyed = new Dictionary<string, Sel[]>(16384, StringComparer.Ordinal);
+        Sel[] unkeyed = new Sel[0];
+        readonly Dictionary<int, string> unkeyedCss = new Dictionary<int, string>();
+        MappedFile cosm; long[] specHash; int[] specOff, specLen, specMask; byte[] specKind;
+        int[] ruleMask;
         ParamRule[] paramRules = new ParamRule[0];
         RespRule[] respRules = new RespRule[0];
         readonly Dictionary<string, Resource> resources = new Dictionary<string, Resource>();
         int cosmeticCount;
         public readonly int RuleCount;
         public readonly string ListInfo;
+        public readonly int[] ListGroups;      // per list (info.txt order = bit order): 0 ads, 1 annoyances, 2 trackers
+        public readonly string[] ListFiles;    // per list: its file name (the id kept in settings)
+
+        /// <summary>The lists that apply: those of the switched-on groups (G_ADS / G_ANNOY / G_TRACK) not turned off one by one.</summary>
+        public int Mask(int groups, ICollection<string> off)
+        {
+            if (ListGroups.Length == 0) return -1;   // lists without group / file columns: all of them
+            int m = 0;
+            for (int i = 0; i < ListGroups.Length && i < 32; i++)
+                if ((groups & (1 << ListGroups[i])) != 0 && (off == null || off.Count == 0 || !off.Contains(ListFiles[i]))) m |= 1 << i;
+            return m;
+        }
         public readonly string Scriptlets, RawJs;
 
         FilterEngine(string dir)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            for (int g = 0; g < 3; g++) keyed[g] = new Dictionary<string, string[]>(g == 0 ? 16384 : 1024, StringComparer.Ordinal);
             LoadPsl(File.ReadAllBytes(Path.Combine(dir, "psl.txt")));
             LoadHosts(new MappedFile(Path.Combine(dir, "hosts.bin")));
             LoadRules(new MappedFile(Path.Combine(dir, "net.txt")));
@@ -79,6 +94,13 @@ namespace GBrowser
             LoadParams(File.ReadAllText(Path.Combine(dir, "params.txt"), Encoding.UTF8));
             LoadResp(File.ReadAllText(Path.Combine(dir, "resp.txt"), Encoding.UTF8));
             ListInfo = File.ReadAllText(Path.Combine(dir, "info.txt"), Encoding.UTF8);
+            var lg = new List<int>(); var lf = new List<string>();
+            foreach (var l in ListInfo.Split('\n'))
+            {
+                var f = l.TrimEnd('\r').Split('\t');
+                if (f.Length >= 5 && f[0] != "built") { lg.Add(int.TryParse(f[3], out var g) ? g : 0); lf.Add(f[4]); }
+            }
+            ListGroups = lg.ToArray(); ListFiles = lf.ToArray();
             Scriptlets = File.ReadAllText(Path.Combine(dir, "scriptlets.js"), Encoding.UTF8);
             RawJs = File.ReadAllText(Path.Combine(dir, "rawjs.js"), Encoding.UTF8);
             RuleCount = hostCount + ruleOff.Length + pageRules.Length + cosmeticCount;
@@ -120,11 +142,12 @@ namespace GBrowser
 
         void LoadPsl(byte[] data) { foreach (var l in Lines(data)) psl.Add(l.Trim()); }
 
-        // hosts.bin, big-endian (Java ByteBuffer): int count, long[count] hashes (sorted, signed), int[count] meta
+        // hosts.bin, big-endian: int count, long[count] hashes (sorted, signed), int[count] meta, uint[count] list masks
         void LoadHosts(MappedFile f) { hosts = f; hostCount = f.Length >= 4 ? f.BE32(0) : 0; }
 
         long HostHash(int i) => hosts.BE64(4 + 8L * i);
         int HostMeta(int i) => hosts.BE32(4 + 8L * hostCount + 4L * i);
+        int HostLists(int i) => hosts.BE32(4 + 12L * hostCount + 4L * i);
 
         /// <summary>First index whose hash is h, or -1.</summary>
         int HostFirst(long h)
@@ -150,12 +173,12 @@ namespace GBrowser
             return neg ? -v : v;
         }
 
-        // net.txt line: group, flags, types, token, regex, domains, deny, literal, redirect (tab separated)
+        // net.txt line: lists, flags, types, token, regex, domains, deny, literal, redirect (tab separated)
         unsafe void LoadRules(MappedFile f)
         {
             net = f;
             byte* d = f.P; long n = f.Length;
-            var offs = new List<int>(48000); var lens = new List<int>(48000); var metas = new List<int>(48000);
+            var offs = new List<int>(48000); var lens = new List<int>(48000); var metas = new List<int>(48000); var masks = new List<int>(48000);
             var pairs = new List<long>(48000); var untok = new List<int>();
             var v = new int[3];
             long s = 0;
@@ -178,11 +201,12 @@ namespace GBrowser
                     if (p == t) untok.Add(id);
                     else pairs.Add(((long)ParseInt(d, t, p) << 32) | (uint)id);
                     offs.Add((int)s); lens.Add((int)(i - s));
-                    metas.Add(v[0] | (v[1] << 2) | (v[2] << 8));   // group 2 bits, flags 6 bits, types 13 bits
+                    metas.Add((v[1] << 2) | (v[2] << 8));   // flags 6 bits, types 13 bits
+                    masks.Add(v[0]);                        // source lists (ParseInt wraps to the same 32 bits)
                 }
                 s = i + 1;
             }
-            ruleOff = offs.ToArray(); ruleLen = lens.ToArray(); ruleMeta = metas.ToArray();
+            ruleOff = offs.ToArray(); ruleLen = lens.ToArray(); ruleMeta = metas.ToArray(); ruleMask = masks.ToArray();
             ruleCache = new Rule[ruleOff.Length];
             untokenized = untok.ToArray();
             // sorted by token, then id: rules of one token keep their file order (as before)
@@ -206,14 +230,17 @@ namespace GBrowser
             var r = ruleCache[id];
             if (r != null) return r;
             var f = Split(net.Str(ruleOff[id], ruleLen[id]), 9);
-            r = new Rule(int.Parse(f[0]), int.Parse(f[1]), int.Parse(f[2]), f[4], f[5], f[6], f[7], f[8]);
+            r = new Rule(unchecked((int)uint.Parse(f[0])), int.Parse(f[1]), int.Parse(f[2]), f[4], f[5], f[6], f[7], f[8]);
             ruleCache[id] = r;   // a race only parses the same line twice
             return r;
         }
 
         /// <summary>Cheap checks from the packed meta before a rule is parsed (Rule.Matches repeats them).</summary>
-        static bool MetaOk(int m, int type, int party, int groups) =>
-            (groups & (1 << (m & 3))) != 0 && ((m >> 8) & type) != 0 && PartyOk((m >> 2) & 63, party);
+        bool MetaOk(int id, int type, int party, int groups)
+        {
+            int m = ruleMeta[id];
+            return (groups & ruleMask[id]) != 0 && ((m >> 8) & type) != 0 && PartyOk((m >> 2) & 63, party);
+        }
 
         void LoadPageRules(string text)
         {
@@ -232,10 +259,10 @@ namespace GBrowser
             cosm = f;
             byte* data = f.P;
             int dataLength = (int)f.Length;
-            var unk = new[] { new List<string>(), new List<string>(), new List<string>() };
-            var key = new[] { new Dictionary<string, List<string>>(StringComparer.Ordinal), new Dictionary<string, List<string>>(StringComparer.Ordinal), new Dictionary<string, List<string>>(StringComparer.Ordinal) };
+            var unk = new List<Sel>();
+            var key = new Dictionary<string, List<Sel>>(StringComparer.Ordinal);
             var hs = new List<long>(1 << 17); var offs = new List<int>(1 << 17); var lens = new List<int>(1 << 17);
-            var kinds = new List<byte>(1 << 17); var grps = new List<byte>(1 << 17);
+            var kinds = new List<byte>(1 << 17); var grps = new List<int>(1 << 17);
             int s = 0;
             for (int i = 0; i <= dataLength; i++)
             {
@@ -243,9 +270,12 @@ namespace GBrowser
                 if (i - s > 4)
                 {
                     byte kind = data[s];
-                    int g = data[s + 2] - '0';
-                    int a = s + 4;
-                    if (kind == 'u') { unk[g].Add(f.Str(a, i - a)); cosmeticCount++; }
+                    int a = s + 2;
+                    while (a < i && data[a] != '\t') a++;
+                    int g = ParseInt(data, s + 2, a);   // source lists
+                    if (kind == 'x' || kind == 'y') g = -1;   // exceptions (cosmetic, scriptlet) apply whatever lists are on
+                    a++;
+                    if (kind == 'u') { unk.Add(new Sel { S = f.Str(a, i - a), Lists = g }); cosmeticCount++; }
                     else
                     {
                         int tab = a;
@@ -253,12 +283,12 @@ namespace GBrowser
                         string k = f.Str(a, tab - a);
                         if (kind == 'k')
                         {
-                            if (!key[g].TryGetValue(k, out var l)) key[g][k] = l = new List<string>(2);
-                            l.Add(f.Str(tab + 1, i - tab - 1));
+                            if (!key.TryGetValue(k, out var l)) key[k] = l = new List<Sel>(2);
+                            l.Add(new Sel { S = f.Str(tab + 1, i - tab - 1), Lists = g });
                         }
                         else
                         {
-                            hs.Add(Fnv64(k)); offs.Add(tab + 1); lens.Add(i - tab - 1); kinds.Add(kind); grps.Add((byte)g);
+                            hs.Add(Fnv64(k)); offs.Add(tab + 1); lens.Add(i - tab - 1); kinds.Add(kind); grps.Add(g);
                         }
                         cosmeticCount++;
                     }
@@ -269,18 +299,14 @@ namespace GBrowser
             var order = Enumerable.Range(0, n).ToArray();
             var hArr = hs.ToArray();
             Array.Sort(order, (x, y) => hArr[x].CompareTo(hArr[y]));
-            specHash = new long[n]; specOff = new int[n]; specLen = new int[n]; specKind = new byte[n]; specGroup = new byte[n];
+            specHash = new long[n]; specOff = new int[n]; specLen = new int[n]; specKind = new byte[n]; specMask = new int[n];
             for (int i = 0; i < n; i++)
             {
                 int o = order[i];
-                specHash[i] = hArr[o]; specOff[i] = offs[o]; specLen[i] = lens[o]; specKind[i] = kinds[o]; specGroup[i] = grps[o];
+                specHash[i] = hArr[o]; specOff[i] = offs[o]; specLen[i] = lens[o]; specKind[i] = kinds[o]; specMask[i] = grps[o];
             }
-            for (int g = 0; g < 3; g++)
-            {
-                unkeyed[g] = unk[g].ToArray();
-                unkeyedCss[g] = Css(unkeyed[g], null);
-                foreach (var kv in key[g]) keyed[g][kv.Key] = kv.Value.ToArray();
-            }
+            unkeyed = unk.ToArray();
+            foreach (var kv in key) keyed[kv.Key] = kv.Value.ToArray();
         }
 
         void LoadRedirects(string text)
@@ -300,7 +326,7 @@ namespace GBrowser
             {
                 if (line.Length == 0) continue;
                 var f = Split(line, 5);
-                try { list.Add(new ParamRule(int.Parse(f[0]), f[1] == "1", f[2], f[3], f[4])); } catch { }
+                try { list.Add(new ParamRule(unchecked((int)uint.Parse(f[0])), f[1] == "1", f[2], f[3], f[4])); } catch { }
             }
             paramRules = list.ToArray();
         }
@@ -312,7 +338,7 @@ namespace GBrowser
             {
                 if (line.Length == 0) continue;
                 var f = Split(line, 7);
-                try { list.Add(new RespRule(int.Parse(f[0]), int.Parse(f[1]), int.Parse(f[2]), f[3], f[4], f[5], f[6])); } catch { }
+                try { list.Add(new RespRule(unchecked((int)uint.Parse(f[0])), int.Parse(f[1]), int.Parse(f[2]), f[3], f[4], f[5], f[6])); } catch { }
             }
             respRules = list.ToArray();
         }
@@ -376,8 +402,8 @@ namespace GBrowser
                     for (int i = idx; i < hostCount && HostHash(i) == hh; i++)
                     {
                         int m = HostMeta(i);
-                        int types = m & 0xFFF, flags = (m >> 12) & 0x1F, g = (m >> 20) & 3;
-                        if ((groups & (1 << g)) == 0 || (types & type) == 0 || !PartyOk(flags, party)) continue;
+                        int types = m & 0xFFF, flags = (m >> 12) & 0x1F;
+                        if ((groups & HostLists(i)) == 0 || (types & type) == 0 || !PartyOk(flags, party)) continue;
                         if ((flags & F_EXC) != 0) { if ((flags & F_IMPORTANT) != 0) st.ImpExc = true; else st.Exc = true; }
                         else if ((flags & F_IMPORTANT) != 0) st.ImpBlock = true;
                         else st.Block = true;
@@ -397,7 +423,7 @@ namespace GBrowser
                     for (int j = tokStart[k], end = tokStart[k + 1]; j < end; j++)
                     {
                         int id = tokIds[j];
-                        if (!MetaOk(ruleMeta[id], type, party, groups)) continue;
+                        if (!MetaOk(id, type, party, groups)) continue;
                         var r = GetRule(id);
                         if (st.Useless(r)) continue;
                         if (r.Matches(this, url, lower, host, pageHost, type, party)) st.Add(r);
@@ -406,7 +432,7 @@ namespace GBrowser
             }
             foreach (int id in untokenized)
             {
-                if (!MetaOk(ruleMeta[id], type, party, groups)) continue;
+                if (!MetaOk(id, type, party, groups)) continue;
                 var r = GetRule(id);
                 if (st.Useless(r)) continue;
                 if (r.Matches(this, url, lower, host, pageHost, type, party)) st.Add(r);
@@ -625,7 +651,7 @@ namespace GBrowser
             string site = pageHost ?? HostOf(url);
             foreach (var r in paramRules)
             {
-                if (r.Skip == null || r.Exc || (groups & (1 << r.Group)) == 0) continue;
+                if (r.Skip == null || r.Exc || (groups & r.Group) == 0) continue;
                 if ((r.DomPos.Length > 0 || r.DomNeg.Length > 0) && (site == null || !DomainsOk(r.DomPos, r.DomNeg, site))) continue;
                 if (r.UrlRe != null && !Find(r.UrlRe, lower)) continue;
                 string v = url;
@@ -671,7 +697,7 @@ namespace GBrowser
             var active = new List<ParamRule>(); var excs = new List<ParamRule>();
             foreach (var r in paramRules)
             {
-                if ((groups & (1 << r.Group)) == 0) continue;
+                if ((groups & r.Group) == 0) continue;
                 if ((r.DomPos.Length > 0 || r.DomNeg.Length > 0) && (site == null || !DomainsOk(r.DomPos, r.DomNeg, site))) continue;
                 if (r.Skip != null) continue;
                 if (r.UrlRe != null && !Find(r.UrlRe, lower)) continue;
@@ -719,7 +745,7 @@ namespace GBrowser
             var exc = new List<RespRule>();
             foreach (var r in respRules)
             {
-                if ((groups & (1 << r.Group)) == 0 || (r.Types & type) == 0 || !PartyOk(r.Flags, party)) continue;
+                if ((groups & r.Group) == 0 || (r.Types & type) == 0 || !PartyOk(r.Flags, party)) continue;
                 if ((r.DomPos.Length > 0 || r.DomNeg.Length > 0) && !DomainsOk(r.DomPos, r.DomNeg, site)) continue;
                 if (r.UrlRe != null && !Find(r.UrlRe, lower)) continue;
                 ((r.Flags & F_EXC) != 0 ? exc : on).Add(r);
@@ -779,12 +805,7 @@ namespace GBrowser
             }
             c.Extra = ext.Count == 0 && jsIds.Count == 0 ? "" : ex.ToString();
             var sb = new StringBuilder(4096);
-            if (c.Generic)
-                for (int g = 0; g < 3; g++)
-                {
-                    if ((groups & (1 << g)) == 0) continue;
-                    sb.Append(exc.Count == 0 ? unkeyedCss[g] : Css(unkeyed[g], exc));
-                }
+            if (c.Generic) sb.Append(exc.Count == 0 ? UnkeyedCss(groups) : Css(Unkeyed(groups), exc));
             if (c.Specific)
             {
                 foreach (var s in sels) if (!exc.Contains(s)) sb.Append(s).Append(HIDE);
@@ -834,8 +855,8 @@ namespace GBrowser
                 while (idx > 0 && specHash[idx - 1] == kh) idx--;
                 for (int i = idx; i < specHash.Length && specHash[i] == kh; i++)
                 {
-                    int kind = specKind[i], g = specGroup[i];
-                    if ((groups & (1 << g)) == 0) continue;
+                    int kind = specKind[i];
+                    if ((groups & specMask[i]) == 0) continue;
                     var parts = cosm.Str(specOff[i], specLen[i]).Split('\u001f');
                     switch ((char)kind)
                     {
@@ -870,6 +891,18 @@ namespace GBrowser
             sb.Append('"');
         }
 
+        string[] Unkeyed(int groups) => unkeyed.Where(x => (groups & x.Lists) != 0).Select(x => x.S).ToArray();
+
+        /// <summary>Generic selectors without a class / id key, for these lists (kept per list mask: few masks are used).</summary>
+        string UnkeyedCss(int groups)
+        {
+            lock (unkeyedCss)
+            {
+                if (!unkeyedCss.TryGetValue(groups, out var css)) unkeyedCss[groups] = css = Css(Unkeyed(groups), null);
+                return css;
+            }
+        }
+
         public string ScriptletCalls(string pageUrl, string host, int groups) => string.IsNullOrEmpty(host) ? "" : Ctx(pageUrl, host, groups).Js;
         public string Extra(string pageUrl, string host, int groups) => string.IsNullOrEmpty(host) ? "" : Ctx(pageUrl, host, groups).Extra;
 
@@ -889,15 +922,12 @@ namespace GBrowser
             foreach (var k in keys.Split(' '))
             {
                 if (k.Length == 0) continue;
-                for (int g = 0; g < 3; g++)
+                if (!keyed.TryGetValue(k, out var sels)) continue;
+                foreach (var sel in sels)
                 {
-                    if ((groups & (1 << g)) == 0 || !keyed[g].TryGetValue(k, out var sels)) continue;
-                    foreach (var sel in sels)
-                    {
-                        if (c.Exceptions.Contains(sel)) continue;
-                        if (sb == null) sb = new StringBuilder(256);
-                        sb.Append(sel).Append(HIDE);
-                    }
+                    if ((groups & sel.Lists) == 0 || c.Exceptions.Contains(sel.S)) continue;
+                    if (sb == null) sb = new StringBuilder(256);
+                    sb.Append(sel.S).Append(HIDE);
                 }
             }
             return sb?.ToString() ?? "";
