@@ -186,6 +186,62 @@ namespace GBrowser
 #if AUTOMATION
         public static readonly List<string> TestLog = new List<string>();
         public static string TestDbg = "";   // test builds: page-script parts to skip (letters, see gbab.js)
+        PageBridge bridge;
+
+        // ---------------------------------------------------------------- same-origin frames without the page script
+        // Measured 19-11-2026: a same-origin frame that a script creates and then navigates (iframe src="/widget")
+        // keeps the window of its first about:blank document. Chromium runs no document-created script for the new
+        // document (WebView2's and DevTools' addScriptToEvaluateOnNewDocument alike), and chrome.webview does not come
+        // back there even when the host object is added again. Scriptlets carry over with the window; element
+        // hiding does not. Such a frame gets its site's hiding rules from here, in the same invisible sheet.
+        readonly Dictionary<string, DateTime> initSeen = new Dictionary<string, DateTime>();
+        internal void NoteInit(string href)
+        {
+            if (initSeen.Count > 200) initSeen.Clear();
+            initSeen[href ?? ""] = DateTime.UtcNow;
+        }
+
+        void WatchFrame(CoreWebView2Frame fr)
+        {
+            string uri = null; DateTime started = DateTime.MinValue;
+            try
+            {
+                fr.NavigationStarting += (s, e) => { uri = e.Uri; started = DateTime.UtcNow; };
+                fr.NavigationCompleted += (s, e) =>
+                {
+                    try
+                    {
+                        if (!e.IsSuccess || uri == null || !uri.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return;
+                        if (initSeen.TryGetValue(uri, out var t) && t >= started.AddSeconds(-1)) return;
+                        var eng = FilterEngine.Instance; string host = HostOf(uri);
+                        if (eng == null || host == null || !Store.Settings.HideAdLeftovers || !OnFor(host)) return;
+                        string init = eng.CosmeticInit(uri, host, Groups());
+                        string css = init.Length > 1 ? init.Substring(1) : "";
+                        TestNote("frame without page script: " + uri + " (" + css.Length + " chars of hiding)");
+                        if (css.Length > 0) QueueCss("f" + Guid.NewGuid().ToString("N"), uri, false, css);
+                    }
+                    catch { }
+                };
+            }
+            catch { }
+        }
+#if AUTOMATION
+        public readonly List<CoreWebView2Frame> TestFrames = new List<CoreWebView2Frame>();
+        public async Task<string> TestFramesExec(string js, bool readd)
+        {
+            var sb = new StringBuilder();
+            foreach (var f in TestFrames.ToList())
+            {
+                try
+                {
+                    if (readd) f.AddHostObjectToScript("gb", bridge, new[] { "*" });
+                    sb.Append(f.Name).Append(": ").Append(await f.ExecuteScriptAsync(js)).Append(" | ");
+                }
+                catch (Exception ex) { sb.Append("err ").Append(ex.Message).Append(" | "); }
+            }
+            return sb.ToString();
+        }
+#endif
         public static string[] TestScriptlets;   // test builds: scriptlet calls for pages whose address has slcase=<line>
 #endif
         /// <summary>A note for the test channel's log; nothing in normal builds.</summary>
@@ -250,9 +306,16 @@ namespace GBrowser
             core.FrameNavigationStarting += OnFrameNavigationStarting;
             var bridge = new PageBridge(this);
             core.AddHostObjectToScript("gb", bridge);
+            this.bridge = bridge;
             core.FrameCreated += (s, e) =>
             {
                 try { e.Frame.AddHostObjectToScript("gb", bridge, new[] { "*" }); } catch { }
+                WatchFrame(e.Frame);
+#if AUTOMATION
+                var fr = e.Frame;
+                TestFrames.Add(fr);
+                fr.Destroyed += (s2, e2) => TestFrames.Remove(fr);
+#endif
             };
             _ = core.AddScriptToExecuteOnDocumentCreatedAsync(PageScript());
         }
@@ -610,6 +673,7 @@ namespace GBrowser
             if (!S.HideAdLeftovers) return "";
             string host = Host(href); var e = FilterEngine.Instance;
             if (host == null || e == null || !Blocking.OnFor(host)) return "";
+            b.NoteInit(href);
             return (S.Stealth ? "S" : "s") + e.CosmeticInit(href, host, Blocking.Groups());
         }
 
