@@ -176,6 +176,8 @@ namespace GBrowser
         public List<string> CookieKeep { get; set; } = new List<string>();                   // sites auto-delete keeps
         public int CookieMaxDays { get; set; } = 0;                                         // cap cookie lifetime (0 = off)
         public bool BlockThirdPartyCookies { get; set; } = false;
+        public string UaOverride { get; set; }          // genuine Edge client hints for pages (UaOverride.cs), measured once
+        public string UaOverrideVersion { get; set; }   // engine version they were measured on
         public bool HostListUpdates { get; set; } = true;       // host lists downloaded again each day
         public long HostListsUpdated { get; set; }   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>

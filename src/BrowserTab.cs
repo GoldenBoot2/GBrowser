@@ -83,6 +83,8 @@ namespace GBrowser
                 await View.EnsureCoreWebView2Async(env, o);
             }
             else await View.EnsureCoreWebView2Async(env);
+            // genuine Edge client hints before the first page (see UaOverride)
+            await UaOverride.Apply(View.CoreWebView2);
             setup(this);
         }
 
