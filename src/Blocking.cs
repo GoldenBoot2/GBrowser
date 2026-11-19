@@ -16,6 +16,7 @@ namespace GBrowser
         readonly BrowserTab tab;
         readonly CoreWebView2Environment env;
         public string PageUrl, PageHost;
+        public bool PopupBlocked;   // the last NewWindowRequested was stopped by the pop-up blocker (not as an ad)
         string pendingMainUrl, sessionAllowedHost;
         public event Action Changed;
 
@@ -552,6 +553,14 @@ namespace GBrowser
                 return;
             }
 #endif
+            // site settings: images off for this site's pages
+            if (e.ResourceContext == CoreWebView2WebResourceContext.Image && S.ImagesBlockedSites.Count > 0 && PageUrl != null
+                && SiteOf(PageUrl) is string imgSite && S.ImagesBlockedSites.Contains(imgSite))
+            {
+                Record(url, FilterEngine.T_IMAGE, "images off for this site");
+                e.Response = Fail();
+                return;
+            }
             if (host == null || !S.AdblockEnabled) return;
             bool main = e.ResourceContext == CoreWebView2WebResourceContext.Document && url == pendingMainUrl;
             string page = main ? host : PageHost;   // a new page is judged by its own site's switch
@@ -577,13 +586,17 @@ namespace GBrowser
         }
 
         /// <summary>window.open / target=_blank: true when it must not open (ad popups, popups without a click).</summary>
+        /// <summary>Chrome's pop-up blocker (also with ad blocking off): a window the page opens without a click is
+        /// blocked unless the site is allowed (site info menu > Pop-ups); with ad blocking on, pop-up ads too.</summary>
         public bool BlockPopup(string url, bool userInitiated)
         {
+            string ps = PageUrl != null ? SiteOf(PageUrl) : null;
+            if (!userInitiated && (ps == null || !S.PopupAllowedSites.Contains(ps))) { PopupBlocked = true; if (S.AdblockEnabled) Count(); return true; }
             if (!S.AdblockEnabled || (PageHost != null && !OnFor(PageHost))) return false;
             var eng = FilterEngine.Instance;
             string host = HostOf(url);
-            bool block = !userInitiated;
-            if (!block && eng != null && host != null)
+            bool block = false;
+            if (eng != null && host != null)
                 block = eng.Match(url, host, PageHost, FilterEngine.T_POPUP | FilterEngine.T_DOCUMENT, Groups()) != null;
             if (block) Count();
             return block;

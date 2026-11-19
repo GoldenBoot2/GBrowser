@@ -521,10 +521,28 @@ namespace GBrowser
             strip.RefreshTabs();
         }
 
+        /// <summary>Muted when the tab is muted or its site's sound is off (Site settings > Sound).</summary>
+        void ApplySiteSound(BrowserTab t)
+        {
+            if (!t.Created) return;
+            string s = Blocking.SiteOf(t.View.CoreWebView2.Source);
+            bool mute = t.Muted || (s != null && Store.Settings.SoundMutedSites.Contains(s));
+            try { if (t.View.CoreWebView2.IsMuted != mute) t.View.CoreWebView2.IsMuted = mute; } catch { }
+        }
+
+        /// <summary>A short note in the status bubble (e.g. "Link copied", "Pop-up blocked").</summary>
+        void Notice(string text)
+        {
+            bubble.SetText(text);
+            var tm = new Timer { Interval = 2500 };
+            tm.Tick += (o, e) => { tm.Dispose(); bubble.SetText(Current?.Created == true ? Current.View.CoreWebView2.StatusBarText : ""); };
+            tm.Start();
+        }
+
         void SetMuted(BrowserTab t, bool mute)
         {
             t.Muted = mute;
-            if (t.Created) try { t.View.CoreWebView2.IsMuted = mute; } catch { }
+            ApplySiteSound(t);
             strip.RefreshTabs();
         }
 
@@ -1101,14 +1119,27 @@ namespace GBrowser
             core.FaviconChanged += (o, e) => t.UpdateFavicon(() => { F().strip.RefreshTabs(); F().bookmarksBar.Invalidate(); });
             core.IsDocumentPlayingAudioChanged += (o, e) => { t.PlayingAudio = core.IsDocumentPlayingAudio; F().strip.RefreshTabs(); };
             if (t.Muted) core.IsMuted = true;
+            // site settings: JavaScript off for a site (the engine's own switch, set for each new page), sound muted
+            core.NavigationStarting += (o, e) =>
+            {
+                string js = Blocking.SiteOf(e.Uri);
+                bool on = js == null || Pages.IsInternal(e.Uri) || !Store.Settings.JsBlockedSites.Contains(js);
+                if (core.Settings.IsScriptEnabled != on) core.Settings.IsScriptEnabled = on;
+            };
+            core.SourceChanged += (o, e) => F().ApplySiteSound(t);
             core.WindowCloseRequested += (o, e) => { int i = F().Tabs.IndexOf(t); if (i >= 0) F().CloseTab(i); };
             core.ContainsFullScreenElementChanged += (o, e) => F().SetFullscreen(core.ContainsFullScreenElement);
             core.NewWindowRequested += async (o, e) =>
             {
-                if (t.Blocking != null && t.Blocking.BlockPopup(e.Uri, e.IsUserInitiated))
+                if (t.Blocking != null)
                 {
-                    e.Handled = true;   // no window: window.open returns null
-                    return;
+                    t.Blocking.PopupBlocked = false;
+                    if (t.Blocking.BlockPopup(e.Uri, e.IsUserInitiated))
+                    {
+                        e.Handled = true;   // no window: window.open returns null
+                        if (t.Blocking.PopupBlocked && t == F().Current) F().Notice("Pop-up blocked");
+                        return;
+                    }
                 }
                 var deferral = e.GetDeferral();
                 try
@@ -1711,10 +1742,7 @@ namespace GBrowser
         {
             if (WebUrl == null) return;
             try { Clipboard.SetText(WebUrl); } catch { return; }
-            bubble.SetText("Link copied");
-            var tm = new Timer { Interval = 2000 };
-            tm.Tick += (o, e) => { tm.Dispose(); bubble.SetText(Current?.Created == true ? Current.View.CoreWebView2.StatusBarText : ""); };
-            tm.Start();
+            Notice("Link copied");
         }
 
         void ToggleBookmarksBar()
@@ -1847,6 +1875,26 @@ namespace GBrowser
                     Store.SaveSettings();
                     ReloadAfterSettingChange();
                 });
+            if (site != null)
+            {
+                // Chrome's per-site settings: on = allowed
+                m.AddSeparator();
+                void SiteToggle(string text, List<string> list, bool listMeansOff, bool reload)
+                {
+                    bool inList = list.Contains(site);
+                    m.AddToggle(text, listMeansOff ? !inList : inList, true, () =>
+                    {
+                        if (!list.Remove(site)) list.Add(site);
+                        Store.SaveSettings();
+                        foreach (var w in App.Windows) foreach (var x in w.Tabs) w.ApplySiteSound(x);
+                        if (reload && t.Created) t.View.CoreWebView2.Reload();
+                    });
+                }
+                SiteToggle("JavaScript", st.JsBlockedSites, true, true);
+                SiteToggle("Images", st.ImagesBlockedSites, true, true);
+                SiteToggle("Pop-ups and redirects", st.PopupAllowedSites, false, false);
+                SiteToggle("Sound", st.SoundMutedSites, true, false);
+            }
             m.Add("Site settings", IconData.Settings, null, () => OpenPage("settings"));
             m.ShowAt(toolbar, toolbar.SiteInfoRect, false, "siteinfo");
         }

@@ -96,7 +96,7 @@ Last full audit: 19-11-2026.
 | Encrypted local data, clear data on close, clear browsing data | Done (time ranges: Missing) |
 | Logins kept after restart (session cookies) | Done (19-11-2026) |
 | Site permission prompts (camera, mic, location, notifications, clipboard, downloads, MIDI, sensors...) in GBrowser's own prompt, remembered choices, Site settings page with reset | Done (19-11-2026) |
-| Per-site toggles not tied to a request (JavaScript, images, pop-ups, sound) and a camera / mic "in use" indicator | Missing |
+| Per-site toggles not tied to a request (JavaScript, images, pop-ups, sound) and a camera / mic "in use" indicator | Partly, 19-11-2026: site info menu switches JavaScript (engine IsScriptEnabled per navigation), Images (image requests refused for that site's pages), Pop-ups and redirects (Chrome's pop-up blocker now always on: windows opened without a click are blocked, "Pop-up blocked" note, Allow per site), Sound (muted in every tab); tested on a local page. Camera / microphone "in use" indicator still Missing (WebView2 has no capture-state API) |
 | Web notifications shown by GBrowser (instead of the engine's toast) | To verify |
 | Cookies and site data page (see / delete per site) | Done 19-11-2026 (gbrowser://cookies, see Cookie manager) |
 | Password manager (save prompt, list, edit, delete, export) | Engine UI (save prompt) / list Missing |

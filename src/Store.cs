@@ -158,6 +158,11 @@ namespace GBrowser
         public List<string> AutoOpenTypes { get; set; } = new List<string>();   // ".pdf" ...: "Always open files of this type"   // Settings > Appearance > Page zoom (sites without their own zoom)
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();
+        // per-site settings, like Chrome's (site info menu): sites where JavaScript / images are off, pop-ups allowed, sound muted
+        public List<string> JsBlockedSites { get; set; } = new List<string>();
+        public List<string> ImagesBlockedSites { get; set; } = new List<string>();
+        public List<string> PopupAllowedSites { get; set; } = new List<string>();
+        public List<string> SoundMutedSites { get; set; } = new List<string>();
         public long TotalBlocked { get; set; }
         public List<string> Session { get; set; } = new List<string>();
         public int SessionIndex { get; set; }
