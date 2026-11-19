@@ -1117,6 +1117,18 @@
     // only the rendered pixels read back get the per-session noise
     [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function (G) {
       if (!G || !cfg.cn || DBG.indexOf('g') >= 0) return;
+      // a WebGL canvas that has drawn is GPU output like text: saving it as an image (toDataURL / toBlob, how EFF's
+      // Cover Your Tracks reads its WebGL fingerprint) gets the same edge-pixel noise as readPixels
+      ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements'].forEach(function (n) {
+        if (typeof G.prototype[n] !== 'function') return;
+        methodOn(G.prototype, n, function (f) {
+          var o = {drawArrays() { return run(this, arguments); }, drawElements() { return run(this, arguments); },
+            drawArraysInstanced() { return run(this, arguments); }, drawElementsInstanced() { return run(this, arguments); },
+            drawRangeElements() { return run(this, arguments); }};
+          function run(self, args) { var r = nat(f, self, args, 2); try { var c = self.canvas; if (c && c.nodeType === 1) texted.add(c); } catch (e) {} return r; }
+          return o[n];
+        });
+      });
       methodOn(G.prototype, 'readPixels', function (f) {
         return {readPixels() {
           var r = nat(f, this, arguments);
@@ -1170,11 +1182,16 @@
           try {
             if (rendered.has(this) && !done.has(d)) {
               done.add(d);
-              var r = rng(base ^ 0x5bd1e995);
-              // relative noise on sounding samples only: silence stays exactly 0, values keep their scale
+              var r = rng(base ^ 0x5bd1e995), f32 = new Float32Array(1), i32 = new Int32Array(f32.buffer);
+              // sounding samples only (silence stays exactly 0), moved by 1-3 steps of the float's last bit: a relative
+              // change of 1e-7 (the first version) was below float32 precision and often rounded back to the real value
               for (var i = 0; i < d.length; i += 97) {
                 var v = d[i], n = r();
-                if (v !== 0 && v === v) d[i] = v * (1 + (n - 0.5) * 2e-7);
+                if (v !== 0 && v === v && v !== Infinity && v !== -Infinity) {
+                  f32[0] = v;
+                  i32[0] += (n < 0.5 ? 1 : -1) * (1 + ((n * 1e6) | 0) % 3);
+                  if (f32[0] === f32[0] && Math.abs(f32[0]) < 1e30 && (f32[0] > 0) === (v > 0)) d[i] = f32[0];
+                }
               }
             }
           } catch (e) {}
@@ -1516,7 +1533,12 @@
   try { dnt = !!B.dnt(); } catch (e) {}
   if (dnt && window.Navigator) getterOn(Navigator.prototype, 'doNotTrack', '1');
   var pcfg = '';
-  try { pcfg = B.p(href); } catch (e) {}
+  // identity values follow the top-level site in every frame (like Brave's partitioning): a page and its third-party
+  // frames agree (Cover Your Tracks compared them and saw "randomized"), and a tracker frame embedded on many sites
+  // sees different values on each of them
+  var topHref = href;
+  try { if (window !== top) { var ao = location.ancestorOrigins; if (ao && ao.length) topHref = ao[ao.length - 1] + '/'; } } catch (e) {}
+  try { pcfg = B.p(topHref); } catch (e) {}
   if (pcfg) { try { privacy(JSON.parse(pcfg)); } catch (e) {} }
 
   var calls = null;

@@ -9,17 +9,19 @@ using Microsoft.Web.WebView2.Core;
 namespace GBrowser
 {
     /// <summary>Hide my identity (Settings > Privacy): GBrowser stays a genuine Microsoft Edge (UaOverride), but what sites
-    /// use to recognise a returning browser changes with each identity and differs per site, so two sites cannot
-    /// link visits: tracker IDs in cookies (_ga, _fbp, MUID ...) get real-looking values of this identity, WebRTC
+    /// use to recognise a returning browser changes with each identity (the same on every site, so detectors that
+    /// compare two sites see nothing changing): tracker IDs in cookies (_ga, _fbp, MUID ...) get real-looking values of this identity, WebRTC
     /// hands out no local addresses, and optionally canvas / WebGL / audio read-backs get a tiny noise that stays the
-    /// same for a site within the identity. New identity: a new seed and the data sites keep about this browser
+    /// same within the identity. New identity: a new seed and the data sites keep about this browser
     /// cleared (local / session storage, IndexedDB, caches, service workers; tracker cookies, or all cookies with
     /// "Also sign out"). The IP address stays (no VPN / proxy without the user's approval).</summary>
     internal static class Identity
     {
         static Settings S => Store.Settings;
 
-        /// <summary>The page script's privacy settings for a page ("" = off). Seed per site and identity.</summary>
+        /// <summary>The page script's privacy settings for a page ("" = off). One seed per identity for every site (user
+        /// decision 19-11-2026): per-site values were seen by EFF's Cover Your Tracks, which opens two of its own sites
+        /// and compared them ("randomized by first party domain"). A site given a Fresh start gets its own values.</summary>
         public static string PageConfig(string href)
         {
             if (!S.HideIdentity) return "";
@@ -27,8 +29,8 @@ namespace GBrowser
             string site = Blocking.SiteOf(href) ?? Blocking.HostOf(href) ?? "";
             uint seed;
             using (var sha = SHA256.Create())
-                seed = BitConverter.ToUInt32(sha.ComputeHash(Encoding.UTF8.GetBytes(S.IdentitySeed + "|" + site + "|" +
-                    (S.SiteSalts.TryGetValue(site, out var salt) ? salt : ""))), 0);
+                seed = BitConverter.ToUInt32(sha.ComputeHash(Encoding.UTF8.GetBytes(S.IdentitySeed + "|" +
+                    (S.SiteSalts.TryGetValue(site, out var salt) ? site + "|" + salt : ""))), 0);
             var sb = new StringBuilder("{\"desktop\":true,\"seed\":");
             sb.Append(seed).Append(",\"start\":").Append(S.IdentityStart).Append(",\"cn\":").Append(S.IdentityNoise ? "true" : "false").Append(",\"site\":");
             FilterEngine.JsonString(sb, site);
