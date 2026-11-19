@@ -183,7 +183,8 @@ namespace GBrowser
         public bool IdentityNoise { get; set; } = false;         // canvas / WebGL / audio noise (detectors may notice it)
         public bool IdentityEachStart { get; set; } = true;      // a new identity at every start
         public long IdentitySeed { get; set; }
-        public long IdentityStart { get; set; }       // host lists downloaded again each day
+        public long IdentityStart { get; set; }
+        public Dictionary<string, string> SiteSalts { get; set; } = new Dictionary<string, string>();   // "Fresh start" per site       // host lists downloaded again each day
         public long HostListsUpdated { get; set; }   // where the star puts new bookmarks (the last folder chosen)
         /// <summary>Every window of the last session (the last used first): tabs, selected tab, pinned count, bounds.</summary>
         public List<WindowSession> Windows { get; set; } = new List<WindowSession>();

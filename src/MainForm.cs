@@ -1726,6 +1726,7 @@ namespace GBrowser
             string ckSite = Blocking.SiteOf(u.AbsoluteUri) ?? host;
             m.Add("Cookies and site data", IconData.Cookie, cookies + " in use", () => NewTab(Pages.Url("cookies") + "?site=" + Uri.EscapeDataString(ckSite)));
             m.Add("Delete site data", IconData.Delete, null, () => DeleteSiteData(t, u, host));
+            if (Store.Settings.HideIdentity) m.Add("Fresh start for this site", IconData.Person, null, () => DeleteSiteData(t, u, host, true));
             var st = Store.Settings;
             string site = Blocking.SiteOf(page);
             if (site != null)
@@ -1761,9 +1762,16 @@ namespace GBrowser
 
         /// <summary>Deletes the site's cookies (its own domain and subdomains) and stored data (local storage,
         /// IndexedDB, caches, service workers), then reloads, like Chrome's "Delete data" in site information.</summary>
-        async void DeleteSiteData(BrowserTab t, Uri u, string host)
+        async void DeleteSiteData(BrowserTab t, Uri u, string host, bool fresh = false)
         {
-            if (!MaterialDialog.Ask(this, "Delete site data?", null, new[] { Tuple.Create(IconData.Cookie, "Cookies and stored data of " + host + ". You may be signed out.") }, "Delete"))
+            if (fresh)
+            {
+                if (!MaterialDialog.Ask(this, "Fresh start for this site?", null, new[] { Tuple.Create(IconData.Person,
+                        host + " sees a new browser: its cookies and stored data are cleared and it gets new identity values. Other sites are not touched.") }, "Fresh start"))
+                    return;
+                Identity.NewForSite(Blocking.SiteOf(u.AbsoluteUri) ?? host);
+            }
+            else if (!MaterialDialog.Ask(this, "Delete site data?", null, new[] { Tuple.Create(IconData.Cookie, "Cookies and stored data of " + host + ". You may be signed out.") }, "Delete"))
                 return;
             if (t?.Created != true) return;
             var core = t.View.CoreWebView2;

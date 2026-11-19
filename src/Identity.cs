@@ -27,7 +27,8 @@ namespace GBrowser
             string site = Blocking.SiteOf(href) ?? Blocking.HostOf(href) ?? "";
             uint seed;
             using (var sha = SHA256.Create())
-                seed = BitConverter.ToUInt32(sha.ComputeHash(Encoding.UTF8.GetBytes(S.IdentitySeed + "|" + site)), 0);
+                seed = BitConverter.ToUInt32(sha.ComputeHash(Encoding.UTF8.GetBytes(S.IdentitySeed + "|" + site + "|" +
+                    (S.SiteSalts.TryGetValue(site, out var salt) ? salt : ""))), 0);
             var sb = new StringBuilder("{\"desktop\":true,\"seed\":");
             sb.Append(seed).Append(",\"start\":").Append(S.IdentityStart).Append(",\"cn\":").Append(S.IdentityNoise ? "true" : "false").Append(",\"site\":");
             FilterEngine.JsonString(sb, site);
@@ -51,6 +52,15 @@ namespace GBrowser
             S.IdentitySeed = BitConverter.ToInt64(b, 0) & long.MaxValue;
             // a session that "started" a few minutes ago (an exact "now" in every rewritten time stamp is itself a sign)
             S.IdentityStart = Store.Now() - (60000 + (long)(b[0] * 1000L * 2));
+            S.SiteSalts.Clear();
+            Store.SaveSettings();
+        }
+
+        /// <summary>Fresh start for one site (one that blocked or keeps recognising you): its own new identity values; its
+        /// cookies and stored data are cleared by the caller. Other sites keep theirs.</summary>
+        public static void NewForSite(string site)
+        {
+            S.SiteSalts[site] = Guid.NewGuid().ToString("N").Substring(0, 12);
             Store.SaveSettings();
         }
 
