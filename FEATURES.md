@@ -43,7 +43,7 @@ Last full audit: 19-11-2026.
 | Site info panel (icon left of the address: connection, permissions with switches + reset, cookies count + delete site data, ad blocking on the site, site settings) | Done (19-11-2026); certificate viewer missing |
 | Zoom indicator in the address bar (click to reset) | Done 19-11-2026 (zoom-in / zoom-out icon left of the star while the page differs from the default zoom, tooltip with the percentage, click = reset; tested) |
 | Bookmark star / Ctrl+D: "Bookmark added" with name, address, folder, Remove (Chrome's bubble) | Done 19-11-2026 |
-| Copy link / QR code / share page | Partly, 19-11-2026: Copy link in the main menu ("Link copied" bubble; tested). QR code and Windows Share still Missing |
+| Copy link / QR code / share page | Partly, 19-11-2026: Copy link (main menu, tested) and Create QR code (main menu > gbrowser://qr: editable address, live code, Download as PNG; own encoder pages/qrcode.js, byte mode level M, checked by an independent decoder against the ISO tables for versions 2-19 incl. Unicode: tools/local/qr_check.py). Windows Share still Missing |
 
 ## Page and content
 | Feature | Status |

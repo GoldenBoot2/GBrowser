@@ -25,6 +25,7 @@ ICONS = [
     ('Check', 'check', ''), ('Pause', 'pause', ''), ('Play', 'play_arrow', ''), ('File', 'draft', ''),
     ('ArrowDrop', 'arrow_drop_down', ''), ('Palette', 'palette', ''), ('Colorize', 'colorize', ''),
     ('Desktop', 'desktop_windows', ''), ('Edit', 'edit', ''),
+    ('QrCode', 'qr_code_2', ''),
     # window buttons drawn in the tab row (thin weight, 20 px optical size, like Chrome's 1 px lines)
     ('WinMin', 'remove', 'wght300', 20), ('WinMax', 'crop_square', 'wght300', 20),
     ('WinRestore', 'filter_none', 'wght300', 20), ('WinClose', 'close', 'wght300', 20),

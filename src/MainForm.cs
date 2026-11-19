@@ -1359,6 +1359,7 @@ namespace GBrowser
             bool web = curUrl != null && (curUrl.StartsWith("http://") || curUrl.StartsWith("https://"));
             m.Add("Save page as...", IconData.Download, "Ctrl+S", SavePageAs).Enabled = web;
             m.Add("Copy link", IconData.Link, null, CopyLink).Enabled = web;
+            m.Add("Create QR code", IconData.QrCode, null, () => NewTab(Pages.Url("qr") + "?u=" + Uri.EscapeDataString(WebUrl ?? ""))).Enabled = web;
             m.Add("View page source", IconData.Code, "Ctrl+U", ViewSource).Enabled = web;
             m.Add("Full screen", IconData.Fullscreen, "F11", () => SetFullscreen(!fullscreen));
             m.Add("Developer tools", IconData.Code, "F12", () =>

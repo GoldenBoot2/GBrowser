@@ -1,0 +1,4 @@
+.qrcard { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; }
+.qrcard .field { width: 100%; box-sizing: border-box; }
+.qrcard canvas.qr { width: 240px; height: 240px; image-rendering: pixelated; border-radius: 12px; }
+.qrcard .actions { display: flex; justify-content: flex-end; width: 100%; }

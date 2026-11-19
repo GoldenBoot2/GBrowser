@@ -57,6 +57,8 @@ namespace GBrowser
                 case "cookies": return "Cookies and site data";
                 case "log": return "Request log";
                 case "tests": return "Blocking tests";
+                case "identity": return "Identity check";
+                case "qr": return "QR code";
                 case "insecure": return "Not secure";
                 case "certerror": return "Privacy error";
                 default: return "New tab";
