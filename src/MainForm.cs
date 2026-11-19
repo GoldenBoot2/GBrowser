@@ -1826,6 +1826,7 @@ namespace GBrowser
             if (site != null && st.AdblockEnabled) m.Add("Hide an element on this page", IconData.Block, null, () => PickElement(null));
             if (t != null) m.Add("Request log", IconData.Find, null, () => NewTab(Pages.Url("log") + "?tab=" + t.Id));
             if (st.HideIdentity) m.Add("New identity", IconData.Person, "Identity " + Identity.Id, () => NewIdentity());
+            if (t != null && site != null) m.Add("Identity check", IconData.Verified, null, () => NewTab(Pages.Url("identity") + "?tab=" + t.Id));
             m.Add("Blocking tests", IconData.Verified, null, () => OpenPage("tests"));
             m.Add("Ad blocking settings", IconData.Settings, null, () => OpenPage("settings"));
             m.ShowAt(toolbar, toolbar.ButtonRect("shield"), true, "shield");
@@ -2510,6 +2511,43 @@ namespace GBrowser
                     string origin = Str(m, "origin"), types = Str(m, "types") ?? "local_storage,indexeddb,cache_storage,service_workers,file_systems,websql,shader_cache";
                     await tab.View.CoreWebView2.CallDevToolsProtocolMethodAsync("Storage.clearDataForOrigin", Store.ToJson(new Dictionary<string, object> { { "origin", origin }, { "storageTypes", types } }));
                     return null;
+                }
+                case "identity.probe":
+                {
+                    // what the site in that tab can read: assets/idprobe.js in its page (main world, identity changes applied)
+                    int id = (int)Lng(m, "tab", 0);
+                    var target = App.Windows.SelectMany(w => w.Tabs).FirstOrDefault(x => x.Id == id);
+                    if (target?.Created != true) throw new Exception("The tab was closed");
+                    var core2 = target.View.CoreWebView2;
+                    string page = core2.Source;
+                    if (!page.StartsWith("http")) throw new Exception("Open a website in that tab first");
+                    string js = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "idprobe.js"), System.Text.Encoding.UTF8);
+                    var res = Store.FromJson<Dictionary<string, object>>(await core2.CallDevToolsProtocolMethodAsync("Runtime.evaluate",
+                        Store.ToJson(new Dictionary<string, object> { { "expression", js }, { "awaitPromise", true }, { "returnByValue", true } })));
+                    var inner = res.TryGetValue("result", out var ro) ? ro as Dictionary<string, object> : null;
+                    string json = inner != null && inner.TryGetValue("value", out var vo) ? vo as string : null;
+                    if (json == null) throw new Exception("The check could not run on this page");
+                    // kept here, not in the page's storage: New identity clears all site storage, the check page's too
+                    string siteKey = Blocking.SiteOf(page) ?? Blocking.HostOf(page);
+                    object prevCheck = null;
+                    if (st.HideIdentity)
+                    {
+                        if (!st.IdentityChecks.TryGetValue(siteKey, out var hist)) st.IdentityChecks[siteKey] = hist = new List<string>();
+                        string idNow = Identity.Id;
+                        hist.RemoveAll(x => Store.FromJson<Dictionary<string, object>>(x).TryGetValue("id", out var hid) && (hid as string) == idNow);
+                        hist.Insert(0, Store.ToJson(new Dictionary<string, object> { { "id", idNow }, { "at", Store.Now() }, { "values", Store.FromJson<Dictionary<string, object>>(json) } }));
+                        if (hist.Count > 5) hist.RemoveRange(5, hist.Count - 5);
+                        if (st.IdentityChecks.Count > 50) st.IdentityChecks.Remove(st.IdentityChecks.Keys.First(k => k != siteKey));
+                        if (hist.Count > 1) prevCheck = Store.FromJson<Dictionary<string, object>>(hist[1]);
+                        Store.SaveSettings();
+                    }
+                    return new Dictionary<string, object>
+                    {
+                        { "prev", prevCheck },
+                        { "page", page }, { "site", Blocking.SiteOf(page) ?? Blocking.HostOf(page) }, { "title", target.Title },
+                        { "on", st.HideIdentity }, { "noise", st.IdentityNoise }, { "id", Identity.Id },
+                        { "values", Store.FromJson<Dictionary<string, object>>(json) },
+                    };
                 }
                 case "log.get":
                 {

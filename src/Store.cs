@@ -184,6 +184,7 @@ namespace GBrowser
         public bool IdentityEachStart { get; set; } = true;      // a new identity at every start
         public long IdentitySeed { get; set; }
         public long IdentityStart { get; set; }
+        public Dictionary<string, List<string>> IdentityChecks { get; set; } = new Dictionary<string, List<string>>();   // identity check results per site (newest first, JSON)
         public List<string> ConsentIds { get; set; } = new List<string>();   // consent cookie IDs GBrowser wrote (Consent.cs)
         public Dictionary<string, string> SiteSalts { get; set; } = new Dictionary<string, string>();   // "Fresh start" per site       // host lists downloaded again each day
         public long HostListsUpdated { get; set; }   // where the star puts new bookmarks (the last folder chosen)
