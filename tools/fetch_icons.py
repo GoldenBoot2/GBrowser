@@ -29,6 +29,7 @@ ICONS = [
     ('Videocam', 'videocam', 'fill1'), ('Mic', 'mic', 'fill1'),
     ('TextFields', 'text_fields', ''), ('FontDownload', 'font_download', ''),
     ('ArrowUp', 'arrow_upward', ''), ('ArrowDown', 'arrow_downward', ''), ('Spellcheck', 'spellcheck', ''),
+    ('Share', 'share', ''),
     # window buttons drawn in the tab row (thin weight, 20 px optical size, like Chrome's 1 px lines)
     ('WinMin', 'remove', 'wght300', 20), ('WinMax', 'crop_square', 'wght300', 20),
     ('WinRestore', 'filter_none', 'wght300', 20), ('WinClose', 'close', 'wght300', 20),
