@@ -77,6 +77,9 @@ namespace GBrowser
         public static void Quit(bool restart = false)
         {
             if (Quitting) return;
+            var first = Windows.FirstOrDefault();
+            if (first != null && !first.ConfirmExit()) return;   // downloads running and the user keeps GBrowser open
+            foreach (var w in Windows) w.CloseConfirmed = true;
             Quitting = true;
             RestartAfter = restart;
             SaveSession(Windows.ToList());

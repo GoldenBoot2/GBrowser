@@ -3019,10 +3019,31 @@ namespace GBrowser
 
         bool sessionSaved;
 
+        public bool CloseConfirmed;
+
+        /// <summary>Like Chrome: closing GBrowser while downloads run asks first. False = the user keeps GBrowser open.</summary>
+        public bool ConfirmExit()
+        {
+            if (CloseConfirmed) return true;
+            int running = Downloads.All.Count(d => d.State == "in_progress");
+            if (running > 0 && !MaterialDialog.Ask(this, running == 1 ? "Cancel download?" : "Cancel " + running + " downloads?", null,
+                    new[] { Tuple.Create(IconData.Download, running == 1 ? "A download is still running." : running + " downloads are still running.") },
+                    "Exit", "Keep downloading"))
+                return false;
+            CloseConfirmed = true;
+            return true;
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            devDock?.Shutdown();   // docked DevTools windows go back to the engine before the window closes
             bool last = App.Windows.Count <= 1;   // GBrowser closes with this window
+            // never asked when Windows itself shuts down
+            if (last && e.CloseReason != CloseReason.WindowsShutDown && e.CloseReason != CloseReason.TaskManagerClosing && !ConfirmExit())
+            {
+                e.Cancel = true;
+                return;
+            }
+            devDock?.Shutdown();   // docked DevTools windows go back to the engine before the window closes
             // session logins (cookies without an expiry date) are kept for next time, like Chrome's session restore
             // (not after the engine itself stopped: it cannot be asked any more, and closing must never be blocked)
             if (last && !sessionSaved && !Store.Settings.ClearOnExit && !engineAsked)

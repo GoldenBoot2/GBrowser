@@ -75,7 +75,7 @@ Last full audit: 19-11-2026.
 | Location, ask where to save, file-exists choice | Done |
 | SmartScreen: block shown in GBrowser, Download anyway | Done (19-11-2026) |
 | Show downloads when a download starts (bubble) | Missing (button only) |
-| Warn when closing with downloads running | Missing |
+| Warn when closing with downloads running | Done 19-11-2026 (closing the last window or Exit: "Cancel download?" with Keep downloading / Exit; not asked at Windows shutdown; tested both answers with a 1 GB download) |
 | "Always open files of this type" | Missing |
 
 ## Ad blocking (AdGuard / uBlock level control)
