@@ -60,7 +60,8 @@ namespace GBrowser
             Security.ApplySecureDnsPref(Path.Combine(Store.WebDataDir, "EBWebView", "Local State"), Security.ActiveSecureDns);
             Cookies.ThirdPartyActive = Store.Settings.BlockThirdPartyCookies;
             Cookies.ApplyThirdPartyPref(Path.Combine(Store.WebDataDir, "EBWebView", "Default", "Preferences"), Cookies.ThirdPartyActive);
-            Fonts.ApplyPrefs(Path.Combine(Store.WebDataDir, "EBWebView", "Default", "Preferences"));   // font size and fonts (Fonts.cs)
+            Fonts.ApplyPrefs(EnginePrefs.ProfilePrefs);       // font size and fonts (Fonts.cs)
+            Languages.ApplyPrefs(EnginePrefs.ProfilePrefs);   // languages and spell check (Languages.cs)
             var opts = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
             return await CoreWebView2Environment.CreateAsync(null, Store.WebDataDir, opts);
         }

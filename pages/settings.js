@@ -79,6 +79,40 @@
   });
   if (location.hash === '#appearance') document.getElementById('appearance').scrollIntoView();
 
+  // Languages (Chrome's Settings > Languages): the order is the Accept-Language header and navigator.languages
+  const langAll = await gb.send('languages.all');
+  const langName = c => (langAll.find(l => l.code === c) || {}).name || c;
+  let langs = s.Languages && s.Languages.length ? s.Languages.slice() : navigator.languages.slice();
+  const langList = el('div');
+  const langRestart = el('div', { class: 'row' }, icon('Restore'), el('div', { class: 'text' },
+    el('div', { class: 'title', text: 'Restart GBrowser to use the new language settings' })),
+    el('button', { class: 'btn', onclick: () => gb.send('app.restart') }, icon('Refresh'), 'Restart'));
+  async function langState() { const st = await gb.send('languages.state'); langRestart.style.display = st.restart ? '' : 'none'; }
+  async function saveLangs(list) { await set('Languages', list); s.Languages = list.length ? list : null; langs = list.length ? list : navigator.languages.slice(); drawLangs(); langState(); }
+  const langAdd = el('select', { 'aria-label': 'Add a language' });
+  langAdd.addEventListener('change', () => { if (langAdd.value && !langs.includes(langAdd.value)) saveLangs(langs.concat(langAdd.value)); });
+  const langReset = el('button', { class: 'btn text', text: 'Use Windows languages', onclick: () => saveLangs([]) });
+  function drawLangs() {
+    langList.textContent = '';
+    langs.forEach((c, i) => {
+      const up = iconButton('ArrowUp', 'Move up', () => { const l = langs.slice(); [l[i - 1], l[i]] = [l[i], l[i - 1]]; saveLangs(l); });
+      const down = iconButton('ArrowDown', 'Move down', () => { const l = langs.slice(); [l[i + 1], l[i]] = [l[i], l[i + 1]]; saveLangs(l); });
+      const del = iconButton('Close', 'Remove', () => saveLangs(langs.filter(x => x !== c)));
+      if (i === 0) up.disabled = true;
+      if (i === langs.length - 1) down.disabled = true;
+      if (langs.length === 1) del.disabled = true;
+      langList.append(el('div', { class: 'row' }, icon('Language'), el('div', { class: 'text' },
+        el('div', { class: 'title', text: langName(c) }), el('div', { class: 'sub', text: c })), el('div', { class: 'actions' }, up, down, del)));
+    });
+    langAdd.textContent = '';
+    langAdd.append(el('option', { value: '', text: 'Add a language' }), ...langAll.filter(l => !langs.includes(l.code)).map(l => el('option', { value: l.code, text: l.name + ' (' + l.code + ')' })));
+    langReset.hidden = !(s.Languages && s.Languages.length) && langs.join() === navigator.languages.join();
+  }
+  drawLangs();
+  langState();
+  main.append(el('div', { class: 'card', id: 'languages' }, el('h2', { text: 'Languages' }), langList,
+    el('div', { class: 'row' }, el('div', { class: 'text' }), langReset, langAdd), langRestart));
+
   // Start and search
   const engine = el('select', { 'aria-label': 'Search engine' }, engines.map(e => el('option', { value: e.id, text: e.name, selected: e.id === s.SearchEngine })));
   engine.addEventListener('change', () => set('SearchEngine', engine.value));

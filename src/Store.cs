@@ -160,6 +160,8 @@ namespace GBrowser
         public string FontSerif { get; set; }
         public string FontSans { get; set; }
         public string FontFixed { get; set; }
+        public List<string> Languages { get; set; }          // Settings > Languages (null = the engine's default from Windows)
+        public bool LanguagesWritten { get; set; }           // GBrowser wrote a language list into the engine's preferences
         public List<string> AutoOpenTypes { get; set; } = new List<string>();   // ".pdf" ...: "Always open files of this type"   // Settings > Appearance > Page zoom (sites without their own zoom)
         public bool ClearOnExit { get; set; } = false;           // cookies, site data, cache, history when GBrowser closes
         public List<string> AllowedSites { get; set; } = new List<string>();

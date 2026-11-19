@@ -69,7 +69,7 @@ namespace GBrowser
                 // through the engine's own text input (the right-click selected it)
                 if (engine.ContainsKey("spellcheck") && selection.Length > 0 && selection.Length < 64 && selection.IndexOf(' ') < 0)
                 {
-                    string lang = System.Globalization.CultureInfo.CurrentUICulture.Name;
+                    string lang = Languages.SpellLanguage;
                     var sug = WinSpell.Suggest(selection, lang);
                     foreach (var w in sug)
                     {

@@ -2430,6 +2430,14 @@ namespace GBrowser
                         case "HttpsFirst": st.HttpsFirst = v is bool s1 && s1; break;
                         case "ClearOnExit": st.ClearOnExit = v is bool s2 && s2; break;
                         case "HostListUpdates": st.HostListUpdates = v is bool hu && hu; break;
+                        case "Languages":
+                        {
+                            var list = new List<string>();
+                            if (v is System.Collections.IEnumerable en && !(v is string))
+                                foreach (var o in en) if (o is string code && code.Length >= 2 && code.Length <= 12 && !list.Contains(code)) list.Add(code);
+                            st.Languages = list.Count > 0 ? list : null;
+                            break;
+                        }
                         case "FontSize":
                         case "FontStandard":
                         case "FontSerif":
@@ -2839,6 +2847,8 @@ namespace GBrowser
                 }
                 case "tasks.list": return await TaskList();
                 case "fonts.list": return Fonts.Installed();
+                case "languages.all": return Languages.All();
+                case "languages.state": return new Dictionary<string, object> { { "restart", Languages.Key != Languages.Active } };
                 case "fonts.state": return new Dictionary<string, object> { { "restart", Fonts.Families != Fonts.ActiveFamilies } };
                 case "tasks.end":
                 {

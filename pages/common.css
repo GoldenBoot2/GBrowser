@@ -121,3 +121,4 @@ details.fonts > summary .chev { margin-left: auto; transition: transform .15s; }
 details.fonts[open] > summary .chev { transform: rotate(180deg); }
 details.fonts .sub-rows { padding-left: 36px; }
 details.fonts .sub-rows select { max-width: 260px; }
+.icon-btn:disabled { opacity: .38; cursor: default; }
