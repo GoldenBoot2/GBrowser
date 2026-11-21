@@ -558,6 +558,8 @@
     ['startup-sec', 'On startup', 'Restore', [startupCard]],
     ['languages-sec', 'Languages', 'Language', [main.querySelector('#languages')]],
     ['downloads-sec', 'Downloads', 'Download', [cardOf('Downloads')]],
+    ['system-sec', 'System', 'Desktop', [card('Developer tools', 'devtools',
+      row('Code', 'Skip sites\u2019 debugger pauses', 'Sites that block developer tools keep running', sw('SkipSiteDebugger')))]],
     // shown here, not in a new tab: their pages' scripts draw into these boxes (loaded when the section is first opened)
     ['extensions-sec', 'Extensions', 'Extension', [el('div', { class: 'embed', 'data-script': 'extensions.js' })]],
     ['about-sec', 'About GBrowser', 'Info', [el('div', { class: 'embed', 'data-script': 'about.js' })]],

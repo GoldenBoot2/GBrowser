@@ -16,6 +16,8 @@ namespace GBrowser
     /// Before GBrowser closes, every docked window is given back to the engine and closed normally.</summary>
     internal sealed class DevToolsDock
     {
+        /// <summary>A tab's DevTools window appeared (GBrowser then prepares it: DevToolsGuard).</summary>
+        public event Action<BrowserTab> Opened;
         readonly Form form;
         readonly Panel host = new Panel { Visible = false };           // header + clip area
         readonly Panel clip = new Panel { Dock = DockStyle.Fill };     // DevTools window lives here (clips its title bar)
@@ -82,6 +84,7 @@ namespace GBrowser
             if (tab == null) return;
             if (windows.TryGetValue(tab, out var old) && old != hwnd && IsWindow(old)) Close(old);
             windows[tab] = hwnd;
+            try { Opened?.Invoke(tab); } catch { }
             // measured while it is still the engine's normal window: once inside GBrowser it lays itself out again
             // asynchronously and answers hit tests from its old layout. Retried briefly until the title bar is there.
             int[] fr = MeasureFrame(hwnd);

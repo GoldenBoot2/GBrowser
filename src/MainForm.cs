@@ -24,6 +24,24 @@ namespace GBrowser
         PageMenu.Host pageMenuHost;
         string lastContextInfo;   // test builds: what the last page right-click offered
         DevToolsDock devDock;
+        string pendingDevToolsAction;   // what the DevTools window should do once it is open (console / inspect)
+
+        /// <summary>F12 / Ctrl+Shift+I and the menu item: open or close this tab's DevTools (Chrome).</summary>
+        void ToggleDevTools()
+        {
+            if (devDock.Docked(Current)) { devDock.CloseCurrent(); return; }
+            if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow();
+        }
+
+        /// <summary>Ctrl+Shift+J (console) / Ctrl+Shift+C (inspect an element): DevTools opens (if needed) and shows it.</summary>
+        void OpenDevTools(string action)
+        {
+            var t = Current;
+            if (t?.Created != true) return;
+            if (devDock.Docked(t)) { _ = DevToolsGuard.Apply(t.View.CoreWebView2, t.View.CoreWebView2.Source, action, 3000); return; }
+            pendingDevToolsAction = action;
+            t.View.CoreWebView2.OpenDevToolsWindow();
+        }
         readonly Timer sleepTimer = new Timer { Interval = 30000 };
         readonly Stack<string> closedTabs = new Stack<string>();
         CoreWebView2Environment env;
@@ -95,6 +113,11 @@ namespace GBrowser
             outer.Controls.Add(content);
             Controls.Add(outer);
             devDock = new DevToolsDock(this, content, () => Current, () => Tabs);
+            devDock.Opened += t =>
+            {
+                string act = pendingDevToolsAction; pendingDevToolsAction = null;
+                if (t.Created) _ = DevToolsGuard.Apply(t.View.CoreWebView2, t.View.CoreWebView2.Source, act);
+            };
             content.Controls.Add(bubble);
             content.Resize += (s, e) => bubble.Place();
             content.Controls.Add(findBar);
@@ -1584,12 +1607,7 @@ namespace GBrowser
             m.AddSub("More tools", IconData.Build, sm =>
             {
                 sm.Add("Task manager", IconData.Memory, "Shift+Esc", () => OpenPage("tasks"));
-                sm.Add("Developer tools", IconData.Code, "F12", () =>
-                {
-                    // like Chrome: toggles this tab's DevTools (it docks itself when it opens)
-                    if (devDock.Docked(Current)) devDock.CloseCurrent();
-                    else if (Current?.Created == true) Current.View.CoreWebView2.OpenDevToolsWindow();
-                });
+                sm.Add("Developer tools", IconData.Code, "Ctrl+Shift+I", ToggleDevTools);   // Chrome's menu shows Ctrl+Shift+I
                 sm.Add("View page source", IconData.Code, "Ctrl+U", ViewSource).Enabled = web;
                 string keepSite = Pages.IsInternal(curUrl) ? null : Blocking.SiteOf(curUrl);   // GBrowser's own pages never unload
                 if (keepSite != null)
@@ -2536,6 +2554,10 @@ namespace GBrowser
                     if (kv.Value == extKey && enabledExtensions.Contains(kv.Key)) { OpenExtension(kv.Key, ExtAnchor(kv.Key)); return true; }
             switch (keyData)
             {
+                case Keys.F12:
+                case Keys.Control | Keys.Shift | Keys.I: ToggleDevTools(); return true;
+                case Keys.Control | Keys.Shift | Keys.J: OpenDevTools("console"); return true;
+                case Keys.Control | Keys.Shift | Keys.C: OpenDevTools("inspect"); return true;
                 case Keys.Control | Keys.T: NewTab(null); return true;
                 case Keys.Control | Keys.N: App.NewWindow(null); return true;
                 case Keys.Control | Keys.Shift | Keys.W: Close(); return true;
@@ -2811,6 +2833,11 @@ namespace GBrowser
                         case "RestoreTabs": st.RestoreTabs = v is bool rb && rb; break;
                         case "SleepMinutes": st.SleepMinutes = Math.Max(0, Math.Min(240, Convert.ToInt32(v))); break;
                         case "LowMemoryHiddenTabs": st.LowMemoryHiddenTabs = v is bool lb && lb; break;
+                        case "SkipSiteDebugger":
+                            st.SkipSiteDebugger = v is bool sd && sd;
+                            Store.SaveSettings();
+                            foreach (var w in App.Windows) foreach (var tt in w.Tabs.Where(x => x.Created)) { _ = DevToolsGuard.ApplyAll(tt.View.CoreWebView2); break; }
+                            break;
                         case "ShowHomeButton": st.ShowHomeButton = v is bool hb && hb; UpdateUi(); break;
                         case "ShowBookmarksBar": st.ShowBookmarksBar = v is bool sb && sb; bookmarksBar.Visible = st.ShowBookmarksBar && !fullscreen; break;
                         case "AdblockEnabled": st.AdblockEnabled = v is bool a1 && a1; break;
@@ -3662,6 +3689,7 @@ namespace GBrowser
                     var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString, null);
                     return ext.Id + " " + ext.Name;
                 }
+                case "devguard": return Current?.Created == true ? await DevToolsGuard.Apply(Current.View.CoreWebView2, Current.View.CoreWebView2.Source, arg.Length > 0 ? arg : null, 5000) : "no tab";
                 case "sqlitecheck":   // sqlitecheck <db file>: rows of icon_mapping + favicon_bitmaps, image bytes, md5 of all images
                 {
                     using (var r = new SqliteReader(arg))
