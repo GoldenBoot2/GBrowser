@@ -183,6 +183,10 @@ namespace GBrowser
             };
             toolbar.DownloadsClicked += () => ShowDownloadBubble(false);
             toolbar.ExtensionsClicked += ShowExtensionsMenu;
+            toolbar.ActionClicked += (id, r) => OpenExtension(id, r);
+            toolbar.ActionMenu += (id, r) => ShowExtensionContextMenu(id, r);
+            Extensions.Changed += OnExtensionsChanged;
+            FormClosed += (s2, e2) => Extensions.Changed -= OnExtensionsChanged;
             toolbar.StoreChipClicked += InstallFromStorePage;
             toolbar.ShieldClicked += ShowShieldMenu;
             toolbar.SiteInfoClicked += () => { _ = ShowSiteInfo(); };
@@ -2050,6 +2054,104 @@ namespace GBrowser
                     if (!installed.Any(e => e.Id == kv.Key) && !Directory.Exists(kv.Value)) Extensions.Index.Remove(kv.Key);
             }
             catch { }
+            await RefreshPinned();
+        }
+
+        readonly HashSet<string> enabledExtensions = new HashSet<string>();
+
+        void OnExtensionsChanged()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            if (InvokeRequired) { BeginInvoke((Action)OnExtensionsChanged); return; }
+            _ = RefreshPinned();
+        }
+
+        int ExtIconPx => (int)Math.Round(16 * DeviceDpi / 96f);
+
+        /// <summary>Pinned extensions on the toolbar (Chrome: left of the extensions button, in the user's order).</summary>
+        async Task RefreshPinned()
+        {
+            var profile = Profile;
+            if (profile == null) return;
+            IReadOnlyList<CoreWebView2BrowserExtension> list;
+            try { list = await profile.GetBrowserExtensionsAsync(); } catch { return; }
+            if (IsDisposed) return;
+            Extensions.SyncPins(list.Select(e => e.Id));
+            enabledExtensions.Clear();
+            foreach (var e in list) if (e.IsEnabled && Extensions.Index.ContainsKey(e.Id)) enabledExtensions.Add(e.Id);
+            foreach (var a in toolbar.Actions) a.Icon?.Dispose();
+            toolbar.Actions.Clear();
+            foreach (var id in Store.Settings.PinnedExtensions ?? new List<string>())
+            {
+                var e = list.FirstOrDefault(x => x.Id == id);
+                if (e == null || !enabledExtensions.Contains(id)) continue;
+                toolbar.Actions.Add(new Toolbar.ExtAction { Id = id, Name = e.Name, Icon = Extensions.IconOrLetter(id, e.Name, ExtIconPx) });
+            }
+            toolbar.LayoutNow();
+        }
+
+        /// <summary>Where an extension's popup opens: under its pinned icon, else under the extensions button (Chrome).</summary>
+        Rectangle ExtAnchor(string id)
+        {
+            var r = toolbar.ActionRect(id);
+            if (r.IsEmpty) r = toolbar.ButtonRect("ext");
+            return toolbar.RectangleToScreen(r);
+        }
+
+        /// <summary>Clicking an extension (toolbar icon, menu row, shortcut): its popup, else its options page, else its menu.</summary>
+        void OpenExtension(string id, Rectangle anchorScreen)
+        {
+            var man = Extensions.Manifest(id);
+            string popup = Extensions.PopupPage(man), options = Extensions.OptionsPage(man);
+            if (popup != null) ShowExtensionPopup(id, popup, anchorScreen);
+            else if (options != null) NewTab("chrome-extension://" + id + "/" + options);
+            else ShowExtensionContextMenu(id, anchorScreen);
+        }
+
+        /// <summary>The extension's own menu (Chrome: right-click on its toolbar icon, or its "More options" button).</summary>
+        async void ShowExtensionContextMenu(string id, Rectangle anchorScreen)
+        {
+            var profile = Profile;
+            if (profile == null) return;
+            string name = id;
+            try { name = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(x => x.Id == id)?.Name ?? id; } catch { }
+            var man = Extensions.Manifest(id);
+            var d = Extensions.Details(id);
+            string home = d != null ? d["homepage"] as string : null;
+            var m = NewMenu();
+            var top = m.Add(name, IconData.Extension, null, string.IsNullOrEmpty(home) ? (Action)(() => OpenExtensionDetails(id)) : () => NewTab(home));
+            top.Image = Extensions.IconOrLetter(id, name, ExtIconPx);
+            string url = Current?.Created == true ? Current.View.CoreWebView2.Source : Current?.Url;
+            m.AddNote(url != null && Extensions.CanAccess(id, url) ? "Can read and change this site" : "Can't read or change this site");
+            m.AddSeparator();
+            string options = Extensions.OptionsPage(man);
+            if (options != null) m.Add("Options", IconData.Settings, null, () => NewTab("chrome-extension://" + id + "/" + options));
+            m.Add("Remove from GBrowser...", IconData.Delete, null, () => AskRemoveExtension(id, name));
+            bool pinned = Extensions.IsPinned(id);
+            m.Add(pinned ? "Unpin" : "Pin", pinned ? IconData.Unpin : IconData.Pin, null, () => { Extensions.SetPinned(id, !pinned); Extensions.RaiseChanged(); });
+            m.Add("Manage extension", IconData.Extension, null, () => OpenExtensionDetails(id));
+            m.ShowAt(toolbar, toolbar.RectangleToClient(anchorScreen), true, "extmenu:" + id);
+        }
+
+        async void AskRemoveExtension(string id, string name)
+        {
+            Image img = Extensions.Icon(id, (int)Math.Round(40 * DeviceDpi / 96f));
+            bool ok;
+            try { ok = MaterialDialog.Ask(this, "Remove \"" + name + "\"?", img, new List<Tuple<string, string>>(), "Remove"); }
+            finally { img?.Dispose(); }
+            if (!ok || Profile == null) return;
+            try { await Extensions.Remove(Profile, id); } catch (Exception ex) { MaterialDialog.Info(this, "Not removed", ex.Message); }
+            Extensions.RaiseChanged();
+        }
+
+        /// <summary>gbrowser://extensions/?id=... (Chrome's details page of one extension).</summary>
+        void OpenExtensionDetails(string id)
+        {
+            string url = Pages.Url("extensions") + "?id=" + id;
+            int existing = Tabs.FindIndex(x => x.Url != null && Pages.PageName(x.Url) == "extensions");
+            if (existing >= 0) { Select(existing); Tabs[existing].Navigate(url); return; }
+            if (Current != null && Pages.PageName(Current.Url) == "newtab") Current.Navigate(url);
+            else NewTab(url);
         }
 
         async void ShowExtensionsMenu()
@@ -2062,17 +2164,26 @@ namespace GBrowser
                 try { list = await profile.GetBrowserExtensionsAsync(); } catch { }
                 m.AddHeader("Extensions", IconData.Extension);
                 int before = m.Items.Count;
-                foreach (var ext in list ?? new List<CoreWebView2BrowserExtension>())
+                // Chrome: every turned-on extension, by name; the row opens it, then Pin and More options buttons
+                foreach (var ext in (list ?? new List<CoreWebView2BrowserExtension>()).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase))
                 {
                     if (!ext.IsEnabled || !Extensions.Index.ContainsKey(ext.Id)) continue;
-                    var man = Extensions.Manifest(ext.Id);
-                    string popup = Extensions.PopupPage(man), options = Extensions.OptionsPage(man);
                     string id = ext.Id;
-                    Action open = popup != null ? (Action)(() => ShowExtensionPopup(id, popup))
-                        : options != null ? () => NewTab("chrome-extension://" + id + "/" + options) : (Action)null;
-                    var it = m.Add(ext.Name, IconData.Extension, null, open);
-                    it.Image = Extensions.Icon(ext.Id);
-                    it.Enabled = open != null;
+                    bool pinned = Extensions.IsPinned(id);
+                    var pin = new MaterialMenu.RowButton { Icon = pinned ? IconData.PinFill : IconData.Pin, Tip = pinned ? "Unpin" : "Pin", KeepOpen = true };
+                    pin.Click = () =>
+                    {
+                        bool now = !Extensions.IsPinned(id);
+                        Extensions.SetPinned(id, now);
+                        pin.Icon = now ? IconData.PinFill : IconData.Pin;
+                        pin.Tip = now ? "Unpin" : "Pin";
+                        Extensions.RaiseChanged();
+                    };
+                    var more = new MaterialMenu.RowButton { Icon = IconData.More, Tip = "More options" };
+                    more.Click = () => ShowExtensionContextMenu(id, ExtAnchor(id));
+                    var it = m.AddButtons(ext.Name, IconData.Extension, pin, more);
+                    it.Image = Extensions.IconOrLetter(id, ext.Name, ExtIconPx);
+                    it.Click = () => OpenExtension(id, ExtAnchor(id));
                 }
                 if (m.Items.Count == before) m.AddNote("No extensions");
             }
@@ -2322,7 +2433,7 @@ namespace GBrowser
         bool ConfirmExtension(string name, List<string> access, string iconFile)
         {
             Image img = null;
-            try { if (iconFile != null) using (var i = Image.FromFile(iconFile)) img = new Bitmap(i, 40, 40); } catch { }
+            try { if (iconFile != null) using (var i = Image.FromFile(iconFile)) img = Extensions.Scale(i, (int)Math.Round(40 * DeviceDpi / 96f)); } catch { }
             var lines = new List<Tuple<string, string>>();
             if (access.Count == 0) lines.Add(Tuple.Create(IconData.Verified, "No special access"));
             else lines.Add(Tuple.Create((string)null, "It can:"));
@@ -2331,11 +2442,13 @@ namespace GBrowser
             finally { img?.Dispose(); }
         }
 
-        void ShowExtensionPopup(string id, string page, bool fromTest = false)
+        void ShowExtensionPopup(string id, string page, Rectangle anchorScreen, bool fromTest = false)
         {
-            var r = toolbar.ButtonRect("ext");
-            var p = toolbar.PointToScreen(new Point(r.Right, r.Bottom + 2));
-            lastPopup = new ExtensionPopup(env, "chrome-extension://" + id + "/" + page, p, url => NewTab(url)) { NoActivate = fromTest };
+            // Chrome: clicking the icon of the open popup closes it (focus leaves the popup first, so look at that too)
+            if (lastPopup != null && !lastPopup.IsDisposed && lastPopup.ExtensionId == id) { lastPopup.Close(); return; }
+            if (!fromTest && ExtensionPopup.JustClosed(id)) return;
+            if (lastPopup != null && !lastPopup.IsDisposed) lastPopup.Close();
+            lastPopup = new ExtensionPopup(env, id, "chrome-extension://" + id + "/" + page, anchorScreen, url => NewTab(url)) { NoActivate = fromTest };
             lastPopup.Show(this);
         }
 
@@ -2352,6 +2465,7 @@ namespace GBrowser
                 var core = Current.View.CoreWebView2;
                 var ext = await Extensions.InstallFromStore(core.Profile, id, core.Settings.UserAgent, env.BrowserVersionString, ConfirmExtension);
                 toolbar.StoreChipText = ext == null ? "Add to GBrowser" : "Installed";
+                if (ext != null) Extensions.RaiseChanged();
             }
             catch (Exception ex)
             {
@@ -2365,6 +2479,10 @@ namespace GBrowser
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            var extKey = Store.Settings.ExtensionShortcuts.Count > 0 ? Extensions.KeyText(keyData) : null;
+            if (extKey != null)
+                foreach (var kv in Store.Settings.ExtensionShortcuts)
+                    if (kv.Value == extKey && enabledExtensions.Contains(kv.Key)) { OpenExtension(kv.Key, ExtAnchor(kv.Key)); return true; }
             switch (keyData)
             {
                 case Keys.Control | Keys.T: NewTab(null); return true;
@@ -3117,6 +3235,25 @@ namespace GBrowser
                 }
                 case "keep.remove": st.KeepActiveSites.Remove(Str(m, "site")); Store.SaveSettings(); return null;
                 case "ext.list": return Profile == null ? new List<Dictionary<string, object>>() : await Extensions.List(Profile);
+                case "ext.details": return Extensions.Details(Str(m, "id"));
+                case "ext.prefs": return new Dictionary<string, object> { { "pinNew", st.PinNewExtensions } };
+                case "ext.pinnew": st.PinNewExtensions = m.TryGetValue("on", out var pn) && pn is bool pnb && pnb; Store.SaveSettings(); return null;
+                case "ext.pin":
+                    Extensions.SetPinned(Str(m, "id"), m.TryGetValue("on", out var pv) && pv is bool pvb && pvb);
+                    Extensions.RaiseChanged();
+                    return null;
+                case "ext.shortcut":
+                {
+                    string sid = Str(m, "id"), key = Str(m, "key") ?? "";
+                    if (key.Length == 0) st.ExtensionShortcuts.Remove(sid);
+                    else
+                    {
+                        foreach (var kv in st.ExtensionShortcuts.ToList()) if (kv.Value == key && kv.Key != sid) throw new Exception("Already used");
+                        st.ExtensionShortcuts[sid] = key;
+                    }
+                    Store.SaveSettings();
+                    return null;
+                }
                 case "ext.install":
                 {
                     var id = Extensions.ParseId(Str(m, "text"));
@@ -3124,6 +3261,7 @@ namespace GBrowser
                     var core = tab.View.CoreWebView2;
                     var ext = await Extensions.InstallFromStore(core.Profile, id, core.Settings.UserAgent, env.BrowserVersionString, ConfirmExtension);
                     if (ext == null) throw new Exception("Cancelled");
+                    Extensions.RaiseChanged();
                     return ext.Name;
                 }
                 case "ext.pick":
@@ -3132,6 +3270,7 @@ namespace GBrowser
                     {
                         if (dlg.ShowDialog(this) != DialogResult.OK) return null;
                         var ext = await Extensions.LoadUnpacked(tab.View.CoreWebView2.Profile, dlg.SelectedPath);
+                        Extensions.RaiseChanged();
                         return ext.Name;
                     }
                 }
@@ -3139,9 +3278,10 @@ namespace GBrowser
                 {
                     var ext = (await Profile.GetBrowserExtensionsAsync()).FirstOrDefault(x => x.Id == Str(m, "id"));
                     if (ext != null) await ext.EnableAsync(m.TryGetValue("on", out var on) && on is bool ob && ob);
+                    Extensions.RaiseChanged();
                     return null;
                 }
-                case "ext.remove": await Extensions.Remove(Profile, Str(m, "id")); return null;
+                case "ext.remove": await Extensions.Remove(Profile, Str(m, "id")); Extensions.RaiseChanged(); return null;
                 case "ext.options":
                 {
                     var o = Extensions.OptionsPage(Extensions.Manifest(Str(m, "id")));
@@ -3151,7 +3291,7 @@ namespace GBrowser
                 case "ext.popup":
                 {
                     var p = Extensions.PopupPage(Extensions.Manifest(Str(m, "id")));
-                    if (p != null) ShowExtensionPopup(Str(m, "id"), p);
+                    if (p != null) ShowExtensionPopup(Str(m, "id"), p, ExtAnchor(Str(m, "id")));
                     return null;
                 }
                 default: throw new Exception("Unknown command");
@@ -3439,13 +3579,31 @@ namespace GBrowser
                     var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString, null);
                     return ext.Id + " " + ext.Name;
                 }
+                case "extload":   // load an unpacked extension folder (same path as Load unpacked, without the folder picker)
+                {
+                    var ext = await Extensions.LoadUnpacked(Profile, arg);
+                    Extensions.RaiseChanged();
+                    return ext.Id + " " + ext.Name;
+                }
                 case "extpopup":
                 {
-                    var pp = Extensions.PopupPage(Extensions.Manifest(arg));
+                    // extpopup <id> [page]: the page lets tests open any of the extension's pages as its popup
+                    var ap = arg.Split(' ');
+                    arg = ap[0];
+                    var pp = ap.Length > 1 ? ap[1] : Extensions.PopupPage(Extensions.Manifest(arg));
                     if (pp == null) return "no popup";
-                    ShowExtensionPopup(arg, pp, true);
+                    ShowExtensionPopup(arg, pp, ExtAnchor(arg), true);
                     await Task.Delay(2500);
-                    return lastPopup.Handle.ToString() + " " + lastPopup.Width + "x" + lastPopup.Height;
+                    return lastPopup.Handle.ToString() + " " + lastPopup.Width + "x" + lastPopup.Height + " css " + lastPopup.CssSize.Width + "x" + lastPopup.CssSize.Height;
+                }
+                case "popupsize": return lastPopup == null || lastPopup.IsDisposed ? "no popup" : lastPopup.Width + "x" + lastPopup.Height + " css " + lastPopup.CssSize.Width + "x" + lastPopup.CssSize.Height + " at " + lastPopup.Left + "," + lastPopup.Top;
+                case "extbar":   // pinned toolbar icons: id name rect
+                    return string.Join("; ", toolbar.Actions.Select(a => a.Id + " " + a.Name + " " + a.Rect));
+                case "extmenu":  // the extension's own menu (as a right-click on its icon)
+                {
+                    ShowExtensionContextMenu(arg, ExtAnchor(arg));
+                    await Task.Delay(400);
+                    return MaterialMenu.Current == null ? "no menu" : string.Join(" | ", MaterialMenu.Current.Items.Select(i => i.Text));
                 }
                 case "popupclose": lastPopup?.Close(); return "ok";
                 case "popupclick":   // real mouse click at CSS x y inside the extension popup

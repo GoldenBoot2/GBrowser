@@ -2,7 +2,7 @@
 
 What a current Chrome / Edge (2026) does, and where GBrowser stands. Kept up to date with every change.
 Status: **Done** · **Missing** (to build) · **Engine UI** (works, but shows the engine's Microsoft Edge interface: to replace) · **Not possible** (with reason).
-Last full audit: 19-11-2026.
+Last full audit: 19-11-2026. Extensions audited against Chrome 158 on 21-11-2026.
 
 ## Pending (build order, 19-11-2026)
 0. Undetectable page scripts, open part (user, 19-11-2026; in progress): AdGuard scriptlet audit (done 19-11-2026); same-origin navigated frames (site rules done 19-11-2026); ExtendedCss inline styles; $csp <meta> (with the cookie manager's response-header editing); Stealth read cost on heavy pages (25-28 ms); privacy wrappers (with Hide my identity). See "Undetectable page scripts" below.
@@ -127,6 +127,15 @@ Last full audit: 19-11-2026.
 | Keyboard shortcuts as in Chrome (full list) | Partly |
 | Task manager (Shift+Esc) | Done 19-11-2026 (Shift+Esc / main menu: GBrowser, Browser, GPU, utility, each tab, other-site frames, extensions, spare renderer, matched by frame ID; memory = private bytes, CPU % of one core, process ID; sortable; End process (not for GBrowser / Browser): tested, the tab shows the crashed page; double-click a tab row switches to it) |
 | Extensions (Chrome Web Store) | Done |
+| Extension popups sized like Chrome (min-content width, height at that width, 25..800 x 25..600 CSS px, scrollbars beyond, re-sized whenever the popup's content changes; bubble under the icon that opened it; a second click on the icon closes it) | Done 21-11-2026 (assets/extpopup.js. Measured in real Chrome 158 with tools/local/chrome_extpopup.mjs on 11 test popups (tools/local/extsize): GBrowser gives the same CSS size in 10, the 11th (bold heading in a flex layout) is 1 px taller from text rendering. VisaD: 450 x 600 like its page asks, whole login screen visible. Old code replaced the page's own html width with max-content and measured once) |
+| Pin extensions to the toolbar (icons left of the extensions button, in pin order, sharp icons from the closest real icon size, letter tile when an extension has no icon) | Done 21-11-2026 (pins saved; first start pins every installed extension once; turned-off extensions hide; tested unpin, restart, re-pin, off / on) |
+| Extensions menu like Chrome (by name; row opens the extension; Pin / Unpin button; More options; Manage extensions) | Done 21-11-2026 |
+| Extension menu (right-click a pinned icon / More options): name (opens its store page or details), "Can / Can't read and change this site", Options, Remove, Pin / Unpin, Manage extension | Done 21-11-2026 |
+| chrome://extensions: search, "Pin new extensions to toolbar" (on by default like Chrome 158), details page (on / off, description, version, size, permissions, site access list, pin, options, shortcut, the extension's own commands, source / loaded from, remove), translated names and descriptions (_locales) | Done 21-11-2026 |
+| "Activate the extension" keyboard shortcut (set on the details page; an extension's suggested _execute_action key is assigned when it is added, like Chrome) | Done 21-11-2026 (tested: Ctrl+Shift+8 opened the test extension's popup) |
+| An extension's own keyboard commands (chrome.commands, e.g. VisaD Ctrl+Shift+1) | Unknown: WebView2 does not document them; a DevTools key event did not fire one (21-11-2026); needs one real key press by the user in the test build (test extension: Ctrl+Shift+9 writes to its storage) |
+| Badge text / colour, dynamic title / icon (chrome.action.setBadgeText etc.), action.onClicked for extensions without a popup, per-tab popups (setPopup) | Missing: WebView2 1.0.4314.35 (newest stable, 21-11-2026) has no API for an extension's action state; not tried yet: reading it from the extension's service worker over DevTools. Until then extensions without a popup open their options page or their menu |
+| Site access control (on click / on this site / on all sites), Allow in Incognito, Allow access to file URLs, Developer mode (errors, inspect views, reload, pack) | Not possible yet: no WebView2 API (install / list / enable / remove only) |
 | DevTools docked / separate | Done (19-11-2026) |
 | Updates from GitHub, About page | Done |
 | Installer, uninstall | Done |

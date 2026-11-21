@@ -280,7 +280,8 @@ namespace GBrowser
                     using (var p = new Pen(Theme.OutlineVariant, 1)) g.DrawLine(p, 0, r.Y + r.Height / 2, r.Width, r.Y + r.Height / 2);
                     continue;
                 }
-                if ((i == hover || (i == childOf && childMenu != null)) && it.Selectable && it.Buttons == null)
+                // a row with buttons is highlighted only when the row itself does something (Chrome's extension rows)
+                if ((i == hover || (i == childOf && childMenu != null)) && it.Selectable && (it.Buttons == null || (it.Click != null && hoverButton == null)))
                 {
                     var hr = new Rectangle(r.X + S(4), r.Y + S(1), r.Width - S(8), r.Height - S(2));
                     using (var p = Theme.Round(hr, S(8))) using (var b = new SolidBrush(Theme.SurfaceContainerHighest)) g.FillPath(b, p);
@@ -376,7 +377,7 @@ namespace GBrowser
                 if (h >= 0 && Items[h].Sub != null) subTimer.Start();
                 else if (childMenu != null && h >= 0 && h != childOf) subTimer.Start();
             }
-            Cursor = h >= 0 && Items[h].Selectable && (Items[h].Buttons == null || hb != null) ? Cursors.Hand : Cursors.Default;
+            Cursor = h >= 0 && Items[h].Selectable && (Items[h].Buttons == null || hb != null || Items[h].Click != null) ? Cursors.Hand : Cursors.Default;
         }
 
         protected override void OnMouseLeave(EventArgs e) { if (!keyboard) { hover = -1; Invalidate(); } }
@@ -389,7 +390,7 @@ namespace GBrowser
             if (Items[h].Buttons != null)
             {
                 var b = ButtonAt(h, e.Location);
-                if (b == null) return;
+                if (b == null) { if (Items[h].Click != null) Activate_(h); return; }
                 if (b.KeepOpen) { b.Click?.Invoke(); Invalidate(); }
                 else { Root.Close(); b.Click?.Invoke(); }
                 return;
@@ -410,7 +411,7 @@ namespace GBrowser
             var it = Items[i];
             if (!it.Selectable) return;
             if (it.Sub != null) { OpenSub(i); childMenu?.MoveSel(1); return; }
-            if (it.Buttons != null) return;
+            if (it.Buttons != null && it.Click == null) return;
             Root.Close();
             it.Click?.Invoke();
         }

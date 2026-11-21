@@ -43,6 +43,14 @@ namespace GBrowser
         bool hoverSite;
 
         readonly List<Btn> buttons = new List<Btn>();
+
+        /// <summary>An extension pinned to the toolbar (Chrome: its icon left of the extensions button).</summary>
+        public sealed class ExtAction { public string Id, Name; public Image Icon; public Rectangle Rect; }
+        public readonly List<ExtAction> Actions = new List<ExtAction>();
+        public event Action<string, Rectangle> ActionClicked;   // extension id, the icon's screen rectangle
+        public event Action<string, Rectangle> ActionMenu;      // right-click: the extension's own menu
+        public Rectangle ActionRect(string id) => Actions.Find(a => a.Id == id)?.Rect ?? Rectangle.Empty;
+        ExtAction hoverAct, pressAct;
         Btn hover, press;
         bool hoverClear, hoverChip;
         readonly ToolTip tip = new ToolTip();
@@ -136,6 +144,14 @@ namespace GBrowser
             int right = Width - S(6);
             foreach (var n in new[] { "menu", "ext", "downloads", "shield" })
             {
+                if (n == "downloads")
+                    // pinned extensions sit between the extensions button and the rest, in the user's order
+                    for (int i = Actions.Count - 1; i >= 0; i--)
+                    {
+                        right -= bs;
+                        Actions[i].Rect = new Rectangle(right, y, bs, bs);
+                        right -= S(2);
+                    }
                 if (n == "downloads" && !ShowDownloads) { buttons.Find(b => b.Name == n).Rect = Rectangle.Empty; continue; }
                 right -= bs;
                 buttons.Find(b => b.Name == n).Rect = new Rectangle(right, y, bs, bs);
@@ -225,6 +241,15 @@ namespace GBrowser
                     TextRenderer.DrawText(g, StoreChipText, f, new Rectangle(chipRect.X + S(30), chipRect.Y, chipRect.Width - S(36), chipRect.Height), fg,
                         TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix);
             }
+            foreach (var a in Actions)
+            {
+                if (a.Rect.IsEmpty) continue;
+                if (a == hoverAct || a == pressAct)
+                    using (var br = new SolidBrush(a == pressAct ? Theme.Pressed : Theme.Hover)) g.FillEllipse(br, a.Rect);
+                int isz = S(16);   // Chrome draws extension icons at 16 px in its 20 px icon area
+                if (a.Icon != null) g.DrawImage(a.Icon, a.Rect.X + (a.Rect.Width - isz) / 2, a.Rect.Y + (a.Rect.Height - isz) / 2, isz, isz);
+                else Icons.Draw(g, IconData.Extension, a.Rect.X + (a.Rect.Width - S(20)) / 2f, a.Rect.Y + (a.Rect.Height - S(20)) / 2f, S(20), Theme.OnSurfaceVariant);
+            }
             foreach (var b in buttons)
             {
                 if (b.Rect.IsEmpty) continue;   // hidden (e.g. the home button when it is switched off)
@@ -261,6 +286,7 @@ namespace GBrowser
         }
 
         Btn Hit(Point p) => buttons.Find(b => b.Rect.Contains(p));
+        ExtAction HitAction(Point p) => Actions.Find(a => !a.Rect.IsEmpty && a.Rect.Contains(p));
 
         /// <summary>Drag a page out (to the bookmarks bar, the tab row, the desktop, other apps).</summary>
         void StartDrag(DataObject d)
@@ -284,6 +310,13 @@ namespace GBrowser
                     return;
                 }
             }
+            var ha = HitAction(e.Location);
+            if (ha != hoverAct)
+            {
+                hoverAct = ha; Invalidate();
+                if (ha != null) { tipText = ha.Name; tip.SetToolTip(this, ha.Name); }
+            }
+            if (ha != null) { if (hover != null) { hover = null; Invalidate(); } Cursor = Cursors.Default; return; }
             var h = Hit(e.Location);
             bool hc = ClearVisible && clearRect.Contains(e.Location);
             bool hch = StoreChip && chipRect.Contains(e.Location);
@@ -303,10 +336,12 @@ namespace GBrowser
             Cursor = hc || hch || hs ? Cursors.Hand : Cursors.Default;
         }
 
-        protected override void OnMouseLeave(EventArgs e) { hover = null; hoverClear = hoverChip = hoverSite = false; Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { hover = null; hoverAct = null; hoverClear = hoverChip = hoverSite = false; Invalidate(); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            var act = HitAction(e.Location);
+            if (act != null && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right)) { pressAct = act; Invalidate(); return; }
             if (e.Button != MouseButtons.Left) return;
             if (ClearVisible && clearRect.Contains(e.Location)) { Address.Clear(); Address.Focus(); return; }
             if (!siteRect.IsEmpty && siteRect.Contains(e.Location)) { siteDown = e.Location; return; }   // opens on mouse up, or a drag
@@ -318,6 +353,17 @@ namespace GBrowser
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            if (pressAct != null)
+            {
+                var a = pressAct; pressAct = null; Invalidate();
+                if (a.Rect.Contains(e.Location))
+                {
+                    var sr = RectangleToScreen(a.Rect);
+                    if (e.Button == MouseButtons.Left) ActionClicked?.Invoke(a.Id, sr);
+                    else if (e.Button == MouseButtons.Right) ActionMenu?.Invoke(a.Id, sr);
+                }
+                return;
+            }
             if (e.Button != MouseButtons.Left) return;
             if (StoreChip && chipRect.Contains(e.Location)) { StoreChipClicked?.Invoke(); return; }
             bool wasSite = siteDown.HasValue; siteDown = null;

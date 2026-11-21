@@ -1,0 +1,8 @@
+/* gbrowser://extensions (list + details, like Chrome's chrome://extensions) */
+.head-tools { flex: 1; display: flex; align-items: center; gap: 16px; }
+.subpage-head { display: flex; align-items: center; gap: 4px; margin: 0 0 14px -4px; }
+.subpage-head .section-title { margin: 0; font-size: 18px; font-weight: 500; }
+.row.sub-row { min-height: 0; padding: 6px 20px 6px 60px; border-top: 0 !important; }
+.row.sub-row:last-child { padding-bottom: 14px; }
+input.field.shortcut { width: 180px; flex: none; cursor: pointer; text-align: center; caret-color: transparent; }
+input.field.shortcut::placeholder { color: var(--on-surface-variant); }

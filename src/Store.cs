@@ -136,6 +136,11 @@ namespace GBrowser
         public List<string> KeepActiveSites { get; set; } = new List<string>();   // never unloaded (site = registrable domain)
         public bool ShowBookmarksBar { get; set; } = false;
         public bool ShowHomeButton { get; set; } = false;   // like Chrome: off by default
+        // extensions pinned to the toolbar, in toolbar order (null = never set: every installed extension is pinned once)
+        public List<string> PinnedExtensions { get; set; } = null;
+        public bool PinNewExtensions { get; set; } = true;  // Chrome 158 default (chrome://extensions "Pin new extensions to Toolbar")
+        // "Activate the extension" shortcuts (extension id -> key text like "Ctrl+Shift+Y"), Chrome's chrome://extensions/shortcuts
+        public Dictionary<string, string> ExtensionShortcuts { get; set; } = new Dictionary<string, string>();
         // ad blocking (same switches as the WebView Adblocker Android app)
         public bool AdblockEnabled { get; set; } = true;
         public bool BlockAnnoyances { get; set; } = true;      // cookie notices, popups, app banners

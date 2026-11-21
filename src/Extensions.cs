@@ -93,6 +93,7 @@ namespace GBrowser
             var ext = await profile.AddBrowserExtensionAsync(folder);
             Index[ext.Id] = folder;
             SaveIndex();
+            Added(ext.Id);
             return ext;
         }
 
@@ -102,6 +103,7 @@ namespace GBrowser
             var ext = await profile.AddBrowserExtensionAsync(folder);
             Index[ext.Id] = folder;
             SaveIndex();
+            Added(ext.Id);
             return ext;
         }
 
@@ -121,6 +123,8 @@ namespace GBrowser
                 Index.Remove(id);
                 SaveIndex();
             }
+            if (IsPinned(id)) SetPinned(id, false);
+            if (Store.Settings.ExtensionShortcuts.Remove(id)) Store.SaveSettings();
         }
 
         static void TryDelete(string dir) { try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { } }
@@ -164,21 +168,42 @@ namespace GBrowser
         }
 
         /// <summary>Name from the manifest, resolving __MSG_x__ with _locales/default_locale/messages.json.</summary>
-        static string LocalName(string dir, Dictionary<string, object> m)
+        static string LocalName(string dir, Dictionary<string, object> m) =>
+            Localize(dir, m, m.TryGetValue("name", out var n) ? n as string : null);
+
+        /// <summary>Resolves a manifest text like "__MSG_appDesc__" from _locales (Windows UI language, then its base
+        /// language, then the extension's default_locale), like Chrome; other texts are returned as they are.</summary>
+        public static string Localize(string dir, Dictionary<string, object> m, string text)
         {
-            string name = m.TryGetValue("name", out var n) ? n as string : null;
-            if (name == null || !name.StartsWith("__MSG_")) return name;
-            try
+            if (text == null || !text.StartsWith("__MSG_") || !text.EndsWith("__") || text.Length < 9) return text;
+            string key = text.Substring(6, text.Length - 8);
+            var ui = System.Globalization.CultureInfo.CurrentUICulture;
+            var locales = new List<string> { ui.Name.Replace('-', '_'), ui.TwoLetterISOLanguageName };
+            if (m.TryGetValue("default_locale", out var dl) && dl is string dls) locales.Add(dls);
+            locales.Add("en");
+            foreach (var loc in locales.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                string key = name.Substring(6, name.Length - 8);
-                string loc = m.TryGetValue("default_locale", out var dl) ? dl as string : "en";
-                var msgs = Store.FromJson<Dictionary<string, object>>(File.ReadAllText(Path.Combine(dir, "_locales", loc, "messages.json"), Encoding.UTF8).TrimStart('\uFEFF'));
-                foreach (var kv in msgs)
-                    if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase) && kv.Value is Dictionary<string, object> d && d.TryGetValue("message", out var msg))
-                        return msg as string;
+                try
+                {
+                    string f = Path.Combine(dir, "_locales", loc, "messages.json");
+                    if (!File.Exists(f)) continue;
+                    var msgs = Store.FromJson<Dictionary<string, object>>(File.ReadAllText(f, Encoding.UTF8).TrimStart('\uFEFF'));
+                    foreach (var kv in msgs)
+                        if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase) && kv.Value is Dictionary<string, object> d && d.TryGetValue("message", out var msg) && msg is string ms)
+                            return ms;
+                }
+                catch { }
             }
-            catch { }
-            return name;
+            return text;
+        }
+
+        /// <summary>A manifest text of an installed extension, localized; null when missing or unresolved.</summary>
+        static string Text(string id, Dictionary<string, object> m, string key)
+        {
+            if (m == null || !m.TryGetValue(key, out var v) || !(v is string s)) return null;
+            if (!s.StartsWith("__MSG_")) return s;
+            string r = Index.TryGetValue(id, out var folder) ? Localize(folder, m, s) : s;
+            return r.StartsWith("__MSG_") ? null : r;
         }
 
         static string IconPath(string dir, Dictionary<string, object> m)
@@ -242,10 +267,11 @@ namespace GBrowser
                 {
                     { "id", e.Id }, { "name", e.Name }, { "enabled", e.IsEnabled },
                     { "version", Get(m, "version") ?? "" },
-                    { "description", Get(m, "description") ?? "" },
+                    { "description", Text(e.Id, m, "description") ?? "" },
                     { "popup", PopupPage(m) ?? "" }, { "options", OptionsPage(m) ?? "" },
-                    { "icon", IconDataUrl(e.Id, m) ?? "" },
+                    { "icon", IconDataUrl(e.Id, e.Name) ?? "" },
                     { "store", Index.TryGetValue(e.Id, out var f) && f.StartsWith(Store.ExtensionsDir, StringComparison.OrdinalIgnoreCase) },
+                    { "pinned", IsPinned(e.Id) },
                 });
             }
             return list;
@@ -301,22 +327,285 @@ namespace GBrowser
             return File.Exists(path) ? path : null;
         }
 
-        public static Image Icon(string id)
+        public static Image Icon(string id) => Icon(id, 16);
+
+        /// <summary>The extension's icon, or Chrome's stand-in when it has none: its first letter on a grey rounded tile.</summary>
+        public static Image IconOrLetter(string id, string name, int px)
         {
-            try { var f = IconFile(id, Manifest(id)); if (f != null) using (var img = Image.FromFile(f)) return new Bitmap(img, 16, 16); } catch { }
+            var img = Icon(id, px);
+            if (img != null) return img;
+            var bmp = new Bitmap(px, px);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                using (var p = Theme.Round(new Rectangle(0, 0, px - 1, px - 1), px / 4f))
+                using (var b = new SolidBrush(Theme.Outline)) g.FillPath(b, p);
+                string letter = string.IsNullOrEmpty(name) ? "?" : name.Trim().Substring(0, 1).ToUpperInvariant();
+                using (var f = new Font("Segoe UI Semibold", px * 0.58f, GraphicsUnit.Pixel))
+                using (var tb = new SolidBrush(Theme.Surface))
+                using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                    g.DrawString(letter, f, tb, new RectangleF(0, 0, px, px + px * 0.04f), sf);
+            }
+            return bmp;
+        }
+
+        /// <summary>The extension's icon at px x px, sharp like Chrome's: the smallest icon file that is at least px big
+        /// (by its real pixel size, not the size its manifest claims), scaled down in halving steps.</summary>
+        public static Image Icon(string id, int px)
+        {
+            string best = null;
+            int bestSize = 0;
+            foreach (var path in IconFiles(id, Manifest(id)))
+            {
+                try
+                {
+                    using (var i = Image.FromFile(path))
+                    {
+                        int sz = Math.Min(i.Width, i.Height);
+                        bool better = best == null
+                            || (sz >= px && (bestSize < px || sz < bestSize))   // big enough and closer to px
+                            || (bestSize < px && sz > bestSize);               // nothing big enough yet: the biggest
+                        if (better) { best = path; bestSize = sz; }
+                    }
+                }
+                catch { }
+            }
+            if (best == null) return null;
+            try { using (var img = Image.FromFile(best)) return Scale(img, px); }
+            catch { return null; }
+        }
+
+        /// <summary>Every icon file of the extension (toolbar icon first, then its icons), existing raster files only.</summary>
+        static List<string> IconFiles(string id, Dictionary<string, object> m)
+        {
+            var res = new List<string>();
+            if (m == null || !Index.TryGetValue(id, out var folder)) return res;
+            void Add(object o)
+            {
+                if (o is string f) Add1(f);
+                else if (o is Dictionary<string, object> d) foreach (var kv in d) if (kv.Value is string f2) Add1(f2);
+            }
+            void Add1(string f)
+            {
+                if (f.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)) return;   // GDI+ cannot read SVG
+                string path = Path.Combine(folder, f.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(path) && !res.Contains(path, StringComparer.OrdinalIgnoreCase)) res.Add(path);
+            }
+            foreach (var k in new[] { "action", "browser_action", "page_action" })
+                if (m.TryGetValue(k, out var a) && a is Dictionary<string, object> ad && ad.TryGetValue("default_icon", out var di)) Add(di);
+            if (m.TryGetValue("icons", out var ic)) Add(ic);
+            return res;
+        }
+
+        /// <summary>High-quality downscale to px x px (aspect kept, centred): halving steps first, then one bicubic step,
+        /// so big icons (e.g. 500 px) stay crisp instead of thin and jagged.</summary>
+        public static Bitmap Scale(Image src, int px)
+        {
+            Image cur = src;
+            bool owned = false;
+            try
+            {
+                while (Math.Max(cur.Width, cur.Height) / 2 >= px)
+                {
+                    var half = new Bitmap(Math.Max(1, cur.Width / 2), Math.Max(1, cur.Height / 2));
+                    Draw(cur, half, new Rectangle(0, 0, half.Width, half.Height));
+                    if (owned) cur.Dispose();
+                    cur = half; owned = true;
+                }
+                var bmp = new Bitmap(px, px);
+                float k = Math.Min((float)px / cur.Width, (float)px / cur.Height);
+                int w = Math.Max(1, (int)Math.Round(cur.Width * k)), h = Math.Max(1, (int)Math.Round(cur.Height * k));
+                Draw(cur, bmp, new Rectangle((px - w) / 2, (px - h) / 2, w, h));
+                return bmp;
+            }
+            finally { if (owned) cur.Dispose(); }
+        }
+
+        static void Draw(Image from, Bitmap to, Rectangle dest)
+        {
+            using (var g = Graphics.FromImage(to))
+            using (var ia = new System.Drawing.Imaging.ImageAttributes())
+            {
+                g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                ia.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);   // no grey halo at the edges
+                g.DrawImage(from, dest, 0, 0, from.Width, from.Height, GraphicsUnit.Pixel, ia);
+            }
+        }
+
+        /// <summary>Raised when extensions are added, removed, turned on/off, pinned or reordered (every window refreshes its toolbar).</summary>
+        public static event Action Changed;
+        public static void RaiseChanged() => Changed?.Invoke();
+
+        /// <summary>Chrome's shortcut text for a key ("Ctrl+Shift+Y", "Alt+1", "Ctrl+F5"); null when the key cannot be an
+        /// extension shortcut (Chrome needs Ctrl or Alt and a letter, digit or F-key).</summary>
+        public static string KeyText(System.Windows.Forms.Keys k)
+        {
+            var code = k & System.Windows.Forms.Keys.KeyCode;
+            bool ctrl = (k & System.Windows.Forms.Keys.Control) != 0, alt = (k & System.Windows.Forms.Keys.Alt) != 0, shift = (k & System.Windows.Forms.Keys.Shift) != 0;
+            if (!ctrl && !alt) return null;
+            string key;
+            if (code >= System.Windows.Forms.Keys.A && code <= System.Windows.Forms.Keys.Z) key = code.ToString();
+            else if (code >= System.Windows.Forms.Keys.D0 && code <= System.Windows.Forms.Keys.D9) key = ((int)(code - System.Windows.Forms.Keys.D0)).ToString();
+            else if (code >= System.Windows.Forms.Keys.F1 && code <= System.Windows.Forms.Keys.F12) key = code.ToString();
+            else return null;
+            return (ctrl ? "Ctrl+" : "") + (alt ? "Alt+" : "") + (shift ? "Shift+" : "") + key;
+        }
+
+        // ---------- toolbar pins (Chrome: pinned icons beside the extensions button) ----------
+
+        /// <summary>Keeps Settings.PinnedExtensions in step with what is installed: the first time, every installed extension
+        /// is pinned (Chrome's "Pin new extensions to Toolbar" is on by default); removed extensions drop out.</summary>
+        public static void SyncPins(IEnumerable<string> installedIds)
+        {
+            var st = Store.Settings;
+            var ids = installedIds.Where(i => Index.ContainsKey(i)).ToList();
+            bool changed = false;
+            if (st.PinnedExtensions == null) { st.PinnedExtensions = new List<string>(ids); changed = true; }
+            else changed = st.PinnedExtensions.RemoveAll(p => !ids.Contains(p)) > 0;
+            if (changed) Store.SaveSettings();
+        }
+
+        public static bool IsPinned(string id) => Store.Settings.PinnedExtensions?.Contains(id) == true;
+
+        public static void SetPinned(string id, bool pin)
+        {
+            var st = Store.Settings;
+            if (st.PinnedExtensions == null) st.PinnedExtensions = new List<string>();
+            st.PinnedExtensions.Remove(id);
+            if (pin) st.PinnedExtensions.Add(id);
+            Store.SaveSettings();
+        }
+
+        /// <summary>A newly added extension is pinned when "Pin new extensions to toolbar" is on.</summary>
+        public static void Added(string id)
+        {
+            if (Store.Settings.PinNewExtensions && !IsPinned(id)) SetPinned(id, true);
+            var key = SuggestedActionKey(Manifest(id));
+            var st = Store.Settings;
+            if (key != null && !st.ExtensionShortcuts.ContainsKey(id) && !st.ExtensionShortcuts.ContainsValue(key))
+            {
+                st.ExtensionShortcuts[id] = key;
+                Store.SaveSettings();
+            }
+        }
+
+        /// <summary>The key an extension suggests for opening it (commands._execute_action / _execute_browser_action),
+        /// written like Chrome ("Ctrl+Shift+Y"); null when none or not a valid GBrowser shortcut.</summary>
+        static string SuggestedActionKey(Dictionary<string, object> m)
+        {
+            if (m == null || !(m.TryGetValue("commands", out var co) && co is Dictionary<string, object> cmds)) return null;
+            foreach (var name in new[] { "_execute_action", "_execute_browser_action", "_execute_page_action" })
+            {
+                if (!(cmds.TryGetValue(name, out var c) && c is Dictionary<string, object> cd && cd.TryGetValue("suggested_key", out var sk))) continue;
+                string k = sk as string ?? (sk is Dictionary<string, object> skd && (skd.TryGetValue("windows", out var w) || skd.TryGetValue("default", out w)) ? w as string : null);
+                if (k == null) continue;
+                // normalise to Chrome's own order: Ctrl, Alt, Shift, key
+                var parts = k.Split('+').Select(x => x.Trim()).ToList();
+                string key = parts.Last();
+                bool ctrl = parts.Contains("Ctrl") || parts.Contains("Command"), alt = parts.Contains("Alt"), shift = parts.Contains("Shift");
+                bool ok = (ctrl || alt) && (key.Length == 1 && char.IsLetterOrDigit(key[0]) || System.Text.RegularExpressions.Regex.IsMatch(key, "^F([1-9]|1[0-2])$"));
+                if (ok) return (ctrl ? "Ctrl+" : "") + (alt ? "Alt+" : "") + (shift ? "Shift+" : "") + key.ToUpperInvariant();
+            }
             return null;
         }
 
-        static string IconDataUrl(string id, Dictionary<string, object> m)
+        // ---------- site access (Chrome match patterns) ----------
+
+        /// <summary>Host patterns the extension asks for: host_permissions (MV3) / host patterns in permissions (MV2) and
+        /// content script matches.</summary>
+        public static List<string> HostPatterns(Dictionary<string, object> m)
+        {
+            var res = new List<string>();
+            if (m == null) return res;
+            foreach (var k in new[] { "host_permissions", "permissions" })
+                if (m.TryGetValue(k, out var v) && v is System.Collections.IEnumerable list && !(v is string))
+                    foreach (var o in list) if (o is string s && (s == "<all_urls>" || s.Contains("://"))) res.Add(s);
+            if (m.TryGetValue("content_scripts", out var cs) && cs is System.Collections.IEnumerable csl)
+                foreach (var o in csl)
+                    if (o is Dictionary<string, object> c && c.TryGetValue("matches", out var mt) && mt is System.Collections.IEnumerable ml)
+                        foreach (var x in ml) if (x is string s) res.Add(s);
+            return res.Distinct().OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>Does a Chrome match pattern (scheme://host/path, * wildcards, &lt;all_urls&gt;) cover this URL?</summary>
+        public static bool Matches(string pattern, string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return false;
+            bool web = u.Scheme == "http" || u.Scheme == "https";
+            if (pattern == "<all_urls>") return web || u.Scheme == "file" || u.Scheme == "ftp";
+            int se = pattern.IndexOf("://", StringComparison.Ordinal);
+            if (se <= 0) return false;
+            string scheme = pattern.Substring(0, se), rest = pattern.Substring(se + 3);
+            if (scheme == "*") { if (!web) return false; }
+            else if (!string.Equals(scheme, u.Scheme, StringComparison.OrdinalIgnoreCase)) return false;
+            int sl = rest.IndexOf('/');
+            string host = sl < 0 ? rest : rest.Substring(0, sl), path = sl < 0 ? "/" : rest.Substring(sl);
+            int colon = host.LastIndexOf(':');
+            if (colon > 0 && !host.EndsWith("]")) host = host.Substring(0, colon);   // a port in the pattern matches any port here
+            string h = u.Host.ToLowerInvariant();
+            host = host.ToLowerInvariant();
+            if (host != "*" && u.Scheme != "file")
+            {
+                if (host.StartsWith("*.")) { string b = host.Substring(2); if (h != b && !h.EndsWith("." + b)) return false; }
+                else if (h != host) return false;
+            }
+            string target = u.AbsolutePath + u.Query;
+            var re = "^" + Regex.Escape(path).Replace("\\*", ".*") + "$";
+            return Regex.IsMatch(target, re);
+        }
+
+        /// <summary>Whether the extension can read and change the page at url (its host patterns cover it).</summary>
+        public static bool CanAccess(string id, string url) => HostPatterns(Manifest(id)).Any(p => Matches(p, url));
+
+        // ---------- details page (Chrome's chrome://extensions/?id=) ----------
+
+        public static Dictionary<string, object> Details(string id)
+        {
+            var m = Manifest(id);
+            if (m == null || !Index.TryGetValue(id, out var folder)) return null;
+            long size = 0;
+            try { size = new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length); } catch { }
+            var commands = new List<Dictionary<string, object>>();
+            if (m.TryGetValue("commands", out var co) && co is Dictionary<string, object> cmds)
+                foreach (var kv in cmds)
+                {
+                    if (kv.Key == "_execute_action" || kv.Key == "_execute_browser_action" || kv.Key == "_execute_page_action") continue;
+                    var d = kv.Value as Dictionary<string, object>;
+                    string desc = d != null && d.TryGetValue("description", out var de) ? Localize(folder, m, de as string) : null;
+                    string key = null;
+                    if (d != null && d.TryGetValue("suggested_key", out var sk))
+                        key = sk as string ?? (sk is Dictionary<string, object> skd && (skd.TryGetValue("windows", out var w) || skd.TryGetValue("default", out w)) ? w as string : null);
+                    commands.Add(new Dictionary<string, object> { { "name", kv.Key }, { "description", desc ?? kv.Key }, { "key", key ?? "" } });
+                }
+            bool store = folder.StartsWith(Store.ExtensionsDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            return new Dictionary<string, object>
+            {
+                { "id", id }, { "version", Get(m, "version_name") ?? Get(m, "version") ?? "" },
+                { "size", size }, { "access", AccessWarnings(m) }, { "hosts", HostPatterns(m) },
+                { "store", store }, { "path", store ? "" : folder }, { "commands", commands },
+                { "homepage", Get(m, "homepage_url") ?? (store ? "https://chromewebstore.google.com/detail/" + id : "") },
+                { "pinned", IsPinned(id) }, { "shortcut", Store.Settings.ExtensionShortcuts.TryGetValue(id, out var sc) ? sc : "" },
+            };
+        }
+
+        static string IconDataUrl(string id, string name)
         {
             try
             {
-                var f = IconFile(id, m);
-                if (f == null) return null;
-                var bytes = File.ReadAllBytes(f);
-                if (bytes.Length > 200000) return null;
-                string mime = f.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ? "image/svg+xml" : "image/png";
-                return "data:" + mime + ";base64," + Convert.ToBase64String(bytes);
+                using (var img = IconOrLetter(id, name, 48))
+                {
+                    if (img == null) return null;
+                    using (var ms = new MemoryStream())
+                    {
+                        img.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                        return "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+                    }
+                }
             }
             catch { return null; }
         }
