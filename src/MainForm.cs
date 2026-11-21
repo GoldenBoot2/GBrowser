@@ -34,6 +34,7 @@ namespace GBrowser
         static readonly string AppVersion = typeof(MainForm).Assembly.GetName().Version.ToString(3);
 
         readonly Timer uiTimer = new Timer { Interval = 300 };
+        readonly Timer badgeTimer = new Timer { Interval = 1500 };   // extension badges / titles (ExtensionBadges)
         WindowFrame frame;
         bool uiDirty;
         long savedTotal;
@@ -186,6 +187,8 @@ namespace GBrowser
             toolbar.ActionClicked += (id, r) => OpenExtension(id, r);
             toolbar.ActionMenu += (id, r) => ShowExtensionContextMenu(id, r);
             Extensions.Changed += OnExtensionsChanged;
+            badgeTimer.Tick += async (s2, e2) => await RefreshBadges();
+            badgeTimer.Start();
             FormClosed += (s2, e2) => Extensions.Changed -= OnExtensionsChanged;
             toolbar.StoreChipClicked += InstallFromStorePage;
             toolbar.ShieldClicked += ShowShieldMenu;
@@ -2068,6 +2071,43 @@ namespace GBrowser
 
         int ExtIconPx => (int)Math.Round(16 * DeviceDpi / 96f);
 
+        /// <summary>Badge text / colours / title of the pinned extensions, for the page in the current tab.</summary>
+        // Every read of an extension's worker counts as activity and restarts its 30 s idle timer (measured 21-11-2026:
+        // reads every 1.5 s kept a worker running for good; without reads it slept after 30-40 s like in Chrome). So the
+        // worker is read every 1.5 s only for 10 s after something that changes badges (tab switch, a page finished
+        // loading, an open popup), otherwise once per 45 s, longer than the idle time, so idle workers still go to sleep.
+        DateTime badgeBurstUntil, badgeSlowNext;
+        string badgeKey;
+
+        async Task RefreshBadges(bool force = false)
+        {
+            if (toolbar.Actions.Count == 0 || WindowState == FormWindowState.Minimized) return;
+            var t = Current;
+            if (t?.Created != true) return;
+            var now = DateTime.UtcNow;
+            string key = t.GetHashCode() + "|" + t.View.CoreWebView2.Source + "|" + t.Loading;
+            bool popupOpen = lastPopup != null && !lastPopup.IsDisposed;
+            if (key != badgeKey || popupOpen) { badgeKey = key; badgeBurstUntil = now.AddSeconds(10); }
+            if (!force && now > badgeBurstUntil && now < badgeSlowNext) return;
+            if (now > badgeBurstUntil) badgeSlowNext = now.AddSeconds(45);
+            Dictionary<string, ExtensionBadges.State> st;
+            // an open popup is read too (it may set the badge while the extension's worker sleeps)
+            if (lastPopup != null && !lastPopup.IsDisposed && lastPopup.Core != null)
+                await ExtensionBadges.ReadPage(lastPopup.Core, lastPopup.ExtensionId, t.View.CoreWebView2.Source);
+            try { st = await ExtensionBadges.Read(t.View.CoreWebView2, toolbar.Actions.Select(a => a.Id).ToList(), t.View.CoreWebView2.Source); }
+            catch { return; }
+            if (IsDisposed) return;
+            bool changed = false;
+            foreach (var a in toolbar.Actions)
+            {
+                if (!st.TryGetValue(a.Id, out var s)) continue;
+                string title = string.IsNullOrEmpty(s.Title) ? null : s.Title;
+                if (a.Badge != s.Text || a.BadgeBack != s.Back || a.BadgeFore != s.Fore || a.Title != title)
+                { a.Badge = s.Text; a.BadgeBack = s.Back; a.BadgeFore = s.Fore; a.Title = title; changed = true; }
+            }
+            if (changed) toolbar.Invalidate();
+        }
+
         /// <summary>Pinned extensions on the toolbar (Chrome: left of the extensions button, in the user's order).</summary>
         async Task RefreshPinned()
         {
@@ -3645,8 +3685,9 @@ namespace GBrowser
                     return lastPopup.Handle.ToString() + " " + lastPopup.Width + "x" + lastPopup.Height + " css " + lastPopup.CssSize.Width + "x" + lastPopup.CssSize.Height;
                 }
                 case "popupsize": return lastPopup == null || lastPopup.IsDisposed ? "no popup" : lastPopup.Width + "x" + lastPopup.Height + " css " + lastPopup.CssSize.Width + "x" + lastPopup.CssSize.Height + " at " + lastPopup.Left + "," + lastPopup.Top;
-                case "extbar":   // pinned toolbar icons: id name rect
-                    return string.Join("; ", toolbar.Actions.Select(a => a.Id + " " + a.Name + " " + a.Rect));
+                case "extbar":   // pinned toolbar icons: id name rect [badge]
+                    await RefreshBadges(true);
+                    return string.Join("; ", toolbar.Actions.Select(a => a.Id + " " + a.Name + " " + a.Rect + (a.Badge.Length > 0 ? " badge=" + a.Badge + " back=" + a.BadgeBack : "") + (a.Title != null ? " title=" + a.Title.Replace("\n", " / ") : "")));
                 case "extmenu":  // the extension's own menu (as a right-click on its icon)
                 {
                     ShowExtensionContextMenu(arg, ExtAnchor(arg));

@@ -45,7 +45,12 @@ namespace GBrowser
         readonly List<Btn> buttons = new List<Btn>();
 
         /// <summary>An extension pinned to the toolbar (Chrome: its icon left of the extensions button).</summary>
-        public sealed class ExtAction { public string Id, Name; public Image Icon; public Rectangle Rect; }
+        public sealed class ExtAction
+        {
+            public string Id, Name; public Image Icon; public Rectangle Rect;
+            public string Badge = "", Title;     // chrome.action badge text / title (the tooltip), read from the extension
+            public Color? BadgeBack, BadgeFore;  // null = default colours
+        }
         public readonly List<ExtAction> Actions = new List<ExtAction>();
         public event Action<string, Rectangle> ActionClicked;   // extension id, the icon's screen rectangle
         public event Action<string, Rectangle> ActionMenu;      // right-click: the extension's own menu
@@ -249,6 +254,23 @@ namespace GBrowser
                 int isz = S(16);   // Chrome draws extension icons at 16 px in its 20 px icon area
                 if (a.Icon != null) g.DrawImage(a.Icon, a.Rect.X + (a.Rect.Width - isz) / 2, a.Rect.Y + (a.Rect.Height - isz) / 2, isz, isz);
                 else Icons.Draw(g, IconData.Extension, a.Rect.X + (a.Rect.Width - S(20)) / 2f, a.Rect.Y + (a.Rect.Height - S(20)) / 2f, S(20), Theme.OnSurfaceVariant);
+                if (!string.IsNullOrEmpty(a.Badge))
+                {
+                    // Chrome: a small label over the icon's bottom right; at most 4 characters show
+                    string txt = a.Badge.Length > 4 ? a.Badge.Substring(0, 4) : a.Badge;
+                    var back = a.BadgeBack ?? Theme.Primary;
+                    var fore = a.BadgeFore ?? (back.R * 0.299 + back.G * 0.587 + back.B * 0.114 > 150 ? Color.Black : Color.White);
+                    using (var bf = new Font("Segoe UI", 6.5f, FontStyle.Bold))
+                    {
+                        // anchored to the icon's bottom right corner, reaching a little past it (Chrome)
+                        int iconRight = a.Rect.X + (a.Rect.Width + isz) / 2, iconBottom = a.Rect.Y + (a.Rect.Height + isz) / 2;
+                        int bw = Math.Max(S(12), TextRenderer.MeasureText(txt, bf, Size.Empty, TextFormatFlags.NoPadding).Width + S(5));
+                        var br = new Rectangle(Math.Min(iconRight + S(5), a.Rect.Right) - bw, iconBottom - S(7), bw, S(12));
+                        using (var p = Theme.Round(br, S(3))) using (var bb = new SolidBrush(back)) g.FillPath(bb, p);
+                        TextRenderer.DrawText(g, txt, bf, br, fore,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+                    }
+                }
             }
             foreach (var b in buttons)
             {
@@ -314,7 +336,7 @@ namespace GBrowser
             if (ha != hoverAct)
             {
                 hoverAct = ha; Invalidate();
-                if (ha != null) { tipText = ha.Name; tip.SetToolTip(this, ha.Name); }
+                if (ha != null) { tipText = ha.Title ?? ha.Name; tip.SetToolTip(this, tipText); }   // Chrome: the extension's title
             }
             if (ha != null) { if (hover != null) { hover = null; Invalidate(); } Cursor = Cursors.Default; return; }
             var h = Hit(e.Location);
