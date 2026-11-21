@@ -3611,6 +3611,22 @@ namespace GBrowser
                     var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString, null);
                     return ext.Id + " " + ext.Name;
                 }
+                case "sqlitecheck":   // sqlitecheck <db file>: rows of icon_mapping + favicon_bitmaps, image bytes, md5 of all images
+                {
+                    using (var r = new SqliteReader(arg))
+                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                    {
+                        int maps = r.Rows("icon_mapping").Count();
+                        int bm = 0; long bytes = 0;
+                        foreach (var row in r.Rows("favicon_bitmaps").OrderBy(x => x.RowId))
+                        {
+                            bm++;
+                            if (row.Values[3] is byte[] png) { bytes += png.Length; md5.TransformBlock(png, 0, png.Length, null, 0); }
+                        }
+                        md5.TransformFinalBlock(new byte[0], 0, 0);
+                        return "mappings " + maps + " bitmaps " + bm + " bytes " + bytes + " md5 " + BitConverter.ToString(md5.Hash).Replace("-", "").ToLowerInvariant();
+                    }
+                }
                 case "extload":   // load an unpacked extension folder (same path as Load unpacked, without the folder picker)
                 {
                     var ext = await Extensions.LoadUnpacked(Profile, arg);

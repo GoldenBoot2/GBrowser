@@ -138,6 +138,7 @@
         const n = await fn();
         if (n >= 0) {
           close();
+          iconCache.clear();   // the import may have brought site icons
           await load();
           // show where they went: the newest "Imported from ..." folder (on the bar or in Other bookmarks), else the bar
           const made = tree.items.filter(x => x.Folder && !before.has(x.Id) && /^Imported/.test(x.Title)).sort((a, c) => c.Id - a.Id)[0];

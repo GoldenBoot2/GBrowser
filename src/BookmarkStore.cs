@@ -268,7 +268,13 @@ namespace GBrowser
                     ExportLevel(sb, b.Id, depth + 1);
                     sb.Append(ind + "</DL><p>\n");
                 }
-                else sb.Append(ind + "<DT><A HREF=\"" + WebUtility.HtmlEncode(b.Url ?? "") + "\" ADD_DATE=\"" + date + "\">" + WebUtility.HtmlEncode(b.Title ?? "") + "</A>\n");
+                else
+                {
+                    // the site icon goes along, like Chrome's export (other browsers import it)
+                    var png = Favicons.Get(b.Url);
+                    string icon = png != null && png.Length <= 16 * 1024 && Favicons.PngWidth(png) > 0 ? " ICON=\"data:image/png;base64," + Convert.ToBase64String(png) + "\"" : "";
+                    sb.Append(ind + "<DT><A HREF=\"" + WebUtility.HtmlEncode(b.Url ?? "") + "\" ADD_DATE=\"" + date + "\"" + icon + ">" + WebUtility.HtmlEncode(b.Title ?? "") + "</A>\n");
+                }
             }
         }
 
@@ -316,6 +322,16 @@ namespace GBrowser
                     if (!href.Success) continue;
                     string url = WebUtility.HtmlDecode(href.Groups[1].Value);
                     if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "ftp" && u.Scheme != "file")) continue;
+                    // exports from Chrome / Firefox carry the site icon: ICON="data:image/png;base64,..."
+                    var ico = Regex.Match(m.Groups[3].Value, "ICON\\s*=\\s*\"data:image/png;base64,([A-Za-z0-9+/=]+)\"", RegexOptions.IgnoreCase);
+                    if (ico.Success && (u.Scheme == "http" || u.Scheme == "https"))
+                        try
+                        {
+                            var png = Convert.FromBase64String(ico.Groups[1].Value);
+                            var cur = Favicons.Get(url);
+                            if (Favicons.PngWidth(png) > 0 && (cur == null || Favicons.PngWidth(cur) < Favicons.PngWidth(png))) Favicons.Save(url, png);
+                        }
+                        catch { }
                     if (IsBookmarked(url)) continue;
                     var add = Regex.Match(m.Groups[3].Value, "ADD_DATE\\s*=\\s*\"(\\d+)\"", RegexOptions.IgnoreCase);
                     long added = add.Success && long.TryParse(add.Groups[1].Value, out var s) && s > 0 ? s * 1000 : 0;
@@ -388,11 +404,69 @@ namespace GBrowser
             return merged;
         }
 
-        /// <summary>Imports a Chrome / Edge / Brave profile (both its bookmark files).</summary>
+        /// <summary>Imports a Chrome / Edge / Brave profile (both its bookmark files), then the site icons the browser
+        /// keeps for those bookmarks.</summary>
         public static int ImportProfile(string profileDir, string source)
         {
             var roots = ReadProfileRoots(profileDir);
-            return roots == null ? 0 : ImportRoots(roots, source);
+            int n = roots == null ? 0 : ImportRoots(roots, source);
+            try { ImportProfileIcons(profileDir); } catch { }
+            return n;
+        }
+
+        /// <summary>Site icons from a Chromium profile's "Favicons" database for every bookmark GBrowser has: one icon per
+        /// site (GBrowser's icon store is per site), the 32 px image when there is one (sharp at 125-200 %), a page that
+        /// is itself bookmarked first. Never replaces a sharper icon GBrowser already has. Returns icons stored.</summary>
+        public static int ImportProfileIcons(string profileDir)
+        {
+            string db = Path.Combine(profileDir, "Favicons");
+            if (!File.Exists(db)) return 0;
+            var wanted = new Dictionary<string, string>();   // site key -> one bookmarked address of that site
+            foreach (var b in All)
+                if (!b.Folder && !string.IsNullOrEmpty(b.Url))
+                {
+                    string k = Favicons.KeyOf(b.Url);
+                    if (k != null && !wanted.ContainsKey(k)) wanted[k] = b.Url;
+                }
+            if (wanted.Count == 0) return 0;
+            var bookmarked = new HashSet<string>(All.Where(b => !b.Folder && b.Url != null).Select(b => b.Url));
+            var iconOfSite = new Dictionary<string, long>();
+            var exact = new HashSet<string>();
+            using (var r = new SqliteReader(db))
+            {
+                // icon_mapping(id, page_url, icon_id, page_url_type)
+                foreach (var row in r.Rows("icon_mapping"))
+                {
+                    if (row.Values.Length < 3 || !(row.Values[1] is string page) || !(row.Values[2] is long icon)) continue;
+                    string k = Favicons.KeyOf(page);
+                    if (k == null || !wanted.ContainsKey(k)) continue;
+                    bool isExact = bookmarked.Contains(page);
+                    if (!iconOfSite.ContainsKey(k) || (isExact && !exact.Contains(k))) { iconOfSite[k] = icon; if (isExact) exact.Add(k); }
+                }
+                if (iconOfSite.Count == 0) return 0;
+                var need = new HashSet<long>(iconOfSite.Values);
+                var best = new Dictionary<long, byte[]>();
+                var bestW = new Dictionary<long, long>();
+                // favicon_bitmaps(id, icon_id, last_updated, image_data, width, height, last_requested)
+                foreach (var row in r.Rows("favicon_bitmaps"))
+                {
+                    if (row.Values.Length < 5 || !(row.Values[1] is long icon) || !need.Contains(icon) || !(row.Values[3] is byte[] png) || png.Length == 0) continue;
+                    long w = row.Values[4] is long lw ? lw : 0;
+                    // prefer 32 px; otherwise the biggest up to 64, else whatever there is
+                    long Score(long x) => x == 32 ? 1000 : x <= 64 ? x : 10 - x / 64;
+                    if (!bestW.TryGetValue(icon, out var have) || Score(w) > Score(have)) { best[icon] = png; bestW[icon] = w; }
+                }
+                int stored = 0;
+                foreach (var kv in iconOfSite)
+                {
+                    if (!best.TryGetValue(kv.Value, out var png) || Favicons.PngWidth(png) == 0) continue;
+                    var cur = Favicons.Get(wanted[kv.Key]);
+                    if (cur != null && Favicons.PngWidth(cur) >= Favicons.PngWidth(png)) continue;
+                    Favicons.Save(wanted[kv.Key], png);
+                    stored++;
+                }
+                return stored;
+            }
         }
 
         public static int ImportChromium(string json, string source)
