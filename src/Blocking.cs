@@ -17,6 +17,8 @@ namespace GBrowser
         readonly CoreWebView2Environment env;
         public string PageUrl, PageHost;
         public bool PopupBlocked;   // the last NewWindowRequested was stopped by the pop-up blocker (not as an ad)
+        /// <summary>Windows the pop-up blocker stopped on this page (not ads), newest last: Chrome's address-bar list.</summary>
+        public readonly List<string> BlockedPopups = new List<string>();
 
         // camera / microphone tracks the page's frames have live (reported by the page script, per frame)
         readonly Dictionary<string, int[]> media = new Dictionary<string, int[]>();
@@ -478,6 +480,7 @@ namespace GBrowser
             PageUrl = core.Source;
             PageHost = HostOf(core.Source);
             tab.Blocked = 0;
+            lock (BlockedPopups) BlockedPopups.Clear();   // a new page: its own list (Chrome)
             // a new page: its own log (the request for the page itself stays)
             lock (log) { var keep = log.LastOrDefault(x => x.Type == "page"); log.Clear(); if (keep != null && keep.Url == PageUrl) log.AddLast(keep); }
             Changed?.Invoke();
@@ -611,7 +614,13 @@ namespace GBrowser
         public bool BlockPopup(string url, bool userInitiated)
         {
             string ps = PageUrl != null ? SiteOf(PageUrl) : null;
-            if (!userInitiated && (ps == null || !S.PopupAllowedSites.Contains(ps))) { PopupBlocked = true; if (S.AdblockEnabled) Count(); return true; }
+            if (!userInitiated && (ps == null || !S.PopupAllowedSites.Contains(ps)))
+            {
+                PopupBlocked = true;
+                if (S.AdblockEnabled) Count();
+                lock (BlockedPopups) { BlockedPopups.Remove(url ?? ""); BlockedPopups.Add(url ?? ""); if (BlockedPopups.Count > 20) BlockedPopups.RemoveAt(0); }
+                return true;
+            }
             if (!S.AdblockEnabled || (PageHost != null && !OnFor(PageHost))) return false;
             var eng = FilterEngine.Instance;
             string host = HostOf(url);

@@ -27,6 +27,44 @@ namespace GBrowser
         string pendingDevToolsAction;   // what the DevTools window should do once it is open (console / inspect)
 
         /// <summary>F12 / Ctrl+Shift+I and the menu item: open or close this tab's DevTools (Chrome).</summary>
+        /// <summary>Chrome's "Pop-ups blocked" bubble: the blocked windows (click opens one), always allow this site.</summary>
+        void ShowBlockedPopups()
+        {
+            var t = Current;
+            if (t?.Blocking == null) return;
+            string url = t.Created ? t.View.CoreWebView2.Source : t.Url;
+            string site = Blocking.SiteOf(url);
+            List<string> list;
+            lock (t.Blocking.BlockedPopups) list = t.Blocking.BlockedPopups.ToList();
+            var m = NewMenu();
+            m.AddHeader("Pop-ups blocked", IconData.PopupOff);
+            foreach (var u in list.AsEnumerable().Reverse())
+            {
+                string show = string.IsNullOrEmpty(u) || u == "about:blank" ? "Blank window (made by the page)" : u;
+                var it = m.Add(show.Length > 70 ? show.Substring(0, 67) + "..." : show, IconData.OpenNew, null, () =>
+                {
+                    lock (t.Blocking.BlockedPopups) t.Blocking.BlockedPopups.Remove(u);
+                    if (!string.IsNullOrEmpty(u) && u != "about:blank") NewTab(u);
+                    UpdateUi();
+                });
+                it.Enabled = !string.IsNullOrEmpty(u) && u != "about:blank";   // a window the page writes itself cannot be reopened later
+            }
+            m.AddSeparator();
+            if (site != null)
+            {
+                bool allowed = Store.Settings.PopupAllowedSites.Contains(site);
+                m.AddToggle("Always allow pop-ups and redirects from " + site, allowed, true, () =>
+                {
+                    if (allowed) Store.Settings.PopupAllowedSites.Remove(site); else Store.Settings.PopupAllowedSites.Add(site);
+                    Store.SaveSettings();
+                    // Chrome: the page is reloaded so its windows can open now
+                    if (!allowed && t.Created) { lock (t.Blocking.BlockedPopups) t.Blocking.BlockedPopups.Clear(); t.View.CoreWebView2.Reload(); }
+                });
+            }
+            m.Add("Manage", IconData.Settings, null, () => OpenPage("settings"));
+            m.ShowAt(toolbar, toolbar.ButtonRect("popups"), true, "popups");
+        }
+
         void ToggleDevTools()
         {
             if (devDock.Docked(Current)) { devDock.CloseCurrent(); return; }
@@ -184,6 +222,7 @@ namespace GBrowser
                 Current.View?.Focus();
             };
             toolbar.Star += ToggleBookmark;
+            toolbar.PopupsClicked += ShowBlockedPopups;
             toolbar.ZoomClicked += () => { if (Current?.Created == true) { Current.View.ZoomFactor = Store.Settings.DefaultZoom; SaveSiteZoom(Current); } };
             toolbar.MenuClicked += ShowMenu;
             // address bar suggestions (history, bookmarks, open tabs, search suggestions)
@@ -1400,6 +1439,8 @@ namespace GBrowser
             bool zs = t.Created && !Pages.IsInternal(url) && zp != dz;
             if (zs != toolbar.ZoomShown || zp != toolbar.ZoomPercent || dz != toolbar.DefaultZoomPercent)
             { toolbar.ZoomShown = zs; toolbar.ZoomPercent = zp; toolbar.DefaultZoomPercent = dz; toolbar.LayoutNow(); }
+            bool ps = t.Blocking != null && t.Blocking.BlockedPopups.Count > 0 && !Pages.IsInternal(url);
+            if (ps != toolbar.PopupsShown) { toolbar.PopupsShown = ps; toolbar.LayoutNow(); }
             toolbar.BlockedCount = t.Blocked;
             string pageHost = Blocking.HostOf(url);
             toolbar.ShieldOn = pageHost == null ? Store.Settings.AdblockEnabled : Blocking.OnFor(pageHost);
@@ -3689,6 +3730,7 @@ namespace GBrowser
                     var ext = await Extensions.InstallFromStore(core.Profile, arg, core.Settings.UserAgent, env.BrowserVersionString, null);
                     return ext.Id + " " + ext.Name;
                 }
+                case "popupsinfo": return Current?.Blocking == null ? "none" : "shown=" + toolbar.PopupsShown + " list=" + string.Join(", ", Current.Blocking.BlockedPopups);
                 case "devguard": return Current?.Created == true ? await DevToolsGuard.Apply(Current.View.CoreWebView2, Current.View.CoreWebView2.Source, arg.Length > 0 ? arg : null, 5000) : "no tab";
                 case "sqlitecheck":   // sqlitecheck <db file>: rows of icon_mapping + favicon_bitmaps, image bytes, md5 of all images
                 {

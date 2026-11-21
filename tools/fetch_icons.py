@@ -39,7 +39,7 @@ ICONS = [
     ('DockBottom', 'dock_to_bottom', ''), ('DockRight', 'dock_to_right', ''), ('Speed', 'speed', ''),
     ('Link', 'link', ''), ('Copy', 'content_copy', ''),
     ('Videocam', 'videocam', ''), ('Mic', 'mic', ''), ('Location', 'location_on', ''), ('Notifications', 'notifications', ''),
-    ('VolumeOff', 'volume_off', ''), ('Pin', 'keep', ''), ('Unpin', 'keep_off', ''), ('PinFill', 'keep', 'fill1'), ('Keyboard', 'keyboard', ''), ('Sort', 'sort_by_alpha', ''), ('Cut', 'content_cut', ''), ('Paste', 'content_paste', ''), ('Duplicate', 'tab_duplicate', ''),
+    ('VolumeOff', 'volume_off', ''), ('Pin', 'keep', ''), ('Unpin', 'keep_off', ''), ('PinFill', 'keep', 'fill1'), ('Keyboard', 'keyboard', ''), ('Sort', 'sort_by_alpha', ''), ('Cut', 'content_cut', ''), ('Paste', 'content_paste', ''), ('PopupOff', 'web_asset_off', ''), ('Duplicate', 'tab_duplicate', ''),
     ('Sad', 'sentiment_dissatisfied', ''), ('ExpandLess', 'expand_less', ''),
     ('NewWindow', 'new_window', ''), ('TabMove', 'tab_move', ''), ('Logout', 'logout', ''),
     ('DoubleRight', 'keyboard_double_arrow_right', ''), ('FolderClosed', 'folder', ''), ('BookmarkAdd', 'bookmark_add', ''),

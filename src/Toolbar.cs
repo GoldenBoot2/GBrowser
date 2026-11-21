@@ -23,6 +23,8 @@ namespace GBrowser
         public int ZoomPercent = 100;       // the page's zoom; the zoom button shows when it is not the default
         public int DefaultZoomPercent = 100;
         public bool ZoomShown;
+        public bool PopupsShown;            // pop-ups were blocked on this page: Chrome's indicator in the address bar
+        public event Action PopupsClicked;
         public event Action ZoomClicked;
         public float DownloadProgress = -1; // 0..1 while downloads run (ring around the icon), -1 = none running
         public event Action DownloadsClicked;
@@ -113,6 +115,7 @@ namespace GBrowser
             Add("home", "Home", () => IconData.Home, () => true, () => Home?.Invoke());
             Add("star", null, () => Bookmarked ? IconData.StarFill : IconData.Star, () => true, () => Star?.Invoke(), () => Bookmarked ? Theme.Primary : Theme.OnSurfaceVariant);
             Add("zoom", null, () => ZoomPercent > DefaultZoomPercent ? IconData.ZoomIn : IconData.ZoomOut, () => true, () => ZoomClicked?.Invoke());
+            Add("popups", "Pop-ups blocked", () => IconData.PopupOff, () => true, () => PopupsClicked?.Invoke());
             Add("shield", null, () => IconData.Shield, () => true, () => ShieldClicked?.Invoke(), () => ShieldOn ? Theme.Primary : Theme.Outline);
             Add("downloads", "Downloads (Ctrl+J)", () => IconData.Download, () => true, () => DownloadsClicked?.Invoke(),
                 () => DownloadProgress >= 0 ? Theme.Primary : Theme.OnSurfaceVariant);
@@ -138,7 +141,7 @@ namespace GBrowser
         protected override void OnLayout(LayoutEventArgs e)
         {
             base.OnLayout(e);
-            if (buttons.Count < 10) return;   // layout can run while the constructor is still adding controls
+            if (buttons.Count < 11) return;   // layout can run while the constructor is still adding controls
             int bs = S(34), y = (Height - bs) / 2, x = S(6);
             foreach (var n in new[] { "back", "forward", "reload", "home" })
             {
@@ -178,6 +181,10 @@ namespace GBrowser
             // zoom indicator (like Chrome): left of the star while the page is not at the default zoom
             int zw = ZoomShown ? S(32) : 0;
             buttons.Find(b => b.Name == "zoom").Rect = ZoomShown ? new Rectangle(pill.Right - S(34) - zw, pill.Y + S(2), S(32), S(32)) : Rectangle.Empty;
+            // pop-up blocked indicator (Chrome): left of the zoom indicator / star while this page had pop-ups blocked
+            int pw = PopupsShown ? S(32) : 0;
+            buttons.Find(b => b.Name == "popups").Rect = PopupsShown ? new Rectangle(pill.Right - S(34) - zw - pw, pill.Y + S(2), S(32), S(32)) : Rectangle.Empty;
+            zw += pw;
             clearRect = new Rectangle(pill.Right - S(34) - zw - S(30), pill.Y + S(5), S(26), S(26));
             int th = Address.PreferredHeight;
             int ax = pill.X + S(40);
