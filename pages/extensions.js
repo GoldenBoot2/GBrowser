@@ -161,7 +161,8 @@
       row('Pin', 'Pin to toolbar', null, switchBtn(d.pinned, 'Pin to toolbar', on => gb.send('ext.pin', { id: x.id, on }))));
     if (x.options) use.append(row('Settings', 'Extension options', null, el('button', { class: 'btn text', onclick: () => gb.send('ext.options', { id: x.id }) }, icon('OpenNew'), 'Open')));
     if (x.popup) use.append(row('Keyboard', 'Activate the extension', 'Keyboard shortcut', shortcutField(d.shortcut, key => gb.send('ext.shortcut', { id: x.id, key }))));
-    for (const c of d.commands) use.append(row('Keyboard', c.description, c.key ? 'Set by the extension: ' + c.key : 'No shortcut'));
+    // an extension's own commands: the engine registers them but never runs them (tested 21-11-2026 with a real key press)
+    for (const c of d.commands) use.append(row('Keyboard', c.description, (c.key ? c.key + '  ·  ' : '') + 'Not supported in GBrowser'));
     main.append(use);
 
     const src = el('div', { class: 'card' },

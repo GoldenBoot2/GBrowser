@@ -54,6 +54,8 @@ namespace GBrowser
             Opacity = 0;
             Place();
             Controls.Add(view);
+            // Esc from inside the popup page (the WebView2 control raises KeyDown, never the form's ProcessCmdKey)
+            view.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape && e.Modifiers == Keys.None) { e.Handled = true; Close(); } };
             poll.Tick += async (s, e) => await Poll();
             Load += async (s, e) =>
             {

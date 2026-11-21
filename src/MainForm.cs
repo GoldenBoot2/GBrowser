@@ -1144,6 +1144,9 @@ namespace GBrowser
             // every handler acts in the window that holds the tab when the event comes (tabs can move between windows)
             MainForm F() => OwnerOf(t) ?? this;
             var core = t.View.CoreWebView2;
+            // keys pressed while the page has focus come here (the control never calls ProcessCmdKey); a used key is
+            // marked handled, so the engine does not also run its own (Microsoft Edge) action for it
+            t.View.KeyDown += (s2, e2) => { if (F().HandleShortcut(e2.KeyData)) { e2.Handled = true; e2.SuppressKeyPress = true; } };
             var s = core.Settings;
             s.AreDevToolsEnabled = true;
             s.AreDefaultScriptDialogsEnabled = false;   // GBrowser's own alert / confirm / prompt / leave-site dialogs
@@ -2517,8 +2520,16 @@ namespace GBrowser
 
         // ---------- keyboard ----------
 
-        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData) => HandleShortcut(keyData) || base.ProcessCmdKey(ref msg, keyData);
+
+        /// <summary>GBrowser's keyboard shortcuts: from the window (ProcessCmdKey) and from every tab's page (the WebView2
+        /// control's KeyDown, raised for the engine's accelerator keys). True when the key was used.</summary>
+        internal bool HandleShortcut(Keys keyData)
         {
+#if AUTOMATION
+            // test builds: which shortcut keys reach GBrowser (also while a page has focus), for the extension-commands check
+            if ((keyData & (Keys.Control | Keys.Alt)) != 0) Blocking.TestLog.Add("KEY " + DateTime.Now.ToString("HH:mm:ss") + " " + keyData);
+#endif
             var extKey = Store.Settings.ExtensionShortcuts.Count > 0 ? Extensions.KeyText(keyData) : null;
             if (extKey != null)
                 foreach (var kv in Store.Settings.ExtensionShortcuts)
@@ -2571,7 +2582,7 @@ namespace GBrowser
                 if (k >= Keys.D1 && k <= Keys.D8) { int i = k - Keys.D1; if (i < Tabs.Count) Select(i); return true; }
                 if (k == Keys.D9) { Select(Tabs.Count - 1); return true; }
             }
-            return base.ProcessCmdKey(ref msg, keyData);
+            return false;
         }
 
         void toolbar_Back() { if (Current?.Created == true && Current.View.CoreWebView2.CanGoBack) Current.View.CoreWebView2.GoBack(); }
