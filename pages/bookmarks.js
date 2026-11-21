@@ -133,7 +133,18 @@
     const list = el('div', { class: 'pick-list' });
     const busy = async (btn, fn) => {
       btn.disabled = true;
-      try { const n = await fn(); if (n >= 0) { snack(n ? n + ' bookmarks imported to Other bookmarks' : 'Nothing new'); close(); await load(); } }
+      try {
+        const before = new Set(tree.items.map(x => x.Id));
+        const n = await fn();
+        if (n >= 0) {
+          close();
+          await load();
+          // show where they went: the newest "Imported from ..." folder (on the bar or in Other bookmarks), else the bar
+          const made = tree.items.filter(x => x.Folder && !before.has(x.Id) && /^Imported/.test(x.Title)).sort((a, c) => c.Id - a.Id)[0];
+          if (n) goFolder(made ? made.Id : 1);
+          snack(n ? (n === 1 ? '1 bookmark imported' : n + ' bookmarks imported') : 'Nothing new');
+        }
+      }
       catch (e) { snack(e.message); }
       btn.disabled = false;
     };

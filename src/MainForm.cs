@@ -2680,11 +2680,8 @@ namespace GBrowser
                     var list = Bm.OtherBrowsers();
                     int i = (int)Lng(m, "i", -1);
                     if (i < 0 || i >= list.Count) throw new Exception("Not found");
-                    string text;
-                    // the browser may be running: read a shared copy
-                    using (var fs = new FileStream(list[i].Item3, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                    using (var rd = new StreamReader(fs)) text = rd.ReadToEnd();
-                    return Bm.ImportChromium(text, list[i].Item1);
+                    // the profile folder: its account bookmarks and its local bookmarks (read shared: the browser may be running)
+                    return Bm.ImportProfile(list[i].Item3, list[i].Item1);
                 }
                 case "favicons":
                 {

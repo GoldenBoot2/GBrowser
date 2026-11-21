@@ -332,33 +332,78 @@ namespace GBrowser
         /// <summary>Chrome / Edge "Bookmarks" file (JSON) of a profile: same rules as the HTML import.</summary>
         /// <summary>How many page bookmarks a Chrome / Edge "Bookmarks" file holds (bar, other, mobile), -1 when unreadable;
         /// shown in the Import dialog so an empty profile is clear before Import is pressed.</summary>
-        public static int CountChromium(string path)
+        public static int CountChromium(string profileDir)
         {
-            try
+            var roots = ReadProfileRoots(profileDir);
+            if (roots == null) return -1;
+            int n = 0;
+            void Walk(object o)
             {
-                string text;
-                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                using (var rd = new StreamReader(fs)) text = rd.ReadToEnd();
-                var root = Store.FromJson<Dictionary<string, object>>(text);
-                if (root == null || !(root.TryGetValue("roots", out var r) && r is Dictionary<string, object> roots)) return -1;
-                int n = 0;
-                void Walk(object o)
-                {
-                    if (!(o is Dictionary<string, object> d)) return;
-                    if (d.TryGetValue("type", out var t) && (t as string) == "url") n++;
-                    if (d.TryGetValue("children", out var c) && c is System.Collections.IEnumerable list) foreach (var k in list) Walk(k);
-                }
-                foreach (var key in new[] { "bookmark_bar", "other", "synced" }) if (roots.TryGetValue(key, out var node)) Walk(node);
-                return n;
+                if (!(o is Dictionary<string, object> d)) return;
+                if (d.TryGetValue("type", out var t) && (t as string) == "url") n++;
+                if (d.TryGetValue("children", out var c) && c is System.Collections.IEnumerable list) foreach (var k in list) Walk(k);
             }
-            catch { return -1; }
+            foreach (var key in new[] { "bookmark_bar", "other", "synced" }) if (roots.TryGetValue(key, out var node)) Walk(node);
+            return n;
+        }
+
+        /// <summary>A Chrome / Edge profile's bookmark files: "AccountBookmarks" (bookmarks of the signed-in Google Account,
+        /// Chrome 2025+) and "Bookmarks" (bookmarks kept only on this PC).</summary>
+        static List<string> BookmarkFiles(string profileDir)
+        {
+            var r = new List<string>();
+            foreach (var n in new[] { "AccountBookmarks", "Bookmarks" })
+            {
+                string f = Path.Combine(profileDir, n);
+                if (File.Exists(f)) r.Add(f);
+            }
+            return r;
+        }
+
+        /// <summary>The profile's bookmark roots with both files merged like Chrome shows them (account items first);
+        /// files are read shared (the browser may be running). Null when nothing could be read.</summary>
+        public static Dictionary<string, object> ReadProfileRoots(string profileDir)
+        {
+            Dictionary<string, object> merged = null;
+            foreach (var f in BookmarkFiles(profileDir))
+            {
+                try
+                {
+                    string text;
+                    using (var fs = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var rd = new StreamReader(fs)) text = rd.ReadToEnd();
+                    var root = Store.FromJson<Dictionary<string, object>>(text);
+                    if (root == null || !(root.TryGetValue("roots", out var r) && r is Dictionary<string, object> roots)) continue;
+                    if (merged == null) merged = new Dictionary<string, object>();
+                    foreach (var key in new[] { "bookmark_bar", "other", "synced" })
+                    {
+                        if (!(roots.TryGetValue(key, out var node) && node is Dictionary<string, object> nd)) continue;
+                        var kids = nd.TryGetValue("children", out var c) && c is System.Collections.IEnumerable e ? e.Cast<object>().ToList() : new List<object>();
+                        if (!merged.TryGetValue(key, out var have)) merged[key] = new Dictionary<string, object> { { "children", kids } };
+                        else ((List<object>)((Dictionary<string, object>)have)["children"]).AddRange(kids);
+                    }
+                }
+                catch { }
+            }
+            return merged;
+        }
+
+        /// <summary>Imports a Chrome / Edge / Brave profile (both its bookmark files).</summary>
+        public static int ImportProfile(string profileDir, string source)
+        {
+            var roots = ReadProfileRoots(profileDir);
+            return roots == null ? 0 : ImportRoots(roots, source);
         }
 
         public static int ImportChromium(string json, string source)
         {
             var root = Store.FromJson<Dictionary<string, object>>(json);
             var roots = root != null && root.TryGetValue("roots", out var r) ? r as Dictionary<string, object> : null;
-            if (roots == null) return 0;
+            return roots == null ? 0 : ImportRoots(roots, source);
+        }
+
+        static int ImportRoots(Dictionary<string, object> roots, string source)
+        {
             int count = 0;
             if (roots.TryGetValue("bookmark_bar", out var bar) && bar is Dictionary<string, object> barNode && HasChildren(barNode))
             {
@@ -459,11 +504,11 @@ namespace GBrowser
                 catch { }
                 foreach (var p in Directory.GetDirectories(dir))
                 {
-                    string f = Path.Combine(p, "Bookmarks"), id = Path.GetFileName(p);
-                    if (!File.Exists(f)) continue;
+                    string id = Path.GetFileName(p);
+                    if (BookmarkFiles(p).Count == 0) continue;
                     string name = id;
                     try { if (names != null && names.TryGetValue(id, out var o)) name = ((o as Dictionary<string, object>)?["name"] as string) ?? id; } catch { }
-                    r.Add(Tuple.Create(b.Item1, name, f));
+                    r.Add(Tuple.Create(b.Item1, name, p));
                 }
             }
             return r;
