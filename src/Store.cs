@@ -10,12 +10,14 @@ namespace GBrowser
     /// <summary>Settings, bookmarks, history and session, saved as small JSON files in the data folder.</summary>
     internal static class Store
     {
-        public static readonly string DataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GoldenBoot",
 #if AUTOMATION
-            "GBrowser-Test");   // local test builds never touch the real profile
+        // local test builds never touch the real profile; GB_TEST_DATA gives a test copy its own scratch folder
+        public static readonly string DataDir = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GB_TEST_DATA"))
+            ? Environment.GetEnvironmentVariable("GB_TEST_DATA")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GoldenBoot", "GBrowser-Test");
 #else
-            "GBrowser");
+        public static readonly string DataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GoldenBoot", "GBrowser");
 #endif
         public static readonly string WebDataDir = Path.Combine(DataDir, "WebData");
         public static readonly string ExtensionsDir = Path.Combine(DataDir, "Extensions");

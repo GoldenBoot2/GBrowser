@@ -205,7 +205,7 @@ namespace GBrowser
             bookmarksBar.AddPage += AddPageDialog;
             bookmarksBar.AddFolder += AddFolderDialog;
             bookmarksBar.Manager += () => OpenPage("bookmarks");
-            bookmarksBar.ImportNow += () => NewTab(Pages.Url("bookmarks") + "#import");
+            bookmarksBar.ImportNow += () => NewTab(Pages.Url("bookmarks") + "#import");   // opens the Import dialog
             bookmarksBar.HideBar += ToggleBookmarksBar;
 
             sleepTimer.Tick += async (s, e) =>
@@ -2555,6 +2555,11 @@ namespace GBrowser
         }
 
         static string Str(Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) && v != null ? v.ToString() : null;
+        /// <summary>The "ids" list of a page command (numbers).</summary>
+        static List<long> Ids(Dictionary<string, object> m) =>
+            m.TryGetValue("ids", out var v) && v is System.Collections.IEnumerable e && !(v is string)
+                ? e.Cast<object>().Select(o => o is IConvertible c ? Convert.ToInt64(c, System.Globalization.CultureInfo.InvariantCulture) : 0).Where(x => x > 0).ToList()
+                : new List<long>();
         static long Lng(Dictionary<string, object> m, string k, long def) =>
             m.TryGetValue(k, out var v) && v != null && long.TryParse(Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture), out var n) ? n : def;
 
@@ -2620,7 +2625,37 @@ namespace GBrowser
                     return null;
                 }
                 case "bookmarks.move": if (!Bm.Move(Lng(m, "id", 0), Lng(m, "parent", Bm.Bar), (int)Lng(m, "index", -1))) throw new Exception("Cannot move there"); return null;
-                case "bookmarks.delete": Bm.Remove(Lng(m, "id", 0)); return null;
+                case "bookmarks.delete": return Bm.RemoveMany(new[] { Lng(m, "id", 0) });
+                case "bookmarks.deleteMany": return Bm.RemoveMany(Ids(m));
+                case "bookmarks.undo": return Bm.UndoRemove();
+                case "bookmarks.moveMany": return Bm.MoveMany(Ids(m), Lng(m, "parent", Bm.Bar), (int)Lng(m, "index", -1));
+                case "bookmarks.copyMany": return Bm.CopyMany(Ids(m), Lng(m, "parent", Bm.Bar), (int)Lng(m, "index", -1));
+                case "bookmarks.sort": Bm.Sort(Lng(m, "parent", Bm.Bar)); return null;
+                case "bookmarks.open":
+                {
+                    // Chrome's Open all / Open in new tab / new window / Incognito / new tab group
+                    var urls = (m.TryGetValue("urls", out var uv2) && uv2 is System.Collections.IEnumerable ua && !(uv2 is string)
+                        ? ua.Cast<object>().OfType<string>() : Enumerable.Empty<string>())
+                        .Where(u => Uri.TryCreate(u, UriKind.Absolute, out var uu) && uu.Scheme != "javascript").Take(500).ToList();
+                    if (urls.Count == 0) return 0;
+                    string mode = Str(m, "mode") ?? "tab";
+                    if (mode == "window") App.NewWindow(urls);
+                    else if (mode == "private") foreach (var u in urls) NewPrivateTab(u);
+                    else if (mode == "group")
+                    {
+                        // the group is made after its tabs exist: the tab row drops groups that have no tabs when a tab opens
+                        string gid = Guid.NewGuid().ToString("N").Substring(0, 8);
+                        int color = Enumerable.Range(0, 9).FirstOrDefault(c => !strip.Groups.Values.Any(x => x.Color == c));
+                        var opened = new List<BrowserTab>();
+                        bool first = true;
+                        foreach (var u in urls) { opened.Add(NewTab(u, first)); first = false; }
+                        strip.Groups[gid] = new TabGroup { Color = color, Name = Str(m, "name") ?? "" };
+                        foreach (var nt in opened) nt.Group = gid;
+                        strip.RefreshTabs();
+                    }
+                    else foreach (var u in urls) NewTab(u, false);
+                    return urls.Count;
+                }
                 case "bookmarks.export":
                 {
                     using (var d = new SaveFileDialog { Filter = "Bookmarks (*.html)|*.html", FileName = "bookmarks_" + DateTime.Now.ToString("dd_MM_yyyy") + ".html" })

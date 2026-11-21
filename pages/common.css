@@ -7,6 +7,7 @@
   --error: #b3261e; --field: #fff; --hover: rgba(31,31,31,.08); --press: rgba(31,31,31,.14);
   --frame: #d3e3fd; --toolbar: #fff; --omnibox: #edf2fa;
   --radius: 16px;
+  --inverse-surface: #303030; --inverse-on-surface: #f2f2f2; --inverse-primary: #a8c7fa;
   color-scheme: light dark;
 }
 /* dark: same tones as the window (src/Theme.cs); follows Windows unless Settings > Appearance says otherwise */
@@ -16,6 +17,7 @@
     --surface: #202124; --surface-container: #292a2d; --surface-container-high: #333438; --surface-container-highest: #3c3c3c;
     --on-surface: #e3e3e3; --on-surface-variant: #c4c7c5; --outline: #8e918f; --outline-variant: #444746;
     --error: #f2b8b5; --field: #3c3c3c; --hover: rgba(227,227,227,.08); --press: rgba(227,227,227,.14);
+    --inverse-surface: #e3e3e3; --inverse-on-surface: #303030; --inverse-primary: #0b57d0;
     --frame: #1f2020; --toolbar: #3c3c3c; --omnibox: #282828;
   }
 }
@@ -102,7 +104,7 @@ textarea.field:focus { outline: 2px solid var(--primary); border-color: transpar
 .switch[aria-checked="true"]::after { left: 17px; top: 1px; width: 14px; height: 14px; background: var(--on-primary); }
 .switch:disabled { opacity: .38; cursor: default; }
 
-.snack { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px); background: #34302a; color: #f8efe2;
+.snack { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px); background: var(--inverse-surface); color: var(--inverse-on-surface);
   padding: 12px 20px; border-radius: 8px; transition: transform .2s; z-index: 9; max-width: 80vw; }
 .snack.show { transform: translateX(-50%) translateY(0); }
 .grow { flex: 1; min-width: 0; }

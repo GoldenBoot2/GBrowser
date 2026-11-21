@@ -1,13 +1,78 @@
-main { max-width: 1120px; }
-.bm { display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; }
-.bm .nav .row { min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
+/* gbrowser://bookmarks, laid out like Chrome's chrome://bookmarks (Chrome 158) */
+main { max-width: 1180px; }
+.head-tools { flex: 1; display: flex; align-items: center; gap: 8px; }
+.bm { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+
+/* folder tree: stays in view and scrolls on its own when there are many folders */
+.bm .nav { position: sticky; top: calc(var(--head-h, 73px) + 16px); max-height: calc(100vh - var(--head-h, 73px) - 40px);
+  overflow: auto; padding: 6px 0; }
+.bm .nav .row { min-height: 36px; padding: 2px 12px 2px 6px; gap: 6px; border-radius: 0 18px 18px 0; margin-right: 8px; }
 .bm .nav .row + .row { border-top: 0; }
-.bm .nav .row.on { background: var(--primary-container); color: var(--on-primary-container); }
+.bm .nav .row.on { background: var(--primary-container); color: var(--on-primary-container); font-weight: 600; }
 .bm .nav .row.on .icon { color: var(--on-primary-container); }
-.bm .list .row.head { min-height: 48px; }
-.bm .list .row.head .title { font-weight: 600; }
-.bm .row.before { box-shadow: inset 0 2px 0 var(--primary); }
-.bm .row.after { box-shadow: inset 0 -2px 0 var(--primary); }
-.bm .row.drop { background: var(--primary-container); }
-.bm .row.dragging { opacity: .5; }
-@media (max-width: 760px) { .bm { grid-template-columns: 1fr; } }
+.bm .nav .arrow { width: 28px; height: 28px; flex: none; }
+.bm .nav .arrow .icon { width: 18px; height: 18px; }
+.bm .nav .arrow-gap { width: 28px; flex: none; }
+.bm .nav .row.drop { background: var(--primary-container); }
+
+/* the list: a bar (folder name / count, or "N selected" with actions) that stays at the top, then the rows */
+.bm .list { overflow: visible; }
+.list-bar { position: sticky; top: var(--head-h, 73px); z-index: 1; display: flex; align-items: center; gap: 8px; min-height: 52px;
+  padding: 0 12px 0 20px; background: var(--surface-container); border-bottom: 1px solid var(--outline-variant);
+  border-radius: var(--radius) var(--radius) 0 0; }
+.list-bar .bar-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-bar .bar-count { font-size: 12.5px; color: var(--on-surface-variant); flex: none; }
+.list-bar.selecting { background: var(--primary-container); color: var(--on-primary-container); padding-left: 8px; }
+.list-bar.selecting .icon-btn { color: var(--on-primary-container); }
+.list-bar.selecting .btn.text { color: var(--on-primary-container); }
+
+.vlist { position: relative; outline: none; }
+.rows-box { position: absolute; left: 0; right: 0; top: 0; }
+.vlist .row.item { height: 40px; min-height: 40px; box-sizing: border-box; padding: 0 8px 0 16px; gap: 12px; cursor: default; border-top: 0; user-select: none; }
+.vlist .row.item:hover { background: var(--hover); }
+.vlist .row.item .site-icon { width: 24px; height: 24px; }
+.vlist .row.item > .icon { width: 20px; height: 20px; margin: 0 2px; flex: none; }
+.vlist .row.item .text { display: flex; align-items: baseline; gap: 16px; min-width: 0; }
+.vlist .row.item .title { flex: 0 1 auto; max-width: 75%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vlist .row.item .url { flex: 1; min-width: 0; font-size: 12.5px; color: var(--on-surface-variant); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; visibility: hidden; }
+/* Chrome shows the address on hover and on selected rows */
+.vlist .row.item:hover .url, .vlist .row.item.sel .url, .vlist .row.item.focus .url { visibility: visible; }
+.vlist .row.item.sel { background: var(--primary-container); color: var(--on-primary-container); }
+.vlist .row.item.sel .url, .vlist .row.item.sel > .icon, .vlist .row.item.sel .row-more { color: var(--on-primary-container); }
+.vlist .row.item.focus { box-shadow: inset 0 0 0 2px var(--primary); }
+.vlist .row.item.cut { opacity: .5; }
+.vlist .row-more { width: 32px; height: 32px; flex: none; }
+.vlist .row.item.before { box-shadow: inset 0 2px 0 var(--primary); }
+.vlist .row.item.after { box-shadow: inset 0 -2px 0 var(--primary); }
+.vlist .row.item.drop { background: var(--primary-container); }
+.vlist .row.item.dragging { opacity: .5; }
+.vlist .empty { padding: 48px 0; }
+
+/* page menus (Organize, More actions): Material menu */
+.menu { position: fixed; z-index: 30; min-width: 220px; max-width: 360px; padding: 8px 0; background: var(--surface-container-high);
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.menu-item { width: 100%; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 16px; border: 0; background: transparent;
+  font: inherit; color: var(--on-surface); cursor: pointer; text-align: left; white-space: nowrap; }
+.menu-item .icon, .menu-item .menu-gap { width: 20px; height: 20px; flex: none; color: var(--on-surface-variant); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--hover); outline: none; }
+.menu-item:disabled { color: var(--outline); cursor: default; background: transparent; }
+.menu-item:disabled .icon { color: var(--outline); }
+.menu-sep { height: 1px; margin: 8px 0; background: var(--outline-variant); }
+
+/* dialogs (Add / Edit bookmark, Rename, Import bookmarks) */
+.dialog-shade { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 20; }
+.dialog { width: min(520px, 90vw); max-height: 80vh; display: flex; flex-direction: column; gap: 14px; padding: 22px 0 16px;
+  background: var(--surface-container-high); border-radius: 28px; box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+.dialog h2 { margin: 0; padding: 0 24px; font-size: 22px; font-weight: 500; color: var(--on-surface); }
+.dialog .dlg-field { display: flex; flex-direction: column; gap: 6px; padding: 0 24px; font-size: 12.5px; color: var(--on-surface-variant); }
+.dialog .dlg-field .field { height: 44px; font-size: 14px; color: var(--on-surface); }
+.dialog .pick-list { overflow: auto; flex: 1; border-top: 1px solid var(--outline-variant); border-bottom: 1px solid var(--outline-variant); }
+.dialog .pick-list .row { padding: 8px 24px; }
+.dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 24px; }
+
+.snack { display: flex; align-items: center; gap: 16px; }
+.snack-btn { border: 0; background: transparent; color: var(--inverse-primary, #a8c7fa); font: inherit; font-weight: 600; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+.snack-btn:hover { background: rgba(255,255,255,.08); }
+
+@media (max-width: 760px) { .bm { grid-template-columns: 1fr; } .bm .nav { position: static; max-height: none; } }

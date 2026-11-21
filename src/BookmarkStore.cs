@@ -132,6 +132,108 @@ namespace GBrowser
             Save();
         }
 
+        // ---------- several at once (the manager's selection), like Chrome's bookmark manager ----------
+
+        /// <summary>Ids plus everything inside the folders among them.</summary>
+        static HashSet<long> WithContents(IEnumerable<long> ids)
+        {
+            var set = new HashSet<long>(ids.Where(i => Find(i) != null));
+            bool more = true;
+            while (more) { more = false; foreach (var x in All) if (!set.Contains(x.Id) && set.Contains(x.Parent)) { set.Add(x.Id); more = true; } }
+            return set;
+        }
+
+        /// <summary>What the last delete removed (positions in the list kept), for Undo (Chrome: Ctrl+Z / the Undo button).</summary>
+        static List<Tuple<int, Bookmark>> lastDeleted;
+
+        public static int RemoveMany(IEnumerable<long> ids)
+        {
+            var gone = WithContents(ids);
+            if (gone.Count == 0) return 0;
+            lastDeleted = All.Select((b, i) => Tuple.Create(i, b)).Where(t => gone.Contains(t.Item2.Id)).ToList();
+            All.RemoveAll(x => gone.Contains(x.Id));
+            Save();
+            return lastDeleted.Count(t => ids.Contains(t.Item2.Id));
+        }
+
+        /// <summary>Puts back what the last delete removed, at the same places (ids taken meanwhile get new ones).</summary>
+        public static bool UndoRemove()
+        {
+            if (lastDeleted == null || lastDeleted.Count == 0) return false;
+            var map = new Dictionary<long, long>();
+            foreach (var t in lastDeleted)
+                if (All.Any(b => b.Id == t.Item2.Id)) map[t.Item2.Id] = Math.Max(NextId(), map.Count == 0 ? 0 : map.Values.Max() + 1);
+            foreach (var t in lastDeleted.OrderBy(t => t.Item1))
+            {
+                var b = t.Item2;
+                if (map.TryGetValue(b.Id, out var nid)) b.Id = nid;
+                if (map.TryGetValue(b.Parent, out var np)) b.Parent = np;
+                if (!Exists(b.Parent)) b.Parent = Other;
+                All.Insert(Math.Min(t.Item1, All.Count), b);
+            }
+            lastDeleted = null;
+            Save();
+            return true;
+        }
+
+        /// <summary>Moves several items (in the order given) to parent at index, keeping them together.</summary>
+        public static int MoveMany(IList<long> ids, long parent, int index)
+        {
+            if (!Exists(parent)) return 0;
+            // index counts the folder's current items; the moved ones go in front of the first item at or after it
+            // that is not itself being moved (or to the end), in the order given
+            var moving = new HashSet<long>(ids);
+            var anchor = index < 0 ? null : Children(parent).Skip(index).FirstOrDefault(b => !moving.Contains(b.Id));
+            int moved = 0;
+            foreach (var id in ids)
+            {
+                var b = Find(id);
+                if (b == null || id == parent || (b.Folder && IsInside(parent, id))) continue;
+                int at = anchor == null ? -1 : Children(parent).Where(x => x != b).ToList().IndexOf(anchor);
+                Place(b, parent, at);
+                moved++;
+            }
+            if (moved > 0) Save();
+            return moved;
+        }
+
+        /// <summary>Copies items (folders with all they hold) into parent at index (Chrome's Copy + Paste).</summary>
+        public static int CopyMany(IList<long> ids, long parent, int index)
+        {
+            if (!Exists(parent)) return 0;
+            int n = 0;
+            long Copy(Bookmark src, long into, int at)
+            {
+                var c = new Bookmark { Id = NextId(), Parent = into, Folder = src.Folder, Title = src.Title, Url = src.Url, Added = Store.Now() };
+                Place(c, into, at);
+                n++;
+                if (src.Folder) foreach (var k in Children(src.Id)) Copy(k, c.Id, -1);
+                return c.Id;
+            }
+            int i = index;
+            foreach (var id in ids)
+            {
+                var b = Find(id);
+                if (b == null || (b.Folder && (parent == id || IsInside(parent, id)))) continue;
+                Copy(b, parent, i);
+                if (i >= 0) i++;
+            }
+            if (n > 0) Save();
+            return n;
+        }
+
+        /// <summary>Chrome's "Sort by name": folders first, then pages, each by name (current language order).</summary>
+        public static void Sort(long parent)
+        {
+            var kids = Children(parent);
+            if (kids.Count < 2) return;
+            var sorted = kids.OrderBy(b => b.Folder ? 0 : 1).ThenBy(b => b.Title ?? b.Url ?? "", StringComparer.CurrentCultureIgnoreCase).ToList();
+            int first = All.IndexOf(kids[0]);
+            foreach (var k in kids) All.Remove(k);
+            All.InsertRange(Math.Min(first, All.Count), sorted);
+            Save();
+        }
+
         public static void Save()
         {
             Store.SaveBookmarks();
