@@ -330,6 +330,30 @@ namespace GBrowser
         }
 
         /// <summary>Chrome / Edge "Bookmarks" file (JSON) of a profile: same rules as the HTML import.</summary>
+        /// <summary>How many page bookmarks a Chrome / Edge "Bookmarks" file holds (bar, other, mobile), -1 when unreadable;
+        /// shown in the Import dialog so an empty profile is clear before Import is pressed.</summary>
+        public static int CountChromium(string path)
+        {
+            try
+            {
+                string text;
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var rd = new StreamReader(fs)) text = rd.ReadToEnd();
+                var root = Store.FromJson<Dictionary<string, object>>(text);
+                if (root == null || !(root.TryGetValue("roots", out var r) && r is Dictionary<string, object> roots)) return -1;
+                int n = 0;
+                void Walk(object o)
+                {
+                    if (!(o is Dictionary<string, object> d)) return;
+                    if (d.TryGetValue("type", out var t) && (t as string) == "url") n++;
+                    if (d.TryGetValue("children", out var c) && c is System.Collections.IEnumerable list) foreach (var k in list) Walk(k);
+                }
+                foreach (var key in new[] { "bookmark_bar", "other", "synced" }) if (roots.TryGetValue(key, out var node)) Walk(node);
+                return n;
+            }
+            catch { return -1; }
+        }
+
         public static int ImportChromium(string json, string source)
         {
             var root = Store.FromJson<Dictionary<string, object>>(json);

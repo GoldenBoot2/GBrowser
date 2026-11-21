@@ -2674,7 +2674,7 @@ namespace GBrowser
                     }
                 }
                 case "bookmarks.browsers":
-                    return Bm.OtherBrowsers().Select((b, i) => new Dictionary<string, object> { { "i", i }, { "browser", b.Item1 }, { "profile", b.Item2 } }).ToList();
+                    return Bm.OtherBrowsers().Select((b, i) => new Dictionary<string, object> { { "i", i }, { "browser", b.Item1 }, { "profile", b.Item2 }, { "count", Bm.CountChromium(b.Item3) } }).ToList();
                 case "bookmarks.importBrowser":
                 {
                     var list = Bm.OtherBrowsers();

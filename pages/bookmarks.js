@@ -139,9 +139,12 @@
     };
     for (const f of found) {
       const b = el('button', { class: 'btn tonal', text: 'Import' });
+      // the count shows before Import is pressed (an empty profile cannot be imported)
+      if (f.count === 0) b.disabled = true;
       b.addEventListener('click', () => busy(b, () => gb.send('bookmarks.importBrowser', { i: f.i })));
+      const what = f.count > 0 ? (f.count === 1 ? '1 bookmark' : f.count.toLocaleString() + ' bookmarks') : f.count === 0 ? 'No bookmarks' : 'Cannot read';
       list.append(el('div', { class: 'row' }, icon('Bookmarks'), el('div', { class: 'text' },
-        el('div', { class: 'title', text: f.browser }), el('div', { class: 'sub', text: 'Profile: ' + f.profile })), b));
+        el('div', { class: 'title', text: f.browser }), el('div', { class: 'sub', text: 'Profile: ' + f.profile + '  ·  ' + what })), b));
     }
     const fileBtn = el('button', { class: 'btn tonal', text: 'Choose file' });
     fileBtn.addEventListener('click', () => busy(fileBtn, () => gb.send('bookmarks.importFile')));
