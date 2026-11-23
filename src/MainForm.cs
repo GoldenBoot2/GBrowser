@@ -1249,6 +1249,7 @@ namespace GBrowser
             t.Blocking = new Blocking(t, F().env);
             t.Blocking.Changed += () => F().uiDirty = true;
             t.Blocking.Attach(core);
+            SiteFixes.Attach(core);   // single-site server faults (VFS login CORS header)
             // The engine proposes download names already made unique against its default folder ("x (1).exe"),
             // which hid existing files from GBrowser's "If the file already exists" choice. Its default folder is an
             // always-empty folder, so it proposes the plain name; GBrowser picks the real folder for every download
